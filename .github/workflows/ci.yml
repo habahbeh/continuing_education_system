@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: continuing_education
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping" --health-interval=10s
+          --health-timeout=5s --health-retries=10
+
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-a-real-secret
+      DB_NAME: continuing_education
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure MySQL for the project's hard requirements
+        run: |
+          # The CI image defaults to STRICT_TRANS_TABLES; the project requires
+          # STRICT_ALL_TABLES, and the startup check refuses to boot without it.
+          mysql -h 127.0.0.1 -u root -e "
+            SET GLOBAL sql_mode='STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,
+              NO_ZERO_DATE,NO_ZERO_IN_DATE,NO_ENGINE_SUBSTITUTION,ONLY_FULL_GROUP_BY';
+            SET GLOBAL transaction_isolation='READ-COMMITTED';"
+          mysql -h 127.0.0.1 -u root -e "SELECT @@version, @@sql_mode, @@lower_case_table_names;"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y default-libmysqlclient-dev pkg-config
+          python -m pip install -U pip
+          pip install "Django==5.2.*" mysqlclient python-dotenv \
+                      pytest pytest-django pytest-cov ruff mypy "django-stubs[compatible-mypy]"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: mypy
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+        run: mypy apps/
+
+      - name: pytest with coverage
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+        run: pytest --cov-fail-under=90
+
+      - name: No pending migrations
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Django system checks
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+        run: python manage.py check --fail-level ERROR
+
+      - name: Deployment checks
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          DJANGO_ALLOWED_HOSTS: example.com
+        run: python manage.py check --deploy --fail-level ERROR

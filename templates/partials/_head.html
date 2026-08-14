@@ -1,0 +1,6 @@
+{% load i18n static %}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% translate "مركز التعليم المستمر — جامعة البترا" %}{% endblock %}</title>
+{# No CDN. Every asset is served locally (ADR-003). #}
+<link rel="stylesheet" href="{% static 'css/app.css' %}">

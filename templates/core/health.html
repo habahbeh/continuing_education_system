@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "حالة النظام" %}{% endblock %}
+
+{% block content %}
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "حالة النظام" %}</h2>
+  </div>
+  <div class="card2-body">
+    <p class="note ok">{% translate "النظام يعمل" %}</p>
+
+    <dl class="dl">
+      <dt>{% translate "إصدار Django" %}</dt>
+      <dd><span dir="ltr">{{ django_version }}</span></dd>
+
+      <dt>{% translate "قاعدة البيانات" %}</dt>
+      <dd>
+        {% if db_ok %}
+          <span class="chip ok">{% translate "متصلة" %}</span>
+        {% else %}
+          <span class="chip danger">{% translate "غير متصلة" %}</span>
+        {% endif %}
+      </dd>
+
+      <dt>{% translate "التفاصيل" %}</dt>
+      <dd><span dir="ltr">{{ db_detail }}</span></dd>
+    </dl>
+  </div>
+</div>
+{% endblock %}

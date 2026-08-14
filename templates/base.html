@@ -1,0 +1,32 @@
+{% load i18n static %}<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  {% include "partials/_head.html" %}
+</head>
+<body class="bg-surface text-ink">
+  <div class="min-h-screen flex flex-col">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">UOP</span>
+        <span>
+          {% translate "مركز التعليم المستمر وخدمة المجتمع" %}
+          <small>{% translate "جامعة البترا — عمّان، الأردن" %}</small>
+        </span>
+      </div>
+    </header>
+
+    <main class="content flex-1">
+      {% include "partials/_messages.html" %}
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+      <small>{% translate "نظام إدارة مركز التعليم المستمر" %}</small>
+    </footer>
+  </div>
+
+  <script src="{% static 'js/htmx.min.js' %}" defer></script>
+  <script src="{% static 'js/alpine.min.js' %}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

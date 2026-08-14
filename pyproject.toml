@@ -1,0 +1,63 @@
+[project]
+name = "continuing-education-system"
+version = "0.1.0"
+description = "University of Petra — Continuing Education Center Management System"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "node_modules", "*/migrations/*", "staticfiles"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "DJ", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # ambiguous unicode in strings — Arabic text is intentional
+    "RUF002",
+    "RUF003",
+    "RUF012",  # Django class attrs are not ClassVar by convention
+]
+
+[tool.ruff.lint.per-file-ignores]
+"apps/*/tests/*" = ["S101"]
+"tests/*" = ["S101"]
+"config/settings/*" = ["F403", "F405"]
+
+# N802: these are field FACTORIES, deliberately PascalCase so a model reads
+# `key = SettingKey(...)` exactly like `key = models.CharField(...)`. The names
+# are prescribed by GLOSSARY.md; renaming them to snake_case would make model
+# definitions read inconsistently against Django's own field classes.
+"apps/core/fields.py" = ["N802"]
+
+# N818: exception names are prescribed verbatim by the approved Sprint 1 scope
+# (SPRINT_1_READY_CHECKLIST.md §2.3). Renaming them to an -Error suffix would
+# diverge the code from the approved documentation for no functional gain.
+"apps/core/exceptions.py" = ["N818"]
+
+# DJ001: `EffectiveSetting.value` is nullable ON PURPOSE. NULL means "not
+# configured yet" — `default_tax_rate` is NULL pending Q-25 — which is
+# semantically distinct from an empty string and from zero. Collapsing NULL to
+# "" would erase that distinction and let a taxable charge silently compute
+# zero tax, the exact failure mode TaxRateNotConfigured exists to prevent.
+"apps/core/models/setting.py" = ["DJ001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+exclude = ["migrations/", ".venv/", "node_modules/"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+[tool.coverage.run]
+source = ["apps/core"]
+omit = ["*/migrations/*", "*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

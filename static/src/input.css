@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Component layer — carries the demo's visual identity so templates stay
+ * readable instead of turning into utility soup (ADR-003).
+ *
+ * RTL RULE: logical properties only (ms-/me-/ps-/pe-/start-/end-).
+ * Directional utilities (ml-/mr-/pl-/pr-/left-/right-) are banned and the
+ * static test A-06 fails the build if one appears in a template.
+ */
+@layer components {
+  .topbar   { @apply flex items-center gap-3 bg-brand text-white px-5 py-3; }
+  .brand    { @apply flex items-center gap-3 font-extrabold; }
+  .brand small { @apply block font-normal text-xs opacity-80; }
+  .logo     { @apply inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/15 font-black; }
+  .content  { @apply p-5 max-w-6xl mx-auto w-full; }
+  .footer   { @apply px-5 py-3 text-ink-3 border-t border-line; }
+
+  .card2        { @apply bg-white border border-line rounded-xl overflow-hidden mb-4; }
+  .card2-head   { @apply flex items-center gap-3 px-4 py-3 border-b border-line bg-surface-2; }
+  .card2-head h2{ @apply text-base font-extrabold m-0; }
+  .card2-body   { @apply p-4; }
+
+  .tbl          { @apply w-full border-collapse text-sm; }
+  .tbl th       { @apply text-start font-bold bg-surface-2 px-3 py-2 border-b border-line; }
+  .tbl td       { @apply px-3 py-2 border-b border-line-2; }
+
+  .chip         { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-surface-2 text-ink-2; }
+  .chip.ok      { @apply bg-ok-soft text-ok; }
+  .chip.warn    { @apply bg-warn-soft text-warn; }
+  .chip.danger  { @apply bg-danger-soft text-danger; }
+  .chip.info    { @apply bg-info-soft text-info; }
+  .chip.brand   { @apply bg-brand-soft text-brand; }
+
+  .note         { @apply flex gap-2 rounded-lg border px-3 py-2.5 mb-3 text-sm border-line bg-surface-2; }
+  .note.ok      { @apply border-ok/30 bg-ok-soft text-ok; }
+  .note.warn    { @apply border-warn/30 bg-warn-soft text-warn; }
+  .note.danger  { @apply border-danger/30 bg-danger-soft text-danger; }
+  .note.info    { @apply border-info/30 bg-info-soft text-info; }
+
+  .kpi          { @apply bg-white border border-line rounded-xl p-4; }
+  .kpi .label   { @apply text-xs text-ink-3 font-bold; }
+  .kpi .value   { @apply text-2xl font-black mt-1; }
+
+  .calc-row     { @apply flex items-center justify-between px-3 py-2 border-b border-line-2; }
+  .calc-row .val{ @apply font-bold tabular-nums; }
+
+  .btn2         { @apply inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-bold; }
+  .btn2.primary { @apply bg-brand text-white border-brand; }
+
+  .dl           { @apply grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm; }
+  .dl dt        { @apply text-ink-3 font-bold; }
+  .dl dd        { @apply m-0; }
+
+  .messages     { @apply mb-4; }
+}

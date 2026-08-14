@@ -1,0 +1,26 @@
+# MySQL 8.4 LTS — بيئة تطوير محلية لنظام التعليم المستمر
+# منفذ 3308 لتفادي التصادم مع XAMPP/MariaDB (3306) و MySQL 9.4 (3307)
+[mysqld]
+port                        = 3308
+datadir                     = /usr/local/var/mysql_ce84
+socket                      = /tmp/mysql_ce84.sock
+pid-file                    = /tmp/mysql_ce84.pid
+log-error                   = /usr/local/var/mysql_ce84/error.log
+mysqlx                      = OFF
+
+character-set-server        = utf8mb4
+collation-server            = utf8mb4_0900_ai_ci
+default-storage-engine      = InnoDB
+innodb_default_row_format   = dynamic
+
+sql_mode                    = STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ZERO_DATE,NO_ZERO_IN_DATE,NO_ENGINE_SUBSTITUTION,ONLY_FULL_GROUP_BY
+transaction-isolation       = READ-COMMITTED
+default_time_zone           = '+00:00'
+
+# انحراف بيئة تطوير مقصود: APFS غير حسّاس لحالة الأحرف ⇒ 0 غير مدعوم على macOS.
+# خادم الإنتاج (Linux) يستخدم 0. فحص الإقلاع يقبل 0 أو 2 ويرفض 1.
+lower_case_table_names      = 2
+
+[client]
+port                        = 3308
+socket                      = /tmp/mysql_ce84.sock
