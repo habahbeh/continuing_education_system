@@ -92,6 +92,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # Captures actor + IP for the audit trail (ADR-010).
     "apps.core.middleware.AuditContextMiddleware",
+    # Q-12: 30 minutes of INACTIVITY ends the session. Must run after
+    # AuthenticationMiddleware (it needs request.user) and after
+    # AuditContextMiddleware (the expiry event is audited with its IP).
+    "apps.people.middleware.IdleSessionMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -151,8 +155,19 @@ DATABASES = {
 }
 
 # ---------------------------------------------------------------------------
-# Authentication
+# Authentication — Q-12: LOCAL accounts in v1
 # ---------------------------------------------------------------------------
+# Exactly ONE backend, deliberately. The decision is not "SSO is bad" but "do
+# not build a dependency on the university's directory before it exists".
+# Adding SAML/LDAP later means appending a backend here; no business rule reads
+# an external identity, so nothing else has to change. T-278 fails the build if
+# a directory backend appears in v1.
+AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
+
+LOGIN_URL = "/auth/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/auth/login/"
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
@@ -202,7 +217,11 @@ MONEY_DECIMAL_PLACES = 3
 # ---------------------------------------------------------------------------
 # Sessions & security baseline
 # ---------------------------------------------------------------------------
-SESSION_COOKIE_AGE = 30 * 60  # 30 minutes idle
+# A hard backstop only. The BUSINESS rule — 30 minutes of inactivity — lives in
+# apps.people.middleware.IdleSessionMiddleware and reads
+# `session_idle_timeout_minutes` from EffectiveSetting, because a threshold in
+# a settings file is a business constant in disguise (BR-086, Q-12).
+SESSION_COOKIE_AGE = 30 * 60
 SESSION_SAVE_EVERY_REQUEST = True
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 CSRF_COOKIE_HTTPONLY = True

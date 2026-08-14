@@ -94,6 +94,28 @@ SEED: list[tuple[str, Any, str, str]] = [
     ("payment_overdue_days", 30, I, "Q-16 (مفتوح): مهلة اعتبار المشارك متأخراً."),
     ("registration_fee_center_default", "50.000", D, "BR-009: رسم تسجيل طالب المركز."),
     ("registration_fee_university_default", "15.000", D, "BR-009: رسم تسجيل الطالب الجامعي."),
+    # --- Local authentication policy (Q-12, Sprint 2A) --------------------
+    # The thresholds live here rather than in settings.py because they are
+    # business decisions, not deployment configuration: raising the attempt
+    # limit is a security decision someone must own and date (BR-086).
+    (
+        "session_idle_timeout_minutes",
+        30,
+        I,
+        "Q-12: خمول 30 دقيقة يُنهي الجلسة. تُقرأ من IdleSessionMiddleware لا من الكود.",
+    ),
+    (
+        "login_max_failed_attempts",
+        5,
+        I,
+        "Q-12: قفل الحساب بعد 5 محاولات فاشلة.",
+    ),
+    (
+        "login_lockout_requires_admin_unlock",
+        True,
+        B,
+        "Q-12: فكّ القفل من SYSTEM_ADMINISTRATOR بسبب موثّق — لا فكّ تلقائي بمرور الوقت.",
+    ),
 ]
 
 #: Keys that must never be seeded again. Kept so the command actively reports

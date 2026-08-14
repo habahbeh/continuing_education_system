@@ -40,6 +40,14 @@ class AuditAction(models.TextChoices):
     RECEIVE_CASH = "RECEIVE_CASH", _("قبض")
     LOGIN = "LOGIN", _("دخول")
     LOGOUT = "LOGOUT", _("خروج")
+    # Q-12 (Sprint 2A): the authentication lifecycle is evidence, not logging.
+    # In a system that takes cash, "who was logged in, and who tried and
+    # failed" is part of the audit record, so each outcome gets its own code
+    # rather than being flattened into LOGIN with a note.
+    LOGIN_FAILED = "LOGIN_FAILED", _("محاولة دخول فاشلة")
+    ACCOUNT_LOCKED = "ACCOUNT_LOCKED", _("قفل حساب")
+    ACCOUNT_UNLOCKED = "ACCOUNT_UNLOCKED", _("فكّ قفل حساب")
+    SESSION_EXPIRED = "SESSION_EXPIRED", _("انتهاء جلسة للخمول")
     VIEW_SENSITIVE = "VIEW_SENSITIVE", _("عرض حساس")
     DENIED_ATTEMPT = "DENIED_ATTEMPT", _("محاولة مرفوضة")
     SETTING_CHANGE = "SETTING_CHANGE", _("تغيير إعداد")

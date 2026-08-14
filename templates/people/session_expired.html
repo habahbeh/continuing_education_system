@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card2" style="max-width: 32rem; margin-inline: auto;">
+  <h1>{% translate "انتهت الجلسة" %}</h1>
+  <p class="note">{% translate "انتهت جلستك بسبب الخمول. يرجى تسجيل الدخول من جديد." %}</p>
+  <a class="btn2" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+</div>
+{% endblock %}

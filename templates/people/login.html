@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card2" style="max-width: 26rem; margin-inline: auto;">
+  <h1>{% translate "تسجيل الدخول" %}</h1>
+  <p class="note">{% translate "حساب محلي داخل النظام — الدور يأتي من الحساب" %}</p>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {% for field in form %}
+      <div class="calc-row">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
+      </div>
+    {% endfor %}
+    <button type="submit" class="btn2">{% translate "دخول" %}</button>
+  </form>
+</div>
+{% endblock %}
