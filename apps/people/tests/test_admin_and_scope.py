@@ -169,6 +169,27 @@ def test_no_business_model_exists_yet() -> None:
             "FinancialPeriod",
         },
         "people": {"User", "Participant"},
+        # Sprint 4 — billing and the till.
+        "billing": {
+            "ChargeLine",
+            "DepositReturn",
+            "DepositForfeiture",
+            "Discount",
+            "ExtraFee",
+            "Refund",
+        },
+        "cashbox": {
+            "PaymentMethod",
+            "Receipt",
+            "PaymentAllocation",
+            "ReceiptVoid",
+            "DailyClosing",
+        },
+        # Sprint 4 PREREQUISITE, not Sprint 6 arriving early. Every billing
+        # entity has a foreign key to Enrollment, so billing could not be
+        # built or tested without it (approved 2026-08-15). The REST of
+        # Sprint 6 stays deferred and is asserted absent below.
+        "operations": {"Cohort", "Enrollment"},
         # Sprint 3 — the catalogue and pricing.
         "catalog": {
             "CourseCategory",
@@ -183,9 +204,6 @@ def test_no_business_model_exists_yet() -> None:
     }
     business_apps = {
         "partners",
-        "operations",
-        "billing",
-        "cashbox",
         "settlements",
         "expenses",
         "reporting",
@@ -198,36 +216,39 @@ def test_no_business_model_exists_yet() -> None:
         if label in business_apps or (label in allowed and model.__name__ not in allowed[label]):
             offenders.append(f"{label}.{model.__name__}")
 
-    assert not offenders, "Models outside the Sprint 3 scope: " + ", ".join(offenders)
+    assert not offenders, "Models outside the Sprint 4 scope: " + ", ".join(offenders)
 
 
 def test_later_sprint_models_do_not_exist() -> None:
     """
-    Named explicitly, because these are the ones a priced catalogue tempts you
-    toward: an enrolment to sell it to, a charge line to bill it with.
+    The guard that keeps a PREREQUISITE from becoming a land grab.
+
+    Sprint 4 pulled Cohort and Enrollment forward because billing has a
+    foreign key to them and could not otherwise be tested. That justification
+    covers exactly those two. The rest of Sprint 6 — the ministry submission,
+    transfers, special cases, the status history — has no such claim, and
+    naming them here keeps "minimal prerequisite" from quietly widening.
     """
     from django.apps import apps as django_apps
 
     names = {m.__name__ for m in django_apps.get_models()}
     for deferred in (
-        "Enrollment",
-        "Cohort",
+        # The REST of Sprint 6 — the half NOT pulled forward. Cohort and
+        # Enrollment came early because billing cannot exist without them;
+        # these have no such claim and must stay absent.
         "MoheSubmission",
         "Transfer",
         "SpecialCase",
-        "Receipt",
-        "ChargeLine",
-        "PaymentAllocation",
-        "Discount",
-        "Refund",
-        "DailyClosing",
-        "DepositReturn",
+        "EnrollmentStatusHistory",
+        # Later sprints entirely.
         "TaxRule",
         "Clearance",
+        "ClearanceStep",
         "Certificate",
         "Partner",
         "Agreement",
         "PartnerClaim",
+        "PartnerSettlement",
         "OpeningBalance",
         "EnrollmentApplication",
     ):
