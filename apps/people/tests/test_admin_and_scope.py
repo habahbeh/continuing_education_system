@@ -146,15 +146,16 @@ def test_centre_manager_may_not_create_users(seeded_settings: None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 2A scope — nothing from a later sprint may have been built
+# Sprint 2B scope — nothing from a LATER sprint may have been built
 # ---------------------------------------------------------------------------
 def test_no_business_model_exists_yet() -> None:
     """
-    The scope guard for this sprint.
+    The scope guard, widened by exactly one model.
 
-    Sprint 2A is identity and permissions. Participant, the catalogue, the
-    ledger, partners, operations, clearance and the archive all belong to later
-    sprints, and a model that appears early is scope that was never approved.
+    Sprint 2A allowed none; Sprint 2B allows people.Participant and nothing
+    else. The catalogue, the ledger, partners, operations, clearance and the
+    archive all belong to later sprints, and a model that appears early is
+    scope that was never approved.
     """
     from django.apps import apps as django_apps
 
@@ -167,7 +168,7 @@ def test_no_business_model_exists_yet() -> None:
             "Attachment",
             "FinancialPeriod",
         },
-        "people": {"User"},
+        "people": {"User", "Participant"},
     }
     business_apps = {
         "catalog",
@@ -190,10 +191,36 @@ def test_no_business_model_exists_yet() -> None:
     assert not offenders, "Models outside the Sprint 2A scope: " + ", ".join(offenders)
 
 
-def test_participant_model_does_not_exist() -> None:
-    """Named explicitly — it is Sprint 2B, and the split was approved."""
+def test_later_sprint_models_do_not_exist() -> None:
+    """
+    Named explicitly, because these are the ones a participant screen tempts
+    you toward: an enrolment to attach it to, a receipt to pay it with.
+    """
     from django.apps import apps as django_apps
 
     names = {m.__name__ for m in django_apps.get_models()}
-    for deferred in ("Participant", "Enrollment", "Receipt", "ChargeLine", "Clearance"):
+    for deferred in (
+        "Enrollment",
+        "Cohort",
+        "Program",
+        "PriceList",
+        "Receipt",
+        "ChargeLine",
+        "Clearance",
+        "Certificate",
+        "Partner",
+        "Agreement",
+        "DepositPolicy",
+        "TaxRule",
+        "OpeningBalance",
+        "EnrollmentApplication",
+    ):
         assert deferred not in names, f"{deferred} belongs to a later sprint"
+
+
+def test_participant_exists_and_carries_no_money() -> None:
+    """Sprint 2B's one model, and the field it must never grow."""
+    from apps.people.models import Participant
+
+    types = {f.get_internal_type() for f in Participant._meta.get_fields()}
+    assert "DecimalField" not in types and "FloatField" not in types

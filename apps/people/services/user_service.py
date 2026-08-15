@@ -25,6 +25,12 @@ from apps.people.permissions import policy
 ENTITY = "people.User"
 
 
+def get_user(*, pk: Any) -> Any:
+    from apps.people.models import User
+
+    return User.objects.get(pk=pk)
+
+
 def list_users() -> Any:
     from apps.people.models import User
 
@@ -131,4 +137,4 @@ def set_active(*, actor: Any, target: Any, is_active: bool, request: Any = None)
     return target
 
 
-__all__ = ["create_user", "list_users", "set_active", "set_role"]
+__all__ = ["create_user", "get_user", "list_users", "set_active", "set_role"]

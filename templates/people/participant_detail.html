@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card2">
+  <h1>{{ name_ar }}</h1>
+  <p class="note" dir="ltr">{{ number }}</p>
+
+  {# Only the fields the service projected reach this template. A field the
+     role may not see is absent from the response entirely (BR-101, T-283). #}
+  <table class="tbl">
+    <tbody>
+      {% for key, label, value in rows %}
+        {% if key != "name_ar" and key != "participant_number" %}
+          <tr>
+            <th>{{ label }}</th>
+            <td>{{ value|default:"—" }}</td>
+          </tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if can_edit %}
+    <a class="btn2" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a>
+  {% endif %}
+  <a href="{% url 'people:participants' %}">{% translate "عودة للقائمة" %}</a>
+</div>
+{% endblock %}

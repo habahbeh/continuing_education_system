@@ -9,8 +9,10 @@ from apps.core.views import health
 
 urlpatterns = [
     path("", health, name="health"),
-    # Q-12 — local authentication. Kept off /accounts/ so it is never confused
-    # with a future SSO callback mount point.
-    path("auth/", include("apps.people.urls")),
+    # people owns authentication (Q-12), users, participants and the audit
+    # screen. Mounted at the root because the app now serves several distinct
+    # sections; the auth paths keep their /auth/ prefix inside the app so they
+    # are never confused with a future SSO callback mount point.
+    path("", include("apps.people.urls")),
     path("admin/", admin.site.urls),
 ]

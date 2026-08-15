@@ -25,6 +25,18 @@ class SequenceExhausted(CoreError):
     """Raised when a NumberSequence cannot produce another value."""
 
 
+class ConcurrencyRetryExhausted(CoreError):
+    """
+    Raised when an operation kept losing to lock contention.
+
+    A MySQL deadlock aborts the whole transaction, so the retry has to live at
+    the service that owns it — the numbering layer cannot retry on a caller's
+    behalf. This is what the caller raises once its own attempts run out, and
+    it is deliberately distinct from OperationalError so the caller's exhausted
+    retry is not mistaken for a first failure.
+    """
+
+
 class AuditChainBroken(CoreError):
     """Raised when the audit hash chain fails verification (ADR-010, layer 3)."""
 
@@ -45,6 +57,7 @@ class TaxRateNotConfigured(CoreError):
 
 __all__ = [
     "AuditChainBroken",
+    "ConcurrencyRetryExhausted",
     "CoreError",
     "ImmutableRecordError",
     "SequenceExhausted",

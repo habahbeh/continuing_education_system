@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card2">
+  <h1>{% translate "طلب التحاق جديد" %}</h1>
+  <p class="note">
+    {% translate "يُولَّد الرقم الجامعي آلياً عند الحفظ من الفصل الدراسي النشط (BR-001)." %}
+  </p>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="note">{{ form.non_field_errors }}</div>
+    {% endif %}
+    {% for field in form %}
+      <div class="calc-row">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
+      </div>
+    {% endfor %}
+    <button type="submit" class="btn2">{% translate "حفظ" %}</button>
+    <a href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
+  </form>
+</div>
+{% endblock %}

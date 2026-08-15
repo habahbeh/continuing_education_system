@@ -16,7 +16,7 @@ from __future__ import annotations
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from apps.people.models import Role
+from apps.people.models import ParticipantCategory, Role
 
 
 class Action(models.TextChoices):
@@ -95,6 +95,12 @@ BUSINESS_ROLES: tuple[str, ...] = (
 #: Read-only actions. Used by D-02 (the audit account writes nothing, ever).
 READ_ONLY_ACTIONS: frozenset[str] = frozenset({Action.VIEW, Action.PRINT})
 
+#: Presentation vocabularies, re-exported so views can render a dropdown
+#: without importing the models module (A-05 forbids that, and rightly: the
+#: rule is about views reaching for data, and the exception would erode it).
+ROLE_CHOICES = Role.choices
+PARTICIPANT_CATEGORY_CHOICES = ParticipantCategory.choices
+
 #: The seven reports of SPEC.md. Access is per-report, not per-screen — see
 #: REPORT_ACCESS in permissions.matrix (footnotes 23 and 31).
 REPORT_NUMBERS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
@@ -102,8 +108,10 @@ REPORT_NUMBERS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
 
 __all__ = [
     "BUSINESS_ROLES",
+    "PARTICIPANT_CATEGORY_CHOICES",
     "READ_ONLY_ACTIONS",
     "REPORT_NUMBERS",
+    "ROLE_CHOICES",
     "Action",
     "Screen",
 ]

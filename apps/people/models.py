@@ -18,7 +18,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from apps.core.fields import NameAr, ShortCode
+from apps.core.fields import DisplayRef, NameAr, NameEn, ShortCode
 
 
 class Role(models.TextChoices):
@@ -106,3 +106,156 @@ class User(AbstractUser):
     @property
     def is_locked(self) -> bool:
         return self.locked_at is not None
+
+
+class ParticipantCategory(models.TextChoices):
+    """
+    The three participant categories (DATA_MODEL §4.2, GLOSSARY §1).
+
+    CENTER is the one that changes the participant number: its type digit is
+    fixed at 5 regardless of the semester (BR-002).
+    """
+
+    UNIVERSITY = "UNIVERSITY", _("طالب جامعة / خرّيج")
+    CENTER = "CENTER", _("طالب مركز")
+    EMPLOYEE = "EMPLOYEE", _("موظف الجامعة")
+
+
+class IdDocumentType(models.TextChoices):
+    NATIONAL_ID = "NATIONAL_ID", _("رقم وطني")
+    PASSPORT = "PASSPORT", _("جواز سفر")
+
+
+class Gender(models.TextChoices):
+    MALE = "MALE", _("ذكر")
+    FEMALE = "FEMALE", _("أنثى")
+
+
+class Participant(models.Model):
+    """
+    A centre participant (DATA_MODEL §4.2).
+
+    Deliberately absent, and not by oversight:
+
+    * **No money field of any kind.** The balance is a Sprint 4 function
+      (``get_account_state()``) computed from charge lines and allocations —
+      never a stored column, because a stored balance is a number that can
+      disagree with the ledger that produced it.
+    * **No ``source_batch``.** Cancelled by Q-02: historical participants live
+      in the isolated archive tables, linked only through
+      ``HistoricalParticipant.linked_participant``, with no financial effect.
+    * **No enrolment.** Linking a participant to a cohort is
+      ``operations.Enrollment`` with its twelve states — Sprint 6. The "new
+      application" screen creates a Participant and nothing else
+      (DATA_MODEL §4.2, checklist §5.2).
+
+    ``qualification`` and ``city`` carry no choices and no CHECK constraint on
+    purpose: their permitted values are still open (Q-31). SPEC §6 names their
+    counts — six levels, twelve governorates — but never lists them. They are
+    validated against effective-dated reference lists instead, so answering
+    Q-31 is data entry rather than a data migration.
+    """
+
+    participant_number = models.CharField(
+        max_length=9,
+        unique=True,
+        editable=False,
+        verbose_name=_("الرقم الجامعي"),
+        help_text=_("يُولَّد آلياً: السنة(4) + النوع(1) + التسلسل(4) — BR-001"),
+    )
+    category = ShortCode(choices=ParticipantCategory.choices, verbose_name=_("الفئة"))
+
+    name_ar = NameAr(verbose_name=_("الاسم رباعياً بالعربية"))
+    name_en = NameEn(blank=True, verbose_name=_("الاسم بالإنجليزية"))
+
+    id_document_type = ShortCode(
+        choices=IdDocumentType.choices,
+        default=IdDocumentType.NATIONAL_ID,
+        verbose_name=_("نوع وثيقة الهوية"),
+    )
+    id_document_number = models.CharField(max_length=32, verbose_name=_("رقم وثيقة الهوية"))
+
+    nationality = models.CharField(max_length=60, blank=True, verbose_name=_("الجنسية"))
+    gender = ShortCode(choices=Gender.choices, blank=True, verbose_name=_("الجنس"))
+    date_of_birth = models.DateField(null=True, blank=True, verbose_name=_("تاريخ الميلاد"))
+
+    # No choices / no CHECK — pending Q-31. See the class docstring.
+    qualification = ShortCode(blank=True, verbose_name=_("المؤهل العلمي"))
+    city = models.CharField(max_length=60, blank=True, verbose_name=_("المدينة"))
+
+    phone = models.CharField(max_length=32, blank=True, verbose_name=_("الهاتف"))
+    po_box = models.CharField(max_length=32, blank=True, verbose_name=_("صندوق البريد"))
+    email = models.EmailField(blank=True, verbose_name=_("البريد الإلكتروني"))
+    employer = models.CharField(max_length=150, blank=True, verbose_name=_("جهة العمل"))
+
+    registered_on = models.DateField(verbose_name=_("تاريخ التسجيل"))
+
+    # BR-003 — the pledge is contractual evidence cited when a refund is
+    # refused (BR-033), so the timestamp matters as much as the flag.
+    no_refund_pledge_accepted = models.BooleanField(
+        default=False, verbose_name=_("الإقرار بالتعهّد بعدم الاسترداد")
+    )
+    no_refund_pledge_at = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("وقت قبول التعهّد")
+    )
+
+    # BR-004 — an exemption without the president's written approval is an
+    # unexplained waiver of revenue.
+    is_exempt = models.BooleanField(default=False, verbose_name=_("معفى"))
+    exemption_approval_ref = DisplayRef(blank=True, verbose_name=_("رقم موافقة رئيس الجامعة"))
+    exemption_approval_date = models.DateField(
+        null=True, blank=True, verbose_name=_("تاريخ الموافقة")
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("أُنشئ في"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("عُدِّل في"))
+
+    class Meta:
+        verbose_name = _("مشارك")
+        verbose_name_plural = _("المشاركون")
+        ordering = ["-registered_on", "participant_number"]
+        constraints = [
+            # C-19 · BR-001 — exactly nine digits. MySQL 8.0.4+ supports REGEXP
+            # in CHECK; this is the last line of defence behind the numbering
+            # service, not a substitute for it.
+            models.CheckConstraint(
+                condition=models.Q(participant_number__regex=r"^[0-9]{9}$"),
+                name="people_participant_number_format",
+            ),
+            # BR-003 — accepting the pledge without recording WHEN destroys the
+            # evidence the pledge exists to provide.
+            models.CheckConstraint(
+                condition=models.Q(no_refund_pledge_accepted=False)
+                | models.Q(no_refund_pledge_at__isnull=False),
+                name="people_participant_pledge_timestamped",
+            ),
+            # C-14 · BR-004 — no exemption without an approval reference.
+            models.CheckConstraint(
+                condition=models.Q(is_exempt=False) | ~models.Q(exemption_approval_ref=""),
+                name="people_participant_exemption_has_ref",
+            ),
+            # Closed vocabularies, enforced in the database for the same reason
+            # people_user_role_valid is: choices alone are Python-side only.
+            models.CheckConstraint(
+                condition=models.Q(category__in=ParticipantCategory.values),
+                name="people_participant_category_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(id_document_type__in=IdDocumentType.values),
+                name="people_participant_id_doc_type_valid",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["name_ar"], name="people_participant_name_idx"),
+            models.Index(fields=["phone"], name="people_participant_phone_idx"),
+            models.Index(fields=["category"], name="people_participant_cat_idx"),
+            models.Index(fields=["id_document_number"], name="people_participant_iddoc_idx"),
+        ]
+        # NOTE: unique(id_document_type, id_document_number) is deliberately
+        # NOT here. DATA_MODEL §4.2 defers it until the Sprint 8 archive data
+        # is cleaned; enabling it now would block that archiving. BR-005 is
+        # enforced as a service-level warning instead, driven by the
+        # `identity_document_uniqueness_mode` setting.
+
+    def __str__(self) -> str:
+        return f"{self.participant_number} — {self.name_ar}"
