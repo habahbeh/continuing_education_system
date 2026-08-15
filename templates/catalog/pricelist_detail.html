@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="card2">
+  <h1>{{ price_list.name_ar }}</h1>
+  <p class="note" dir="ltr">
+    {{ price_list.code }} · {{ price_list.get_status_display }}
+  </p>
+  {% if price_list.is_frozen %}
+    <p class="note">
+      {% translate "هذه القائمة مجمَّدة — لا تُعدَّل بأي مسار (D-14). التغيير بإصدار قائمة جديدة." %}
+      {% if price_list.approved_by_text %}
+        <br>{% translate "الاعتماد" %}: {{ price_list.approved_by_text }} — {{ price_list.decision_reference }}
+      {% endif %}
+    </p>
+  {% endif %}
+
+  <h2>{% translate "بنود الأسعار" %}</h2>
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>{% translate "البرنامج" %}</th><th>{% translate "المستوى" %}</th>
+        <th>{% translate "رسوم الدورة" %}</th>
+        <th>{% translate "التأمين" %}</th><th>{% translate "سياسة التأمين" %}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td>{{ item.program.name_ar }}</td>
+          <td>{{ item.level|default:"—" }}</td>
+          <td>{{ item.course_fee }}</td>
+          <td>{% if item.deposit_amount %}{{ item.deposit_amount }}{% else %}—{% endif %}</td>
+          <td>{{ item.deposit_policy.name_ar|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">{% translate "لا توجد بنود" %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">
+    {% translate "التأمين الفارغ يعني «لا تأمين على هذا البرنامج» — ويختلف عن صفر (BR-096)." %}
+  </p>
+
+  <h2>{% translate "قواعد رسوم التسجيل" %}</h2>
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>{% translate "البرنامج" %}</th><th>{% translate "فئة المشارك" %}</th>
+        <th>{% translate "الرسم" %}</th><th>{% translate "الملاحظة" %}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rule in fee_rules %}
+        <tr>
+          <td>{{ rule.program.name_ar|default:_("كل البرامج") }}</td>
+          <td>{{ rule.participant_category }}</td>
+          <td>{% if rule.fee is None %}{% translate "بلا رسوم" %}{% else %}{{ rule.fee }}{% endif %}</td>
+          <td>{{ rule.exception_note_ar|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4">{% translate "لا توجد قواعد" %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="note">
+    {% translate "«بلا رسوم» تعني عدم وجود رسم تسجيل أصلاً — وتختلف عن رسم قيمته صفر." %}
+  </p>
+</div>
+{% endblock %}

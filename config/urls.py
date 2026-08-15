@@ -14,5 +14,6 @@ urlpatterns = [
     # sections; the auth paths keep their /auth/ prefix inside the app so they
     # are never confused with a future SSO callback mount point.
     path("", include("apps.people.urls")),
+    path("", include("apps.catalog.urls")),
     path("admin/", admin.site.urls),
 ]

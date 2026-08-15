@@ -146,16 +146,16 @@ def test_centre_manager_may_not_create_users(seeded_settings: None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 2B scope — nothing from a LATER sprint may have been built
+# Sprint 3 scope — nothing from a LATER sprint may have been built
 # ---------------------------------------------------------------------------
 def test_no_business_model_exists_yet() -> None:
     """
-    The scope guard, widened by exactly one model.
+    The scope guard, widened one sprint at a time.
 
-    Sprint 2A allowed none; Sprint 2B allows people.Participant and nothing
-    else. The catalogue, the ledger, partners, operations, clearance and the
-    archive all belong to later sprints, and a model that appears early is
-    scope that was never approved.
+    2A allowed no business model; 2B added people.Participant; 3 adds the
+    catalogue. The ledger, partners, operations, clearance and the archive all
+    belong to later sprints, and a model that appears early is scope that was
+    never approved.
     """
     from django.apps import apps as django_apps
 
@@ -169,9 +169,19 @@ def test_no_business_model_exists_yet() -> None:
             "FinancialPeriod",
         },
         "people": {"User", "Participant"},
+        # Sprint 3 — the catalogue and pricing.
+        "catalog": {
+            "CourseCategory",
+            "KnowledgeField",
+            "Program",
+            "Subject",
+            "DepositPolicy",
+            "PriceList",
+            "PriceListItem",
+            "RegistrationFeeRule",
+        },
     }
     business_apps = {
-        "catalog",
         "partners",
         "operations",
         "billing",
@@ -188,13 +198,13 @@ def test_no_business_model_exists_yet() -> None:
         if label in business_apps or (label in allowed and model.__name__ not in allowed[label]):
             offenders.append(f"{label}.{model.__name__}")
 
-    assert not offenders, "Models outside the Sprint 2A scope: " + ", ".join(offenders)
+    assert not offenders, "Models outside the Sprint 3 scope: " + ", ".join(offenders)
 
 
 def test_later_sprint_models_do_not_exist() -> None:
     """
-    Named explicitly, because these are the ones a participant screen tempts
-    you toward: an enrolment to attach it to, a receipt to pay it with.
+    Named explicitly, because these are the ones a priced catalogue tempts you
+    toward: an enrolment to sell it to, a charge line to bill it with.
     """
     from django.apps import apps as django_apps
 
@@ -202,16 +212,22 @@ def test_later_sprint_models_do_not_exist() -> None:
     for deferred in (
         "Enrollment",
         "Cohort",
-        "Program",
-        "PriceList",
+        "MoheSubmission",
+        "Transfer",
+        "SpecialCase",
         "Receipt",
         "ChargeLine",
+        "PaymentAllocation",
+        "Discount",
+        "Refund",
+        "DailyClosing",
+        "DepositReturn",
+        "TaxRule",
         "Clearance",
         "Certificate",
         "Partner",
         "Agreement",
-        "DepositPolicy",
-        "TaxRule",
+        "PartnerClaim",
         "OpeningBalance",
         "EnrollmentApplication",
     ):
