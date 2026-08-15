@@ -285,17 +285,25 @@ def test_q16_a_flag_without_a_reason_is_not_an_override(
     assert not entitlement_service.is_payment_overdue(enrollment, as_of=TERM_START)
 
 
-def test_q16_only_the_predicate_exists_not_the_sprint_6_job() -> None:
+def test_q16_the_predicate_stays_the_only_definition_of_overdue() -> None:
     """
-    The daily sweep belongs to Sprint 6 and is deliberately not built.
+    ✅ **Sprint 6 built the daily job**, so this guard inverted rather than
+    being deleted — its sprint arrived.
 
-    Asserted so "we only built the predicate" stays true rather than becoming
-    a comment nobody rechecks.
+    What it protects now is the thing that actually matters: the job must call
+    this predicate, not carry its own copy of the rule. Two definitions of
+    "overdue" would drift, and the one that drifts decides what a partner
+    earns (BR-045).
     """
-    from pathlib import Path
+    import inspect
 
-    commands = Path(__file__).resolve().parents[3] / "apps"
-    names = [p.name for p in commands.rglob("management/commands/*.py")]
-    assert not any("overdue" in n for n in names), (
-        "an overdue sweep command appeared — that is Sprint 6 scope"
+    from apps.operations.services import daily_service
+
+    source = inspect.getsource(daily_service)
+    assert "entitlement_service.is_payment_overdue" in source, (
+        "the daily job stopped calling the Sprint 5 predicate"
     )
+    for smell in (assumptions.OVERDUE_DAYS_KEY + '"', "timedelta(days="):
+        assert smell not in source.replace('OVERDUE_DAYS_KEY = "payment_overdue_days"', ""), (
+            f"the daily job looks like it reimplements the rule: {smell}"
+        )

@@ -153,9 +153,10 @@ def test_no_business_model_exists_yet() -> None:
     The scope guard, widened one sprint at a time.
 
     2A allowed no business model; 2B added people.Participant; 3 the
-    catalogue; 4 billing and the till; 5 partners and settlements. Expenses,
-    reporting, clearance and the archive still belong to later sprints, and a
-    model that appears early is scope that was never approved.
+    catalogue; 4 billing and the till; 5 partners and settlements; 6 the rest
+    of the participant lifecycle. Clearance, certificates, expenses,
+    reporting and the archive still belong to later sprints, and a model that
+    appears early is scope that was never approved.
     """
     from django.apps import apps as django_apps
 
@@ -185,11 +186,17 @@ def test_no_business_model_exists_yet() -> None:
             "ReceiptVoid",
             "DailyClosing",
         },
-        # Sprint 4 PREREQUISITE, not Sprint 6 arriving early. Every billing
-        # entity has a foreign key to Enrollment, so billing could not be
-        # built or tested without it (approved 2026-08-15). The REST of
-        # Sprint 6 stays deferred and is asserted absent below.
-        "operations": {"Cohort", "Enrollment"},
+        # Sprint 6 — the lifecycle completed. Cohort and Enrollment arrived
+        # early as the Sprint 4 prerequisite (every billing entity has a
+        # foreign key to Enrollment); the other four are Sprint 6's own.
+        "operations": {
+            "Cohort",
+            "Enrollment",
+            "MoheSubmission",
+            "EnrollmentStatusHistory",
+            "Transfer",
+            "SpecialCase",
+        },
         # Sprint 3 — the catalogue and pricing.
         "catalog": {
             "CourseCategory",
@@ -224,31 +231,25 @@ def test_no_business_model_exists_yet() -> None:
         if label in business_apps or (label in allowed and model.__name__ not in allowed[label]):
             offenders.append(f"{label}.{model.__name__}")
 
-    assert not offenders, "Models outside the Sprint 5 scope: " + ", ".join(offenders)
+    assert not offenders, "Models outside the Sprint 6 scope: " + ", ".join(offenders)
 
 
 def test_later_sprint_models_do_not_exist() -> None:
     """
     The guard that keeps a PREREQUISITE from becoming a land grab.
 
-    Sprint 4 pulled Cohort and Enrollment forward because billing has a
-    foreign key to them and could not otherwise be tested. That justification
-    covers exactly those two. The rest of Sprint 6 — the ministry submission,
-    transfers, special cases, the status history — has no such claim, and
-    naming them here keeps "minimal prerequisite" from quietly widening.
+    ✅ Sprint 6 delivered the rest of operations, so the four models this
+    used to name have moved into the allowed set above. What remains here is
+    everything Sprint 7 and later own — named individually, because a list of
+    absences is only worth having if it is specific.
     """
     from django.apps import apps as django_apps
 
     names = {m.__name__ for m in django_apps.get_models()}
     for deferred in (
-        # The REST of Sprint 6 — the half NOT pulled forward. Cohort and
-        # Enrollment came early because billing cannot exist without them;
-        # these have no such claim and must stay absent.
-        "MoheSubmission",
-        "Transfer",
-        "SpecialCase",
-        "EnrollmentStatusHistory",
-        # Later sprints entirely.
+        # Sprint 7 — the end of the participant's life in the system. Sprint 6
+        # CREATES the credit balance a cheaper transfer leaves behind; only
+        # returning it (BR-071) waits for clearance.
         "TaxRule",
         "Clearance",
         "ClearanceStep",

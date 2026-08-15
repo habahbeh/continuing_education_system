@@ -1,0 +1,435 @@
+"""
+Documented exceptions to the ordinary lifecycle (BR-067 … BR-071).
+
+Each of the six kinds has a financial consequence, and each records that
+consequence in words as well as in rows. ``financial_effect_ar`` is not
+decoration: a deferral that moves 700 dinars and a substitution that moves a
+seat look identical in a status column, and the person reading the file a year
+later is usually asking about the money.
+
+**Sprint 7 boundary.** A credit balance is CREATED here — by a deferral, a
+substitution or a cheaper transfer — and the case row records it. RETURNING
+it is BR-071, which happens at clearance, and clearance is Sprint 7. Nothing
+in this module pays anything back.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from apps.billing.services.account_service import ZERO, get_account_state
+from apps.core.services.audit_service import write_audit
+from apps.operations.models import (
+    Cohort,
+    Enrollment,
+    EnrollmentStatus,
+    EnrollmentStatusHistory,
+    SpecialCase,
+    SpecialCaseStatus,
+    SpecialCaseType,
+)
+from apps.operations.services.enrollment_service import record_status_change
+from apps.people.constants import Action, Screen
+from apps.people.permissions import policy
+
+ENTITY = "operations.SpecialCase"
+
+
+class DecisionReferenceRequiredError(ValidationError):
+    """BR-067 — a dismissal without the decision that ordered it."""
+
+
+def dismiss(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    decision_reference: str,
+    detail_ar: str,
+    occurred_on: date,
+    code: str,
+    request: Any = None,
+) -> SpecialCase:
+    """
+    BR-067 · BR-068 — dismissal, and what it costs.
+
+    No refund follows a dismissal, the partner earns nothing on it (BR-045),
+    and any outstanding balance stays a debt that blocks clearance. That is
+    severe enough that the decision reference is mandatory in the service and
+    in the database both.
+    """
+    policy.require(actor, Screen.SPECIAL_CASES, Action.CREATE, request=request)
+
+    if not decision_reference.strip():
+        raise DecisionReferenceRequiredError("الفصل يتطلب مرجع قرار مسجَّلاً (BR-067).")
+    return _dismiss(
+        actor=actor,
+        enrollment=enrollment,
+        decision_reference=decision_reference.strip(),
+        detail_ar=detail_ar,
+        occurred_on=occurred_on,
+        code=code,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _dismiss(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    decision_reference: str,
+    detail_ar: str,
+    occurred_on: date,
+    code: str,
+    request: Any,
+) -> SpecialCase:
+    state = get_account_state(enrollment)
+    case = SpecialCase.objects.create(
+        code=code,
+        case_type=SpecialCaseType.DISMISSAL,
+        enrollment=enrollment,
+        occurred_on=occurred_on,
+        detail_ar=detail_ar,
+        financial_effect_ar=(
+            f"لا استرداد (BR-068) · الرصيد القائم {state.balance} يبقى ديناً "
+            "يمنع براءة الذمة · ولا استحقاق للشريك (BR-045)."
+        ),
+        decision_reference=decision_reference,
+        created_by=actor,
+    )
+    record_status_change(
+        actor=actor,
+        enrollment=enrollment,
+        to_status=EnrollmentStatus.DISMISSED,
+        reason_ar=f"فصل — {decision_reference}",
+        reference=code,
+    )
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(case.pk),
+        reference=code,
+        summary_ar=f"فصل المشارك عن {enrollment.code} — {decision_reference}",
+        actor=actor,
+        changes={
+            "enrollment": enrollment.code,
+            "decision_reference": decision_reference,
+            "balance_at_dismissal": str(state.balance),
+        },
+        request=request,
+    )
+    return case
+
+
+def defer_to_cohort(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    to_cohort: Cohort,
+    occurred_on: date,
+    case_code: str,
+    new_enrollment_code: str,
+    detail_ar: str = "",
+    request: Any = None,
+) -> tuple[SpecialCase, Enrollment]:
+    """
+    BR-069 — move a participant to a later cohort, money and all.
+
+    The money moves the same way a transfer moves it: a reversing allocation
+    on the old enrolment and a matching one on the new, against the same
+    receipt. Nothing is edited and nothing is deleted.
+    """
+    policy.require(actor, Screen.SPECIAL_CASES, Action.CREATE, request=request)
+    return _defer(
+        actor=actor,
+        enrollment=enrollment,
+        to_cohort=to_cohort,
+        occurred_on=occurred_on,
+        case_code=case_code,
+        new_enrollment_code=new_enrollment_code,
+        detail_ar=detail_ar,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _defer(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    to_cohort: Cohort,
+    occurred_on: date,
+    case_code: str,
+    new_enrollment_code: str,
+    detail_ar: str,
+    request: Any,
+) -> tuple[SpecialCase, Enrollment]:
+    from apps.cashbox.models import AllocationType, PaymentAllocation, ReceiptStatus
+
+    new = Enrollment.objects.create(
+        code=new_enrollment_code,
+        participant=enrollment.participant,
+        cohort=to_cohort,
+        enrolled_on=occurred_on,
+        price_list=enrollment.price_list,
+        status=EnrollmentStatus.PENDING_APPROVAL,
+        status_changed_at=timezone.now(),
+        status_note_ar=f"ترحيل من {enrollment.code}",
+        voucher_received=enrollment.voucher_received,
+        voucher_received_at=enrollment.voucher_received_at,
+        voucher_received_by=enrollment.voucher_received_by,
+    )
+    EnrollmentStatusHistory.objects.create(
+        enrollment=new,
+        from_status="",
+        to_status=EnrollmentStatus.PENDING_APPROVAL,
+        changed_by=actor,
+        reason_ar=f"ترحيل من {enrollment.code}",
+        reference=case_code,
+    )
+
+    carried: Decimal = ZERO
+    for allocation in PaymentAllocation.objects.filter(
+        enrollment=enrollment, receipt__status=ReceiptStatus.ISSUED
+    ).select_related("receipt"):
+        if allocation.amount == ZERO:
+            continue
+        PaymentAllocation.objects.create(
+            receipt=allocation.receipt,
+            charge_line=allocation.charge_line,
+            enrollment=enrollment,
+            amount=-allocation.amount,
+            allocation_type=AllocationType.MANUAL,
+            allocated_by=actor,
+            manual_reason_ar=f"عكس تخصيص — ترحيل إلى {new.code} ({case_code})"[:255],
+        )
+        # Carried as an unallocated credit: the new cohort's charge lines do
+        # not exist yet, and inventing a line to point at would be worse than
+        # BR-023's own representation of money received against nothing.
+        PaymentAllocation.objects.create(
+            receipt=allocation.receipt,
+            charge_line=None,
+            enrollment=new,
+            amount=allocation.amount,
+            allocation_type=AllocationType.MANUAL,
+            allocated_by=actor,
+            manual_reason_ar=f"رصيد مُرحَّل من {enrollment.code} ({case_code})"[:255],
+        )
+        carried += allocation.amount
+
+    for line in enrollment.charge_lines.filter(voided=False):
+        line.voided = True
+        line.voided_by = actor
+        line.voided_at = timezone.now()
+        line.void_reason_ar = f"ترحيل إلى {new.code} بموجب {case_code} (BR-069)"
+        line.save(update_fields=["voided", "voided_by", "voided_at", "void_reason_ar"])
+
+    enrollment.deferred_to = new
+    enrollment.save(update_fields=["deferred_to"])
+    record_status_change(
+        actor=actor,
+        enrollment=enrollment,
+        to_status=EnrollmentStatus.DEFERRED,
+        reason_ar=f"ترحيل إلى {new.code}",
+        reference=case_code,
+    )
+
+    case = SpecialCase.objects.create(
+        code=case_code,
+        case_type=SpecialCaseType.DEFERRAL,
+        enrollment=enrollment,
+        related_enrollment=new,
+        occurred_on=occurred_on,
+        detail_ar=detail_ar or f"ترحيل إلى الدفعة {to_cohort.code}",
+        financial_effect_ar=(
+            f"نُقل المقبوض {carried} رصيداً للتسجيل {new.code} (BR-069) · "
+            "وتُنشأ بنود الرسوم على الدفعة الجديدة بسعرها."
+        ),
+        created_by=actor,
+    )
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(case.pk),
+        reference=case_code,
+        summary_ar=f"ترحيل {enrollment.code} ← {new.code} برصيد {carried}",
+        actor=actor,
+        changes={
+            "from": enrollment.code,
+            "to": new.code,
+            "credit_carried": str(carried),
+            "to_cohort": to_cohort.code,
+        },
+        request=request,
+    )
+    return case, new
+
+
+def substitute(
+    *,
+    actor: Any,
+    withdrawn_enrollment: Enrollment,
+    incoming_participant: Any,
+    occurred_on: date,
+    case_code: str,
+    new_enrollment_code: str,
+    detail_ar: str = "",
+    request: Any = None,
+) -> tuple[SpecialCase, Enrollment]:
+    """
+    BR-070 — a replacement takes the seat, and NOT a second registration fee.
+
+    The seat was already paid for administratively. Charging the incoming
+    participant a fresh registration fee would bill the centre's admin work
+    twice for one seat.
+    """
+    policy.require(actor, Screen.SPECIAL_CASES, Action.CREATE, request=request)
+
+    if withdrawn_enrollment.status != EnrollmentStatus.WITHDRAWN:
+        raise ValidationError("الإحلال لا يكون إلا على مقعد شاغر بانسحاب موثّق (BR-070).")
+    return _substitute(
+        actor=actor,
+        withdrawn_enrollment=withdrawn_enrollment,
+        incoming_participant=incoming_participant,
+        occurred_on=occurred_on,
+        case_code=case_code,
+        new_enrollment_code=new_enrollment_code,
+        detail_ar=detail_ar,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _substitute(
+    *,
+    actor: Any,
+    withdrawn_enrollment: Enrollment,
+    incoming_participant: Any,
+    occurred_on: date,
+    case_code: str,
+    new_enrollment_code: str,
+    detail_ar: str,
+    request: Any,
+) -> tuple[SpecialCase, Enrollment]:
+    new = Enrollment.objects.create(
+        code=new_enrollment_code,
+        participant=incoming_participant,
+        cohort=withdrawn_enrollment.cohort,
+        enrolled_on=occurred_on,
+        price_list=withdrawn_enrollment.price_list,
+        status=EnrollmentStatus.PENDING_FINANCE,
+        status_changed_at=timezone.now(),
+        status_note_ar=f"إحلال محل {withdrawn_enrollment.code}",
+    )
+    EnrollmentStatusHistory.objects.create(
+        enrollment=new,
+        from_status="",
+        to_status=EnrollmentStatus.PENDING_FINANCE,
+        changed_by=actor,
+        reason_ar=f"إحلال محل {withdrawn_enrollment.code}",
+        reference=case_code,
+    )
+    case = SpecialCase.objects.create(
+        code=case_code,
+        case_type=SpecialCaseType.SUBSTITUTION,
+        enrollment=withdrawn_enrollment,
+        related_enrollment=new,
+        occurred_on=occurred_on,
+        detail_ar=detail_ar or "إحلال مشارك بدل منسحب في نفس الدفعة",
+        financial_effect_ar=(
+            "المقعد ينتقل بلا رسم تسجيل جديد (BR-070) · وتُستوفى الرسوم الدراسية من المشارك الجديد."
+        ),
+        created_by=actor,
+    )
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(case.pk),
+        reference=case_code,
+        summary_ar=f"إحلال {incoming_participant.name_ar} محل {withdrawn_enrollment.code}",
+        actor=actor,
+        changes={
+            "seat_from": withdrawn_enrollment.code,
+            "seat_to": new.code,
+            "registration_fee_charged": False,
+        },
+        request=request,
+    )
+    return case, new
+
+
+def record_credit_balance(
+    *, actor: Any, enrollment: Enrollment, occurred_on: date, code: str, request: Any = None
+) -> SpecialCase | None:
+    """
+    Make a credit balance a case someone owns, rather than a negative number.
+
+    ⏳ **DEFERRED to Sprint 7 — the RETURN itself (BR-071).** This records that
+    the centre owes money and blocks nothing on its own; clearance is what
+    refuses to close while a balance is non-zero (BR-073), and clearance does
+    not exist yet.
+    """
+    policy.require(actor, Screen.SPECIAL_CASES, Action.CREATE, request=request)
+
+    state = get_account_state(enrollment)
+    if not state.centre_owes:
+        return None
+    return _record_credit(
+        actor=actor,
+        enrollment=enrollment,
+        amount=-state.balance,
+        occurred_on=occurred_on,
+        code=code,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _record_credit(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    amount: Decimal,
+    occurred_on: date,
+    code: str,
+    request: Any,
+) -> SpecialCase:
+    case = SpecialCase.objects.create(
+        code=code,
+        case_type=SpecialCaseType.CREDIT_BALANCE,
+        enrollment=enrollment,
+        occurred_on=occurred_on,
+        detail_ar=f"رصيد دائن للمشارك بقيمة {amount}",
+        financial_effect_ar=(
+            f"على المركز إعادة {amount} — يُردّ عند براءة الذمة (BR-071) · "
+            "⏳ آلية الإعادة في Sprint 7."
+        ),
+        status=SpecialCaseStatus.OPEN,
+        created_by=actor,
+    )
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(case.pk),
+        reference=code,
+        summary_ar=f"تسجيل رصيد دائن {amount} على {enrollment.code}",
+        actor=actor,
+        changes={"amount": str(amount), "returned": False},
+        request=request,
+    )
+    return case
+
+
+__all__ = [
+    "DecisionReferenceRequiredError",
+    "defer_to_cohort",
+    "dismiss",
+    "record_credit_balance",
+    "substitute",
+]
