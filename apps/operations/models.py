@@ -107,6 +107,15 @@ class Cohort(models.Model):
         default=CohortStatus.PLANNED,
         verbose_name=_("الحالة"),
     )
+    agreement = models.ForeignKey(
+        "partners.Agreement",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cohorts",
+        verbose_name=_("الاتفاقية"),
+        help_text=_("الاتفاقية التي تحكم قسمة إيراد هذه الدفعة (DATA_MODEL §7.1)"),
+    )
     lecture_cost = Money(
         null=True,
         blank=True,

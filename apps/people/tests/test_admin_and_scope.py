@@ -152,10 +152,10 @@ def test_no_business_model_exists_yet() -> None:
     """
     The scope guard, widened one sprint at a time.
 
-    2A allowed no business model; 2B added people.Participant; 3 adds the
-    catalogue. The ledger, partners, operations, clearance and the archive all
-    belong to later sprints, and a model that appears early is scope that was
-    never approved.
+    2A allowed no business model; 2B added people.Participant; 3 the
+    catalogue; 4 billing and the till; 5 partners and settlements. Expenses,
+    reporting, clearance and the archive still belong to later sprints, and a
+    model that appears early is scope that was never approved.
     """
     from django.apps import apps as django_apps
 
@@ -201,10 +201,18 @@ def test_no_business_model_exists_yet() -> None:
             "PriceListItem",
             "RegistrationFeeRule",
         },
+        # Sprint 5 — partners, entitlement and claims.
+        "partners": {"Partner", "Agreement", "AgreementProgramSnapshot"},
+        "settlements": {
+            "Entitlement",
+            "PartnerClaim",
+            "PartnerClaimLine",
+            "PartnerObligation",
+            "ClaimDeduction",
+            "PartnerSettlement",
+        },
     }
     business_apps = {
-        "partners",
-        "settlements",
         "expenses",
         "reporting",
         "datamigration",
@@ -216,7 +224,7 @@ def test_no_business_model_exists_yet() -> None:
         if label in business_apps or (label in allowed and model.__name__ not in allowed[label]):
             offenders.append(f"{label}.{model.__name__}")
 
-    assert not offenders, "Models outside the Sprint 4 scope: " + ", ".join(offenders)
+    assert not offenders, "Models outside the Sprint 5 scope: " + ", ".join(offenders)
 
 
 def test_later_sprint_models_do_not_exist() -> None:
@@ -245,12 +253,14 @@ def test_later_sprint_models_do_not_exist() -> None:
         "Clearance",
         "ClearanceStep",
         "Certificate",
-        "Partner",
-        "Agreement",
-        "PartnerClaim",
-        "PartnerSettlement",
         "OpeningBalance",
         "EnrollmentApplication",
+        # The expense side of the partner relationship (DATA_MODEL §10.1).
+        # Sprint 5 records what a partner is OWED and what they owe back;
+        # what the centre pays out is a separate ledger in a later sprint.
+        "Expense",
+        "MigrationBatch",
+        "MigrationRow",
     ):
         assert deferred not in names, f"{deferred} belongs to a later sprint"
 
