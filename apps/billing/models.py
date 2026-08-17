@@ -521,3 +521,77 @@ class Refund(models.Model):
 
     def __str__(self) -> str:
         return f"{self.code} — {self.amount}"
+
+
+class CreditReturn(models.Model):
+    """
+    Money handed back that was never a refund (BR-071, DATA_MODEL gap).
+
+    A participant who overpaid — most often because a transfer moved them to a
+    cheaper course — is owed the difference. BR-071 requires this to be
+    recorded as an INDEPENDENT financial movement, and neither existing model
+    can carry it:
+
+    * ``Refund`` reverses REVENUE and demands an official letter plus the
+      president's approval (BR-034, ``billing_refund_has_external_approvals``).
+      Requiring a presidential decree to hand back a participant's own fifty
+      dinars would make the rule unusable and is not what BR-034 is for.
+    * ``ChargeLine`` cannot represent it either: everything that is not a
+      deposit must be revenue (C-21, ``billing_charge_non_deposit_is_revenue``),
+      and returned money is not income.
+
+    The money itself moves by a REVERSING allocation against the credit row —
+    the same pattern as a void or a transfer — so no original row is edited or
+    deleted. ``reversal_allocation`` points at the row that moved it, which is
+    what makes the payout traceable from either direction.
+
+    ⚠️ **ASSUMPTION — who authorises it.** The documents do not say. It is
+    executed inside clearance step 2, which already requires the finance
+    officer's certification followed by the finance manager's (BR-074, D-30),
+    so the existing dual control is the control. That is a professional
+    reading, NOT a settled client decision.
+    """
+
+    code = ShortCode(unique=True, verbose_name=_("رمز ردّ الرصيد"))
+    enrollment = models.ForeignKey(
+        "operations.Enrollment", on_delete=models.PROTECT, related_name="credit_returns"
+    )
+    amount = Money(verbose_name=_("المبلغ المُعاد"))
+    reason_ar = models.TextField(verbose_name=_("سبب الرصيد الدائن"))
+    returned_on = models.DateField(verbose_name=_("تاريخ الإعادة"))
+    returned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="credit_returns"
+    )
+    #: The reversing allocation that actually moved the money out. Nullable
+    #: only so the row can be written before the allocation inside one
+    #: transaction; the service always links it.
+    reversal_allocation = models.ForeignKey(
+        "cashbox.PaymentAllocation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="credit_returns",
+        verbose_name=_("التخصيص العكسي"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("ردّ رصيد دائن")
+        verbose_name_plural = _("ردود الأرصدة الدائنة")
+        ordering = ["-returned_on", "code"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="billing_credit_return_amount_positive"
+            ),
+            # Money leaving the centre always says why it left.
+            models.CheckConstraint(
+                condition=~models.Q(reason_ar=""), name="billing_credit_return_has_reason"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["enrollment"], name="bil_credret_enr_idx"),
+            models.Index(fields=["returned_on"], name="bil_credret_date_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} — {self.amount}"

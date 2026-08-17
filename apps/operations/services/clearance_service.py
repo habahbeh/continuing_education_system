@@ -1,0 +1,584 @@
+"""
+Clearing a participant out (WORKFLOWS §6, BR-072 … BR-074).
+
+Three steps that cannot be reordered, on form ``CS Fm 7.18 Rev A``:
+
+1. the centre recovers its property,
+2. finance verifies the account is **exactly zero** — and two different people
+   sign for it,
+3. the centre hands over the certificate.
+
+Step 2 is where the controls live. The balance must be zero **in either
+direction**: a credit balance stops a clearance just as firmly as a debt,
+because the centre owing the participant is not "close enough to settled"
+(BR-073, C-09). And it takes two signatures from two people (BR-074, C-29,
+C-30, D-30) — the finance officer first, then the finance manager.
+
+The FINANCE_MANAGER requirement on the second signature is enforced HERE, in
+the policy layer, not as a constraint: a role can be changed on a user
+afterwards, and a constraint has to stay true for rows written years ago
+(DATA_MODEL §7.7).
+
+WORKFLOWS §6.7 names a failure this module has to answer: the balance moving
+after step 2 was certified. The final close therefore RE-CHECKS it rather than
+trusting the number captured at certification time.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from apps.billing.services.account_service import ZERO, get_account_state
+from apps.core.services.audit_service import write_audit
+from apps.operations.models import (
+    Clearance,
+    ClearanceCaseType,
+    ClearanceStatus,
+    ClearanceStep,
+    Enrollment,
+)
+from apps.people.constants import Action, Screen
+from apps.people.models import Role
+from apps.people.permissions import policy
+from apps.people.permissions.separation import assert_second_certifier_differs
+
+ENTITY = "operations.Clearance"
+STEP_ENTITY = "operations.ClearanceStep"
+
+STEP_NAMES = {
+    1: "المركز — استرجاع العُهد",
+    2: "المالية — التحقق المالي",
+    3: "المركز — تسليم الشهادة",
+}
+
+FINANCE_STEP = 2
+
+
+class ClearanceBlockedError(ValidationError):
+    """BR-073 — the account is not exactly zero, in one direction or the other."""
+
+
+class StepOutOfOrderError(ValidationError):
+    """BR-072 — a step was attempted before the one before it was done."""
+
+
+class DepositNotSettledError(ValidationError):
+    """Q-01 / BR-097 — a deposit line exists and has been neither returned nor forfeited."""
+
+
+class SecondCertifierRoleError(PermissionDenied):
+    """BR-074 — the second signature belongs to the finance manager alone."""
+
+
+def open_clearance(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    case_type: str,
+    opened_on: date,
+    code: str,
+    request: Any = None,
+) -> Clearance:
+    """
+    WORKFLOWS §6.3 C1 — open a clearance and lay out its three steps.
+
+    All three rows are created up front rather than as each is reached: the
+    form is a printed checklist, and a participant standing at the counter is
+    entitled to see what is still outstanding.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.CREATE, request=request)
+
+    if case_type not in ClearanceCaseType.values:
+        raise ValidationError(f"حالة براءة غير معروفة: {case_type}")
+
+    live = Clearance.objects.filter(enrollment=enrollment, active_key=1).first()
+    if live is not None:
+        raise ValidationError(f"للتسجيل {enrollment.code} براءة ذمة قائمة سلفاً ({live.code}).")
+
+    return _open_clearance(
+        actor=actor,
+        enrollment=enrollment,
+        case_type=case_type,
+        opened_on=opened_on,
+        code=code,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _open_clearance(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    case_type: str,
+    opened_on: date,
+    code: str,
+    request: Any,
+) -> Clearance:
+    clearance = Clearance.objects.create(
+        code=code,
+        participant=enrollment.participant,
+        enrollment=enrollment,
+        case_type=case_type,
+        opened_on=opened_on,
+        opened_by=actor,
+        status=ClearanceStatus.OPEN,
+    )
+    for number, name in STEP_NAMES.items():
+        ClearanceStep.objects.create(clearance=clearance, step_number=number, name_ar=name)
+
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(clearance.pk),
+        reference=code,
+        summary_ar=f"فتح براءة ذمة — {enrollment.code} · {case_type}",
+        actor=actor,
+        changes={"enrollment": enrollment.code, "case_type": case_type},
+        request=request,
+    )
+    return clearance
+
+
+def _step(clearance: Clearance, number: int) -> ClearanceStep:
+    step = clearance.steps.filter(step_number=number).first()
+    if step is None:  # pragma: no cover - steps are created with the clearance
+        raise ValidationError(f"الخطوة {number} غير موجودة على {clearance.code}.")
+    return step
+
+
+def _require_previous_done(clearance: Clearance, number: int) -> None:
+    """BR-072 — no skipping. The order is the control, not a convention."""
+    if number == 1:
+        return
+    previous = _step(clearance, number - 1)
+    if not previous.is_done:
+        raise StepOutOfOrderError(
+            f"لا يمكن إتمام الخطوة {number} قبل الخطوة {number - 1} ({previous.name_ar}) — BR-072."
+        )
+
+
+def complete_custody_step(
+    *,
+    actor: Any,
+    clearance: Clearance,
+    custody_items: list[dict[str, Any]],
+    request: Any = None,
+) -> ClearanceStep:
+    """
+    Step 1 — the centre's property back. Certified by the centre manager.
+
+    An item left outstanding keeps the step open; WORKFLOWS §6.7 is explicit
+    that this is the correct outcome and not a nuisance.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+
+    outstanding = [item for item in custody_items if not item.get("returned")]
+    if outstanding:
+        names = "، ".join(str(item.get("name_ar", "?")) for item in outstanding)
+        raise ValidationError(f"عهدة غير مُسترجعة: {names}")
+
+    return _complete_custody(
+        actor=actor, clearance=clearance, custody_items=custody_items, request=request
+    )
+
+
+@transaction.atomic
+def _complete_custody(
+    *, actor: Any, clearance: Clearance, custody_items: list[dict[str, Any]], request: Any
+) -> ClearanceStep:
+    step = _step(clearance, 1)
+    step.custody_items = custody_items
+    step.certified_by = actor
+    step.certified_at = timezone.now()
+    step.is_done = True
+    step.save()
+
+    if clearance.status == ClearanceStatus.OPEN:
+        clearance.status = ClearanceStatus.IN_PROGRESS
+        clearance.save(update_fields=["status", "active_key"])
+
+    write_audit(
+        action="APPROVE",
+        entity_type=STEP_ENTITY,
+        entity_id=str(step.pk),
+        reference=clearance.code,
+        summary_ar=f"مصادقة الخطوة 1 — استرجاع {len(custody_items)} عهدة",
+        actor=actor,
+        changes={"event": "CERTIFY_STEP", "step": 1, "items": len(custody_items)},
+        request=request,
+    )
+    return step
+
+
+def deposit_settlement_state(enrollment: Enrollment) -> dict[str, Any]:
+    """
+    Q-01 — what the financial step must see about the deposit, if any.
+
+    A programme with no deposit policy produces no deposit line, and then the
+    whole question does not arise: the fields are not merely hidden, there is
+    nothing to settle. Visibility follows the DATA, never a global flag
+    (PERMISSIONS §3.7, ADR-014 revised).
+    """
+    from apps.billing.services import deposit_service
+
+    line = deposit_service.deposit_line_for(enrollment)
+    if line is None:
+        return {"applies": False, "collected": ZERO, "settled": ZERO, "is_settled": True}
+
+    collected = deposit_service.collected_on(line)
+    settled = deposit_service.settled_amount(line)
+    return {
+        "applies": collected > ZERO,
+        "collected": collected,
+        "settled": settled,
+        "is_settled": collected <= ZERO or settled > ZERO,
+    }
+
+
+def certify_finance_step(*, actor: Any, clearance: Clearance, request: Any = None) -> ClearanceStep:
+    """
+    Step 2, first signature — the finance officer (BR-074).
+
+    Certifies but does NOT close: ``is_done`` waits for the second signature,
+    which is what C-29 makes true at the database level too.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+    _require_previous_done(clearance, FINANCE_STEP)
+
+    enrollment = clearance.enrollment
+    balance = get_account_state(enrollment).balance
+    deposit = deposit_settlement_state(enrollment)
+
+    if balance != ZERO:
+        _block(actor=actor, clearance=clearance, balance=balance, request=request)
+        raise ClearanceBlockedError(_balance_message(balance))
+
+    if deposit["applies"] and not deposit["is_settled"]:
+        raise DepositNotSettledError(
+            f"لا تُغلق الخطوة المالية قبل تسوية التأمين — المقبوض "
+            f"{deposit['collected']} بلا إعادة ولا مصادرة (Q-01 · BR-097)."
+        )
+
+    return _certify_finance(
+        actor=actor, clearance=clearance, balance=balance, deposit=deposit, request=request
+    )
+
+
+def _balance_message(balance: Decimal) -> str:
+    """
+    WORKFLOWS §6.5 — the two directions read differently on purpose.
+
+    🐞 The demo printed the same negative number for "owes us" and "we owe
+    them", which is how CLR-002 and CLR-003 ended up indistinguishable.
+    """
+    if balance > ZERO:
+        return f"براءة الذمة موقوفة — عليه ذمة {balance} (BR-073)."
+    return f"براءة الذمة موقوفة — رصيد دائن {-balance} يجب ردّه (BR-071 · BR-073)."
+
+
+@transaction.atomic
+def _block(*, actor: Any, clearance: Clearance, balance: Decimal, request: Any) -> None:
+    """WORKFLOWS §6.3 C3 — the clearance is parked, visibly, with its reason."""
+    if clearance.status != ClearanceStatus.BLOCKED:
+        clearance.status = ClearanceStatus.BLOCKED
+        clearance.save(update_fields=["status", "active_key"])
+
+    write_audit(
+        action="DENIED_ATTEMPT",
+        entity_type=ENTITY,
+        entity_id=str(clearance.pk),
+        reference=clearance.code,
+        summary_ar=f"محاولة إغلاق الخطوة المالية والرصيد {balance}",
+        actor=actor,
+        denial_rule="BR-073",
+        changes={"balance": str(balance)},
+        request=request,
+    )
+
+
+@transaction.atomic
+def _certify_finance(
+    *,
+    actor: Any,
+    clearance: Clearance,
+    balance: Decimal,
+    deposit: dict[str, Any],
+    request: Any,
+) -> ClearanceStep:
+    step = _step(clearance, FINANCE_STEP)
+    step.balance_at_check = balance
+    step.certified_by = actor
+    step.certified_at = timezone.now()
+    if deposit["applies"]:
+        step.deposit_return_amount = deposit["settled"]
+    step.save()
+
+    if clearance.status == ClearanceStatus.BLOCKED:
+        clearance.status = ClearanceStatus.IN_PROGRESS
+        clearance.save(update_fields=["status", "active_key"])
+
+    write_audit(
+        action="APPROVE",
+        entity_type=STEP_ENTITY,
+        entity_id=str(step.pk),
+        reference=clearance.code,
+        summary_ar=f"المصادقة المالية الأولى — الرصيد {balance}",
+        actor=actor,
+        changes={
+            "event": "CERTIFY_STEP",
+            "step": 2,
+            "order": "first",
+            "balance": str(balance),
+            "deposit_applies": deposit["applies"],
+        },
+        request=request,
+    )
+    return step
+
+
+def second_certify_finance_step(
+    *, actor: Any, clearance: Clearance, request: Any = None
+) -> ClearanceStep:
+    """
+    Step 2, second signature — the finance manager, and only them (BR-074).
+
+    Two checks that look similar and are not: the ROLE must be
+    FINANCE_MANAGER, and the PERSON must differ from the first certifier
+    (D-30). Either one alone leaves the control half-built — the same finance
+    manager signing both lines would satisfy the role check and defeat the
+    purpose.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+
+    step = _step(clearance, FINANCE_STEP)
+    if step.certified_by_id is None:
+        raise StepOutOfOrderError(
+            "المصادقة الثانية بعد الأولى — لم يصادق الموظف المالي بعد (BR-074)."
+        )
+    if step.is_done:
+        raise ValidationError("الخطوة المالية مغلقة سلفاً.")
+
+    if getattr(actor, "role", None) != Role.FINANCE_MANAGER:
+        write_audit(
+            action="DENIED_ATTEMPT",
+            entity_type=STEP_ENTITY,
+            entity_id=str(step.pk),
+            reference=clearance.code,
+            summary_ar="محاولة مصادقة ثانية بدور غير المدير المالي",
+            actor=actor,
+            denial_rule="BR-074",
+            changes={"role": getattr(actor, "role", None)},
+            request=request,
+        )
+        raise SecondCertifierRoleError(
+            "المصادقة الثانية على الخطوة المالية للمدير المالي حصراً (BR-074 · Q-14)."
+        )
+
+    # D-30 — refused here for a readable message; C-30 refuses it again at the
+    # database, which is what holds if a caller skips this.
+    assert_second_certifier_differs(step.certified_by_id, getattr(actor, "pk", None))
+
+    # WORKFLOWS §6.7 — the balance may have moved since the first signature.
+    balance = get_account_state(clearance.enrollment).balance
+    if balance != ZERO:
+        _block(actor=actor, clearance=clearance, balance=balance, request=request)
+        raise ClearanceBlockedError(_balance_message(balance))
+
+    return _second_certify(actor=actor, clearance=clearance, balance=balance, request=request)
+
+
+@transaction.atomic
+def _second_certify(
+    *, actor: Any, clearance: Clearance, balance: Decimal, request: Any
+) -> ClearanceStep:
+    step = _step(clearance, FINANCE_STEP)
+    step.balance_at_check = balance
+    step.second_certified_by = actor
+    step.second_certified_at = timezone.now()
+    step.is_done = True
+    step.save()
+
+    write_audit(
+        action="APPROVE",
+        entity_type=STEP_ENTITY,
+        entity_id=str(step.pk),
+        reference=clearance.code,
+        summary_ar=f"المصادقة المالية الثانية — إغلاق الخطوة برصيد {balance}",
+        actor=actor,
+        changes={
+            "event": "CERTIFY_STEP",
+            "step": 2,
+            "order": "second",
+            "balance": str(balance),
+            "first_certifier": step.certified_by_id,
+        },
+        request=request,
+    )
+    return step
+
+
+def complete_handover_step(
+    *, actor: Any, clearance: Clearance, request: Any = None
+) -> ClearanceStep:
+    """Step 3 — the certificate changes hands. Certified by the centre manager."""
+    policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+    _require_previous_done(clearance, 3)
+    return _complete_handover(actor=actor, clearance=clearance, request=request)
+
+
+@transaction.atomic
+def _complete_handover(*, actor: Any, clearance: Clearance, request: Any) -> ClearanceStep:
+    step = _step(clearance, 3)
+    step.certified_by = actor
+    step.certified_at = timezone.now()
+    step.is_done = True
+    step.save()
+
+    write_audit(
+        action="APPROVE",
+        entity_type=STEP_ENTITY,
+        entity_id=str(step.pk),
+        reference=clearance.code,
+        summary_ar="مصادقة الخطوة 3 — تسليم الشهادة",
+        actor=actor,
+        changes={"event": "CERTIFY_STEP", "step": 3},
+        request=request,
+    )
+    return step
+
+
+def close_clearance(*, actor: Any, clearance: Clearance, request: Any = None) -> Clearance:
+    """
+    WORKFLOWS §6.3 C5 — close it, having checked the money AGAIN.
+
+    §6.7 names the failure this guards: the balance moving between step 2's
+    certification and the close. Trusting the number captured earlier would
+    complete a clearance over a live balance, and BR-075 would then let a
+    certificate out to someone who owes money.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+
+    missing = [s.step_number for s in clearance.steps.order_by("step_number") if not s.is_done]
+    if missing:
+        raise StepOutOfOrderError(f"لا تُغلق البراءة وخطواتها غير مكتملة: {missing} (BR-072).")
+
+    balance = get_account_state(clearance.enrollment).balance
+    if balance != ZERO:
+        _block(actor=actor, clearance=clearance, balance=balance, request=request)
+        raise ClearanceBlockedError(
+            f"تغيّر الرصيد بعد المصادقة المالية — {_balance_message(balance)}"
+        )
+
+    return _close(actor=actor, clearance=clearance, request=request)
+
+
+@transaction.atomic
+def _close(*, actor: Any, clearance: Clearance, request: Any) -> Clearance:
+    clearance.status = ClearanceStatus.COMPLETED
+    clearance.completed_at = timezone.now()
+    clearance.save(update_fields=["status", "completed_at", "active_key"])
+
+    write_audit(
+        action="APPROVE",
+        entity_type=ENTITY,
+        entity_id=str(clearance.pk),
+        reference=clearance.code,
+        summary_ar="إغلاق براءة الذمة — الخطوات الثلاث مكتملة",
+        actor=actor,
+        changes={"balance_rechecked": "0.000"},
+        request=request,
+    )
+    return clearance
+
+
+def cancel_clearance(
+    *, actor: Any, clearance: Clearance, reason_ar: str, request: Any = None
+) -> Clearance:
+    """WORKFLOWS §6.3 C6 — cancelled, with a reason, and freeing the enrolment."""
+    policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+
+    if clearance.status == ClearanceStatus.COMPLETED:
+        raise ValidationError("لا تُلغى براءة مكتملة.")
+    if not reason_ar.strip():
+        raise ValidationError("سبب الإلغاء إلزامي.")
+    return _cancel(actor=actor, clearance=clearance, reason_ar=reason_ar.strip(), request=request)
+
+
+@transaction.atomic
+def _cancel(*, actor: Any, clearance: Clearance, reason_ar: str, request: Any) -> Clearance:
+    clearance.status = ClearanceStatus.CANCELLED
+    clearance.cancellation_reason_ar = reason_ar
+    clearance.save(update_fields=["status", "cancellation_reason_ar", "active_key"])
+
+    write_audit(
+        action="REJECT",
+        entity_type=ENTITY,
+        entity_id=str(clearance.pk),
+        reference=clearance.code,
+        summary_ar=f"إلغاء براءة الذمة — {reason_ar}",
+        actor=actor,
+        changes={"reason": reason_ar},
+        request=request,
+    )
+    return clearance
+
+
+def return_credit_at_clearance(
+    *,
+    actor: Any,
+    clearance: Clearance,
+    returned_on: date,
+    code: str,
+    request: Any = None,
+) -> Any:
+    """
+    BR-071 — hand the credit back so step 2 can close.
+
+    ⚠️ **ASSUMPTION.** No approver is named in the documents for this. It runs
+    inside step 2, whose dual certification (BR-074, D-30) is the control that
+    already exists. Recorded as a professional reading, not a client decision.
+    """
+    from apps.billing.services import credit_service
+
+    _require_previous_done(clearance, FINANCE_STEP)
+    step = _step(clearance, FINANCE_STEP)
+    if step.is_done:
+        raise ValidationError("الخطوة المالية مغلقة — لا يُعدَّل ما صودق عليه.")
+
+    record = credit_service.return_credit(
+        actor=actor,
+        enrollment=clearance.enrollment,
+        returned_on=returned_on,
+        reason_ar=f"ردّ رصيد دائن عند براءة الذمة {clearance.code} (BR-071)",
+        code=code,
+        request=request,
+    )
+    step.credit_return = record
+    step.save(update_fields=["credit_return"])
+    return record
+
+
+__all__ = [
+    "FINANCE_STEP",
+    "STEP_NAMES",
+    "ClearanceBlockedError",
+    "DepositNotSettledError",
+    "SecondCertifierRoleError",
+    "StepOutOfOrderError",
+    "cancel_clearance",
+    "certify_finance_step",
+    "close_clearance",
+    "complete_custody_step",
+    "complete_handover_step",
+    "deposit_settlement_state",
+    "open_clearance",
+    "return_credit_at_clearance",
+    "second_certify_finance_step",
+]

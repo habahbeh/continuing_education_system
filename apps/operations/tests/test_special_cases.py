@@ -323,15 +323,17 @@ def test_the_sign_convention_is_the_one_the_demo_contradicted(enrolled) -> None:
 # ---------------------------------------------------------------------------
 # Scope — Sprint 7 is not here
 # ---------------------------------------------------------------------------
-def test_clearance_and_certificates_do_not_exist_yet() -> None:
+def test_the_clearance_half_of_these_rules_now_exists() -> None:
     """
-    The rules above end at clearance, and clearance is Sprint 7.
+    ✅ **Sprint 7 arrived**, so this guard inverted rather than being deleted.
 
-    Named explicitly so "deferred" stays a fact rather than a comment nobody
-    rechecks.
+    Sprint 6 could only record that a dismissal leaves a debt and that a
+    credit balance is owed; the rules SAY those block clearance, and there was
+    no clearance to block. There is now — and `test_clearance.py` asserts the
+    blocking directly, in both directions.
     """
     from django.apps import apps as django_apps
 
     names = {model.__name__ for model in django_apps.get_models()}
-    for deferred in ("Clearance", "ClearanceStep", "Certificate"):
-        assert deferred not in names, f"{deferred} belongs to Sprint 7"
+    for arrived in ("Clearance", "ClearanceStep", "Certificate"):
+        assert arrived in names, f"{arrived} is Sprint 7 scope and should exist"

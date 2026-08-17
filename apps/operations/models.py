@@ -780,3 +780,355 @@ class SpecialCase(models.Model):
 
     def __str__(self) -> str:
         return f"{self.code} — {self.get_case_type_display()}"
+
+
+class ClearanceCaseType(models.TextChoices):
+    GRADUATION = "GRADUATION", _("تخرج")
+    WITHDRAWAL = "WITHDRAWAL", _("انسحاب")
+    DISMISSAL = "DISMISSAL", _("فصل")
+
+
+class ClearanceStatus(models.TextChoices):
+    OPEN = "OPEN", _("مفتوحة")
+    IN_PROGRESS = "IN_PROGRESS", _("قيد التنفيذ")
+    BLOCKED = "BLOCKED", _("موقوفة")
+    COMPLETED = "COMPLETED", _("مكتملة")
+    CANCELLED = "CANCELLED", _("ملغاة")
+
+
+class CertificateStatus(models.TextChoices):
+    ISSUED = "ISSUED", _("صادرة")
+    DELIVERED = "DELIVERED", _("مُسلَّمة")
+    REPLACED = "REPLACED", _("استُبدلت")
+
+
+class GradeSource(models.TextChoices):
+    """BR-078 — MANUAL in v1; CALCULATED when a grades module exists."""
+
+    MANUAL = "MANUAL", _("إدخال يدوي")
+    CALCULATED = "CALCULATED", _("محتسب")
+
+
+class Clearance(models.Model):
+    """
+    Clearing a participant out (DATA_MODEL §7.7, BR-072 … BR-074).
+
+    Three sequential steps on form ``CS Fm 7.18 Rev A``: the centre recovers
+    its property, finance verifies the account is EXACTLY zero, the centre
+    hands over the certificate. Nothing about this is a formality — BR-075
+    makes a completed clearance the precondition for a certificate existing at
+    all, so this is the gate the whole ending runs through.
+    """
+
+    code = ShortCode(unique=True, verbose_name=_("رمز البراءة"))
+    participant = models.ForeignKey(
+        "people.Participant", on_delete=models.PROTECT, related_name="clearances"
+    )
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.PROTECT, related_name="clearances")
+    case_type = ShortCode(choices=ClearanceCaseType.choices, verbose_name=_("الحالة"))
+    opened_on = models.DateField(verbose_name=_("فُتحت في"))
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="clearances_opened"
+    )
+    status = ShortCode(
+        choices=ClearanceStatus.choices,
+        default=ClearanceStatus.OPEN,
+        verbose_name=_("حالة البراءة"),
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason_ar = models.TextField(blank=True, verbose_name=_("سبب الإلغاء"))
+
+    # Same device as MoheSubmission: holds 1 while the clearance is live, NULL
+    # once cancelled. MySQL does not collide NULLs, so a cancelled clearance
+    # never blocks a fresh one — but two live ones cannot exist.
+    active_key = models.PositiveSmallIntegerField(null=True, blank=True, editable=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("براءة ذمة")
+        verbose_name_plural = _("براءات الذمة")
+        ordering = ["-opened_on", "code"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(case_type__in=ClearanceCaseType.values),
+                name="operations_clearance_case_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=ClearanceStatus.values),
+                name="operations_clearance_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status=ClearanceStatus.COMPLETED)
+                | models.Q(completed_at__isnull=False),
+                name="operations_clearance_completed_has_timestamp",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status=ClearanceStatus.CANCELLED)
+                | ~models.Q(cancellation_reason_ar=""),
+                name="operations_clearance_cancelled_has_reason",
+            ),
+            # Two completed clearances on one enrolment would let two
+            # certificates be issued for one course.
+            models.UniqueConstraint(
+                fields=["enrollment", "active_key"],
+                name="operations_clearance_one_live_per_enrollment",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["participant", "status"], name="ops_clr_part_status_idx"),
+            models.Index(fields=["status", "opened_on"], name="ops_clr_status_date_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} — {self.get_status_display()}"
+
+    def save(self, *args: object, **kwargs: object) -> None:
+        self.active_key = None if self.status == ClearanceStatus.CANCELLED else 1
+        super().save(*args, **kwargs)  # type: ignore[arg-type]
+
+
+class ClearanceStep(models.Model):
+    """
+    One of the three steps (DATA_MODEL §7.7).
+
+    Step 2 carries the weight. Its constraints make two things impossible in
+    the database rather than merely discouraged in a service:
+
+    * closing it while the balance is anything other than exactly zero —
+      **in either direction** (C-09, BR-073). A credit balance stops a
+      clearance just as firmly as a debt: the centre owing the participant is
+      not "close enough to settled".
+    * closing it on one signature, or on two signatures from one person
+      (C-29, C-30, BR-074, D-30).
+
+    That ``second_certified_by`` must hold the FINANCE_MANAGER role is
+    enforced in the POLICY layer, not here: a role can be changed on a user
+    afterwards, and a constraint has to stay true for rows written years ago.
+    """
+
+    clearance = models.ForeignKey(Clearance, on_delete=models.CASCADE, related_name="steps")
+    step_number = models.PositiveSmallIntegerField(verbose_name=_("رقم الخطوة"))
+    name_ar = models.CharField(max_length=255, verbose_name=_("اسم الخطوة"))
+
+    #: Step 1 — what the centre lent out and wants back.
+    custody_items = models.JSONField(default=list, blank=True, verbose_name=_("العُهد"))
+
+    #: Step 2 — positive = the participant owes us · negative = we owe them.
+    balance_at_check = Money(null=True, blank=True, verbose_name=_("الرصيد عند الفحص"))
+
+    deposit_return_amount = Money(null=True, blank=True, verbose_name=_("مبلغ إعادة التأمين"))
+    deposit_return = models.ForeignKey(
+        "billing.DepositReturn",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="clearance_steps",
+    )
+    deposit_forfeiture = models.ForeignKey(
+        "billing.DepositForfeiture",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="clearance_steps",
+    )
+    #: BR-071 — the credit handed back so the balance could reach zero.
+    credit_return = models.ForeignKey(
+        "billing.CreditReturn",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="clearance_steps",
+    )
+
+    certified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="clearance_steps_certified",
+    )
+    certified_at = models.DateTimeField(null=True, blank=True)
+    second_certified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="clearance_steps_second_certified",
+    )
+    second_certified_at = models.DateTimeField(null=True, blank=True)
+    is_done = models.BooleanField(default=False, verbose_name=_("مكتملة"))
+
+    class Meta:
+        verbose_name = _("خطوة براءة ذمة")
+        verbose_name_plural = _("خطوات براءة الذمة")
+        ordering = ["clearance", "step_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["clearance", "step_number"], name="operations_clearance_step_unique"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(step_number__gte=1) & models.Q(step_number__lte=3),
+                name="operations_clearance_step_number_range",
+            ),
+            # C-09 · BR-073 — zero, in either direction, or the step does not
+            # close. This is the constraint the demo had no equivalent of.
+            models.CheckConstraint(
+                condition=~models.Q(step_number=2)
+                | models.Q(is_done=False)
+                | models.Q(balance_at_check=0),
+                name="operations_clearance_step_finance_needs_zero_balance",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(is_done=False) | models.Q(certified_by__isnull=False),
+                name="operations_clearance_step_done_has_certifier",
+            ),
+            # C-29 · BR-074 — one signature never closes the financial step.
+            models.CheckConstraint(
+                condition=~models.Q(step_number=2)
+                | models.Q(is_done=False)
+                | models.Q(second_certified_by__isnull=False),
+                name="operations_clearance_step_finance_needs_second_cert",
+            ),
+            # C-30 · D-30 — two signatures from one person is a single control
+            # wearing a costume.
+            models.CheckConstraint(
+                condition=models.Q(second_certified_by__isnull=True)
+                | ~models.Q(second_certified_by=models.F("certified_by")),
+                name="operations_clearance_step_second_certifier_differs",
+            ),
+            # Q-01 — deposit settlement belongs to the financial step alone.
+            models.CheckConstraint(
+                condition=models.Q(deposit_return_amount__isnull=True) | models.Q(step_number=2),
+                name="operations_clearance_step_deposit_fields_on_step_2",
+            ),
+            # BR-097 — a deposit is returned or forfeited, never both.
+            models.CheckConstraint(
+                condition=models.Q(deposit_return__isnull=True)
+                | models.Q(deposit_forfeiture__isnull=True),
+                name="operations_clearance_step_not_return_and_forfeit",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(credit_return__isnull=True) | models.Q(step_number=2),
+                name="operations_clearance_step_credit_return_on_step_2",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["clearance", "is_done"], name="ops_clrstep_done_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.clearance_id}/{self.step_number} — {self.name_ar}"
+
+
+class Certificate(models.Model):
+    """
+    The certificate (DATA_MODEL §7.8, BR-075 … BR-079).
+
+    🐞 The demo issued certificate ``2026000002`` as a REPLACEMENT with
+    neither a clearance nor an original certificate to replace — a complete
+    way around BR-075. ``operations_certificate_clearance_or_original`` makes
+    that unrepresentable: either a completed clearance, or an original this
+    one replaces.
+
+    Programme name, duration and hours are SNAPSHOTS (ADR-012). A certificate
+    is a document that leaves the building and is read years later; the
+    catalogue behind it will have moved on.
+
+    ``grade`` carries NO check constraint. BR-078 lists four grades today, but
+    the vocabulary belongs to the centre — it lives in the ``certificate_grades``
+    setting, following the same decision taken for qualifications and cities
+    (Q-31, client instruction 2026-08-15).
+    """
+
+    certificate_number = models.CharField(max_length=10, unique=True, verbose_name=_("رقم الشهادة"))
+    participant = models.ForeignKey(
+        "people.Participant", on_delete=models.PROTECT, related_name="certificates"
+    )
+    enrollment = models.ForeignKey(
+        Enrollment, on_delete=models.PROTECT, related_name="certificates"
+    )
+    clearance = models.ForeignKey(
+        Clearance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="certificates",
+        help_text=_("إلزامية إلا لبدل الفاقد (BR-075 · C-08)"),
+    )
+
+    program_name_snapshot = models.CharField(max_length=255, verbose_name=_("اسم البرنامج"))
+    duration_text = models.CharField(max_length=150, blank=True, verbose_name=_("المدة"))
+    training_hours = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name=_("عدد الساعات")
+    )
+
+    grade = ShortCode(verbose_name=_("التقدير"))
+    grade_source = ShortCode(
+        choices=GradeSource.choices,
+        default=GradeSource.MANUAL,
+        verbose_name=_("مصدر التقدير"),
+    )
+
+    issued_on = models.DateField(verbose_name=_("تاريخ الإصدار"))
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="certificates_issued"
+    )
+
+    is_replacement = models.BooleanField(default=False, verbose_name=_("بدل فاقد"))
+    replaces = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="replaced_by"
+    )
+    #: BR-038 — the replacement fee, so "was it collected" is answered by a
+    #: link rather than by guessing which extra fee on the account meant this.
+    replacement_fee_line = models.ForeignKey(
+        "billing.ChargeLine",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="replacement_certificates",
+    )
+
+    status = ShortCode(
+        choices=CertificateStatus.choices,
+        default=CertificateStatus.ISSUED,
+        verbose_name=_("الحالة"),
+    )
+    delivered_on = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("شهادة")
+        verbose_name_plural = _("الشهادات")
+        ordering = ["-issued_on", "certificate_number"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=CertificateStatus.values),
+                name="operations_certificate_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(grade_source__in=GradeSource.values),
+                name="operations_certificate_grade_source_valid",
+            ),
+            # C-20 · BR-076 — ten digits, year plus sequence.
+            models.CheckConstraint(
+                condition=models.Q(certificate_number__regex=r"^[0-9]{10}$"),
+                name="operations_certificate_number_ten_digits",
+            ),
+            # C-08 — the demo's replacement loophole, closed.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(is_replacement=False, clearance__isnull=False)
+                    | models.Q(is_replacement=True, replaces__isnull=False)
+                ),
+                name="operations_certificate_clearance_or_original",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["participant"], name="ops_cert_participant_idx"),
+            models.Index(fields=["enrollment"], name="ops_cert_enrollment_idx"),
+            models.Index(fields=["status", "issued_on"], name="ops_cert_status_date_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.certificate_number} — {self.participant_id}"

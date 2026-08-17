@@ -154,7 +154,7 @@ def test_no_business_model_exists_yet() -> None:
 
     2A allowed no business model; 2B added people.Participant; 3 the
     catalogue; 4 billing and the till; 5 partners and settlements; 6 the rest
-    of the participant lifecycle. Clearance, certificates, expenses,
+    of the participant lifecycle; 7 clearance and certificates. Expenses,
     reporting and the archive still belong to later sprints, and a model that
     appears early is scope that was never approved.
     """
@@ -178,6 +178,8 @@ def test_no_business_model_exists_yet() -> None:
             "Discount",
             "ExtraFee",
             "Refund",
+            # Sprint 7 — BR-071's "independent financial movement".
+            "CreditReturn",
         },
         "cashbox": {
             "PaymentMethod",
@@ -196,6 +198,10 @@ def test_no_business_model_exists_yet() -> None:
             "EnrollmentStatusHistory",
             "Transfer",
             "SpecialCase",
+            # Sprint 7 — the ending: clearance, its steps, the certificate.
+            "Clearance",
+            "ClearanceStep",
+            "Certificate",
         },
         # Sprint 3 — the catalogue and pricing.
         "catalog": {
@@ -231,17 +237,17 @@ def test_no_business_model_exists_yet() -> None:
         if label in business_apps or (label in allowed and model.__name__ not in allowed[label]):
             offenders.append(f"{label}.{model.__name__}")
 
-    assert not offenders, "Models outside the Sprint 6 scope: " + ", ".join(offenders)
+    assert not offenders, "Models outside the Sprint 7 scope: " + ", ".join(offenders)
 
 
 def test_later_sprint_models_do_not_exist() -> None:
     """
     The guard that keeps a PREREQUISITE from becoming a land grab.
 
-    ✅ Sprint 6 delivered the rest of operations, so the four models this
-    used to name have moved into the allowed set above. What remains here is
-    everything Sprint 7 and later own — named individually, because a list of
-    absences is only worth having if it is specific.
+    ✅ Sprint 7 delivered clearance and certificates, so those have moved into
+    the allowed set above too. What remains is everything Sprint 8 and later
+    own — named individually, because a list of absences is only worth having
+    if it is specific.
     """
     from django.apps import apps as django_apps
 
@@ -251,9 +257,6 @@ def test_later_sprint_models_do_not_exist() -> None:
         # CREATES the credit balance a cheaper transfer leaves behind; only
         # returning it (BR-071) waits for clearance.
         "TaxRule",
-        "Clearance",
-        "ClearanceStep",
-        "Certificate",
         "OpeningBalance",
         "EnrollmentApplication",
         # The expense side of the partner relationship (DATA_MODEL §10.1).
