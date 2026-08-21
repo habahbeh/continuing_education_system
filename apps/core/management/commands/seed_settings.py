@@ -103,6 +103,14 @@ SEED: list[tuple[str, Any, str, str]] = [
     ("payment_overdue_days", 30, I, "Q-16 (مفتوح): مهلة اعتبار المشارك متأخراً."),
     ("registration_fee_center_default", "50.000", D, "BR-009: رسم تسجيل طالب المركز."),
     ("registration_fee_university_default", "15.000", D, "BR-009: رسم تسجيل الطالب الجامعي."),
+    (
+        "clearance_second_certifier_role",
+        "FINANCE_MANAGER",
+        S,
+        "BR-074 · §6.4: دور الموقّع الثاني على الخطوة المالية — «المحاسب ثم المدير المالي». "
+        "إعداد لا ثابت في الكود، فتغيير الدور قرار مؤرَّخ لا تعديل برمجي (Q-14). "
+        "شرط اختلاف الشخص عن الموقّع الأول يبقى قيداً في القاعدة ولا يُعدَّل بإعداد (C-30 · D-30).",
+    ),
     # --- Local authentication policy (Q-12, Sprint 2A) --------------------
     # The thresholds live here rather than in settings.py because they are
     # business decisions, not deployment configuration: raising the attempt

@@ -24,6 +24,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.billing.services import discount_service
 from apps.billing.services.account_service import ZERO
 from apps.core.exceptions import ImmutableRecordError
 from apps.core.services.audit_service import write_audit
@@ -225,7 +226,14 @@ def _build_claim(
     claim.excluded_registration = excluded["registration"]
     claim.excluded_consumables = excluded["consumables"]
     claim.excluded_deposits = excluded["deposits"]
-    claim.discount_partner_burden = ZERO
+    # §5.1 — the partner's share of any discount is ALREADY inside
+    # gross_collected: a discounted participant paid less, so less was
+    # allocated, so a percentage partner collected less. Subtracting their
+    # burden again here would deduct the same discount twice, which is the
+    # defect C-02 records in the demo. Derived rather than assumed so the
+    # reasoning lives in one place and moves if a compensating mechanism is
+    # ever built (discount_service.claim_base_adjustment).
+    claim.discount_partner_burden = discount_service.claim_base_adjustment(agreement=agreement)
     claim.distribution_base = (
         claim.gross_collected
         - claim.excluded_registration
@@ -250,6 +258,10 @@ def _build_claim(
         "registration": agreement.exclude_registration_fee,
         "consumables": agreement.exclude_consumables,
         "deposits": agreement.exclude_deposits,
+        # Recorded so a reader of the claim can see which split governed the
+        # period, without inferring it from an agreement that may since have
+        # been superseded (ADR-012).
+        "discount_split_mode": agreement.discount_split_mode,
     }
     claim.consumables_cap_snapshot = agreement.consumables_cap_per_student
     claim.save()

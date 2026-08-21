@@ -119,4 +119,71 @@ def close_name_list(
     return obligation
 
 
-__all__ = ["close_name_list", "exposure_for", "name_list_deadline"]
+def record_refund_recovery(
+    *,
+    actor: Any,
+    refund: Any,
+    amount: Decimal,
+    occurred_on: date,
+    request: Any = None,
+) -> PartnerObligation:
+    """
+    Record what a partner must return after a refund (§5.3, تناغم بند 4).
+
+    Called by ``refund_service`` only when the partner has ALREADY been paid
+    for the enrolment. A refund on an enrolment not yet claimed needs no
+    obligation at all: the reversal lowers what was collected, and the partner
+    simply never receives a share of it. Raising one anyway would recover the
+    same dinar twice.
+
+    Pinned to the agreement that produced it. The Q-08 default is partner-wide
+    recovery, but a refund arises under one specific contract and the
+    participant, the cohort and the rate all belong to it — so the tighter
+    scope is the accurate one, exactly as for an advance clawback.
+    """
+    enrollment = refund.enrollment
+    cohort = enrollment.cohort
+    agreement = getattr(cohort, "agreement", None)
+    if agreement is None:  # pragma: no cover - refund_service returns 0 first
+        raise ValidationError("لا اتفاقية على الدفعة — لا استرجاع من الشريك.")
+
+    obligation = PartnerObligation.objects.create(
+        code=f"OBL-RF-{refund.code}"[:32],
+        partner=agreement.partner,
+        restricted_to_agreement=agreement,
+        obligation_type=ObligationType.REFUND_RECOVERY,
+        cohort=cohort,
+        amount=amount,
+        statement_reference=(
+            f"استرجاع حصة الشريك من الاسترداد {refund.code} — "
+            f"{enrollment.code} · {refund.amount} × {agreement.percent_rate}%"
+        ),
+        occurred_on=occurred_on,
+        created_by=actor,
+    )
+
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(obligation.pk),
+        reference=obligation.code,
+        summary_ar=f"استرجاع حصة شريك {amount} عن الاسترداد {refund.code}",
+        actor=actor,
+        changes={
+            "amount": str(amount),
+            "refund": refund.code,
+            "refund_amount": str(refund.amount),
+            "enrollment": enrollment.code,
+            "restricted_to_agreement": agreement.agreement_number,
+        },
+        request=request,
+    )
+    return obligation
+
+
+__all__ = [
+    "close_name_list",
+    "exposure_for",
+    "name_list_deadline",
+    "record_refund_recovery",
+]

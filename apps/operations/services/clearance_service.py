@@ -36,6 +36,7 @@ from django.utils import timezone
 
 from apps.billing.services.account_service import ZERO, get_account_state
 from apps.core.services.audit_service import write_audit
+from apps.core.services.settings_service import get_setting
 from apps.operations.models import (
     Clearance,
     ClearanceCaseType,
@@ -58,6 +59,19 @@ STEP_NAMES = {
 }
 
 FINANCE_STEP = 2
+
+#: BR-074 · §6.4 — which role signs second. A SETTING rather than a literal:
+#: §8 lists five roles and §6.4 names a sixth actor ("المحاسب ثم المدير
+#: المالي"), so the centre may need to move this without a code change. The
+#: DEFAULT stays FINANCE_MANAGER because that is what §6.4 names.
+SECOND_CERTIFIER_ROLE_KEY = "clearance_second_certifier_role"
+
+
+def second_certifier_role(*, as_of: date) -> str:
+    """The role authorised to countersign the financial step."""
+    return str(
+        get_setting(SECOND_CERTIFIER_ROLE_KEY, as_of=as_of, default=Role.FINANCE_MANAGER)
+    ).upper()
 
 
 class ClearanceBlockedError(ValidationError):
@@ -349,11 +363,15 @@ def second_certify_finance_step(
     """
     Step 2, second signature — the finance manager, and only them (BR-074).
 
-    Two checks that look similar and are not: the ROLE must be
-    FINANCE_MANAGER, and the PERSON must differ from the first certifier
-    (D-30). Either one alone leaves the control half-built — the same finance
-    manager signing both lines would satisfy the role check and defeat the
-    purpose.
+    Two checks that look similar and are not: the ROLE must match
+    ``clearance_second_certifier_role`` (seeded FINANCE_MANAGER), and the
+    PERSON must differ from the first certifier (D-30). Either one alone
+    leaves the control half-built — the same finance manager signing both
+    lines would satisfy the role check and defeat the purpose.
+
+    The role is configurable; the different-person rule is not. One is a
+    question about the centre's org chart, the other is what makes this a
+    control at all.
     """
     policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
 
@@ -365,20 +383,22 @@ def second_certify_finance_step(
     if step.is_done:
         raise ValidationError("الخطوة المالية مغلقة سلفاً.")
 
-    if getattr(actor, "role", None) != Role.FINANCE_MANAGER:
+    required_role = second_certifier_role(as_of=timezone.now().date())
+    if getattr(actor, "role", None) != required_role:
         write_audit(
             action="DENIED_ATTEMPT",
             entity_type=STEP_ENTITY,
             entity_id=str(step.pk),
             reference=clearance.code,
-            summary_ar="محاولة مصادقة ثانية بدور غير المدير المالي",
+            summary_ar=f"محاولة مصادقة ثانية بدور غير {required_role}",
             actor=actor,
             denial_rule="BR-074",
-            changes={"role": getattr(actor, "role", None)},
+            changes={"role": getattr(actor, "role", None), "required_role": required_role},
             request=request,
         )
         raise SecondCertifierRoleError(
-            "المصادقة الثانية على الخطوة المالية للمدير المالي حصراً (BR-074 · Q-14)."
+            f"المصادقة الثانية على الخطوة المالية للدور {required_role} حصراً "
+            f"(BR-074 · Q-14 · الإعداد {SECOND_CERTIFIER_ROLE_KEY})."
         )
 
     # D-30 — refused here for a readable message; C-30 refuses it again at the
@@ -567,6 +587,7 @@ def return_credit_at_clearance(
 
 __all__ = [
     "FINANCE_STEP",
+    "SECOND_CERTIFIER_ROLE_KEY",
     "STEP_NAMES",
     "ClearanceBlockedError",
     "DepositNotSettledError",
@@ -580,5 +601,6 @@ __all__ = [
     "deposit_settlement_state",
     "open_clearance",
     "return_credit_at_clearance",
+    "second_certifier_role",
     "second_certify_finance_step",
 ]
