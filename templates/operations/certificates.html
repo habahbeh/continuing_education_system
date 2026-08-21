@@ -32,6 +32,7 @@
           <td><span class="chip">{{ c.status_display }}</span>
               {% if c.delivered_on %}<br><small class="muted num">{{ c.delivered_on }}</small>{% endif %}</td>
           <td>
+            <a class="btn2" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "طباعة" %}</a>
             {% if can_create and c.status == "ISSUED" %}
               <form method="post">{% csrf_token %}
                 <input type="hidden" name="action" value="deliver">

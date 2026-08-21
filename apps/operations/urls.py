@@ -21,4 +21,15 @@ urlpatterns = [
     path("operations/clearance/", views.clearances_view, name="clearances"),
     path("operations/clearance/<str:code>/", views.clearance_detail_view, name="clearance-detail"),
     path("operations/certificates/", views.certificates_view, name="certificates"),
+    # Printed documents (Sprint 8C-1)
+    path(
+        "operations/clearance/<str:code>/print/",
+        views.clearance_print_view,
+        name="clearance-print",
+    ),
+    path(
+        "operations/certificates/<str:number>/print/",
+        views.certificate_print_view,
+        name="certificate-print",
+    ),
 ]

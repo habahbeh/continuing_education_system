@@ -56,6 +56,46 @@
 
   .messages     { @apply mb-4; }
 
+  /* --- Sprint 8C-1: printed documents ---------------------------------
+   * Browser print, no PDF dependency. §7 requires a manual signature and
+   * two hand-applied stamps, so the destination is paper — a generated PDF
+   * would add a dependency to reach the same printer.
+   * RTL RULE still applies: logical properties only (A-06). */
+  .doc          { @apply mx-auto bg-white text-ink; max-width: 21cm; }
+  .doc-head     { @apply flex items-start gap-4 border-b-2 border-ink pb-3 mb-5; }
+  .doc-head .org{ @apply font-extrabold text-lg leading-tight; }
+  .doc-head .org small { @apply block font-normal text-xs text-ink-3; }
+  .doc-head .meta { @apply ms-auto text-xs text-ink-3 text-start; }
+  .doc h1       { @apply text-xl font-black text-center my-4; }
+  .doc-section  { @apply border border-line rounded-lg p-4 mb-4; }
+  .doc-section h2 { @apply text-sm font-extrabold mb-3 pb-2 border-b border-line; }
+  .doc-grid     { @apply grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2 text-sm; }
+  .doc-grid dt  { @apply text-ink-3 font-bold; }
+  .doc-grid dd  { @apply m-0 font-bold; }
+  .doc-tbl      { @apply w-full border-collapse text-sm; }
+  .doc-tbl th   { @apply text-start bg-surface-2 border border-line px-2 py-1.5 font-bold; }
+  .doc-tbl td   { @apply border border-line px-2 py-1.5; }
+  .sign-row     { @apply grid gap-6 mt-8; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+  .sign-box     { @apply text-center text-xs text-ink-3; }
+  .sign-line    { @apply border-b border-ink mb-2; height: 3rem; }
+  .stamp-box    { @apply text-center text-xs text-ink-3; }
+  .stamp-ring   { @apply mx-auto mb-2 rounded-full border border-dashed border-line-2;
+                  width: 5rem; height: 5rem; }
+  .doc-note     { @apply text-xs text-ink-3 border-t border-line pt-3 mt-6; }
+  .doc-warn     { @apply text-xs border border-warn/40 bg-warn-soft text-warn rounded-lg px-3 py-2 mb-4; }
+  .no-print     { @apply mb-4; }
+
+  @media print {
+    .topbar, .sidebar, .footer, .no-print, .messages { display: none !important; }
+    .layout, .content { display: block !important; padding: 0 !important; margin: 0 !important; }
+    body { background: #fff !important; }
+    .doc { max-width: none; }
+    .doc-section, .sign-row, tr { break-inside: avoid; }
+    .doc-head { position: running(header); }
+    @page { size: A4; margin: 14mm 12mm; }
+  }
+
+
   /* --- Sprint 8B: the shell ------------------------------------------- */
   .layout       { @apply flex flex-1 items-stretch; }
   .sidebar      { @apply w-64 shrink-0 border-e border-line bg-white py-3 overflow-y-auto; }

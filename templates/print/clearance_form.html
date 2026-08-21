@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% comment %}
+  براءة الذمة — §6.4.
+  ⚠ Requirements-based. The centre's blank CS Fm 7.18 Rev A was not available,
+  so this carries what §6.4 says the form records, in that order. The warning
+  block below prints until someone verifies the layout and flips document_mode.
+{% endcomment %}
+{% block content %}
+<div class="no-print">
+  <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+  <a class="btn2" href="{% url 'operations:clearance-detail' clearance.code %}">{% translate "رجوع" %}</a>
+</div>
+
+<div class="doc">
+  {% include "print/_doc_head.html" with chrome=clearance.chrome form_code=clearance.labels.form_code reference=clearance.code %}
+
+  {% if not clearance.chrome.is_verified and clearance.chrome.unverified_note_ar %}
+    <div class="doc-warn">{{ clearance.chrome.unverified_note_ar }}</div>
+  {% endif %}
+
+  <h1>{{ clearance.labels.title_ar }}</h1>
+
+  <div class="doc-section">
+    <h2>{% translate "بيانات المشارك" %}</h2>
+    <dl class="doc-grid">
+      <dt>{% translate "الاسم" %}</dt><dd>{{ clearance.participant_name }}</dd>
+      <dt>{% translate "الرقم الجامعي" %}</dt><dd dir="ltr">{{ clearance.participant_number }}</dd>
+      <dt>{% translate "البرنامج" %}</dt><dd>{{ clearance.program_name }}</dd>
+      <dt>{% translate "التسجيل" %}</dt><dd dir="ltr">{{ clearance.enrollment_code }}</dd>
+      <dt>{% translate "الحالة" %}</dt><dd>{{ clearance.case_type_display }}</dd>
+      <dt>{% translate "تاريخ الفتح" %}</dt><dd>{{ clearance.opened_on }}</dd>
+      <dt>{% translate "وضع البراءة" %}</dt><dd>{{ clearance.status_display }}</dd>
+    </dl>
+  </div>
+
+  {% for step in clearance.steps %}
+    <div class="doc-section">
+      <h2>{{ step.step_number }} — {{ step.name_ar }}
+        {% if step.is_done %}<span class="chip ok">{% translate "مكتملة" %}</span>
+        {% else %}<span class="chip">{% translate "غير مكتملة" %}</span>{% endif %}
+      </h2>
+
+      {% if step.step_number == 1 %}
+        <table class="doc-tbl">
+          <thead><tr><th>{% translate "العهدة" %}</th><th>{% translate "مُسترجَعة" %}</th></tr></thead>
+          <tbody>
+            {% for item in step.custody_items %}
+              <tr><td>{{ item.name_ar }}</td><td>{% if item.returned %}✔{% else %}—{% endif %}</td></tr>
+            {% empty %}
+              {% for name in clearance.standard_custody_items %}
+                <tr><td>{{ name }}</td><td>—</td></tr>
+              {% endfor %}
+            {% endfor %}
+          </tbody>
+        </table>
+
+      {% elif step.step_number == 2 %}
+        <dl class="doc-grid">
+          <dt>{% translate "الرصيد عند الفحص" %}</dt>
+          <dd>{% if step.balance_at_check is not None %}{{ step.balance_at_check }}{% else %}—{% endif %}</dd>
+          {% if clearance.deposit.applies %}
+            <dt>{% translate "التأمين المقبوض" %}</dt><dd>{{ clearance.deposit.collected }}</dd>
+            <dt>{% translate "المُسوّى" %}</dt><dd>{{ clearance.deposit.settled }}</dd>
+          {% endif %}
+          <dt>{% translate "المصادقة الأولى" %}</dt>
+          <dd>{{ step.certified_by|default:"—" }}{% if step.certified_at %} · {{ step.certified_at|date:"Y-m-d" }}{% endif %}</dd>
+          <dt>{% translate "المصادقة الثانية" %}</dt>
+          <dd>{{ step.second_certified_by|default:"—" }}{% if step.second_certified_at %} · {{ step.second_certified_at|date:"Y-m-d" }}{% endif %}</dd>
+        </dl>
+
+      {% else %}
+        <dl class="doc-grid">
+          <dt>{% translate "مستلم الشهادة" %}</dt><dd>{{ step.participant_ack_name|default:"—" }}</dd>
+          <dt>{% translate "تاريخ الاستلام" %}</dt>
+          <dd>{% if step.participant_ack_at %}{{ step.participant_ack_at|date:"Y-m-d" }}{% else %}—{% endif %}</dd>
+          <dt>{% translate "مدير المركز" %}</dt><dd>{{ step.certified_by|default:"—" }}</dd>
+        </dl>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  <div class="sign-row">
+    {% for label in clearance.labels.signature_labels %}
+      <div class="sign-box"><div class="sign-line"></div>{{ label }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="doc-note">{{ clearance.chrome.footer_ar }}</div>
+</div>
+{% endblock %}

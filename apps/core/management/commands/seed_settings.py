@@ -103,6 +103,87 @@ SEED: list[tuple[str, Any, str, str]] = [
     ("payment_overdue_days", 30, I, "Q-16 (مفتوح): مهلة اعتبار المشارك متأخراً."),
     ("registration_fee_center_default", "50.000", D, "BR-009: رسم تسجيل طالب المركز."),
     ("registration_fee_university_default", "15.000", D, "BR-009: رسم تسجيل الطالب الجامعي."),
+    # --- Printed documents (Sprint 8C-1) ---------------------------------
+    # The centre's own blank forms were NOT in the client folder — it carries
+    # the signed agreements and the 2026 price list and no form of the
+    # centre's. So the layout follows §6.4 and §7, and every word of it is a
+    # setting, because the first thing that happens when the real form arrives
+    # is that half of these turn out to be worded differently.
+    (
+        "document_mode",
+        "REQUIREMENTS_BASED",
+        S,
+        "REQUIREMENTS_BASED: التخطيط مبنيّ على §6.4 و§7 ولم يُقابَل بنموذج المركز الأصلي، "
+        "فيطبع كل مستند حاشية تقول ذلك. يُحوَّل إلى OFFICIAL بعد مقابلة المخرَج بالنموذج "
+        "المعتمد فعلاً — وحتى ذلك الحين لا يدّعي أي مستند أنه ما لم يُتحقَّق منه.",
+    ),
+    ("document_university_ar", "جامعة البترا", S, "ترويسة المستندات — اسم الجامعة."),
+    (
+        "document_center_ar",
+        "مركز التعليم المستمر وخدمة المجتمع",
+        S,
+        "ترويسة المستندات — اسم المركز.",
+    ),
+    (
+        "document_footer_ar",
+        "هذا المستند صادر عن نظام إدارة مركز التعليم المستمر — جامعة البترا.",
+        S,
+        "حاشية تُطبع أسفل كل مستند.",
+    ),
+    (
+        "document_unverified_note_ar",
+        "تخطيط هذا المستند مبنيّ على وثيقة المتطلبات ولم يُقابَل بعد بالنموذج الورقي "
+        "المعتمد لدى المركز.",
+        S,
+        "تُطبع ما دام document_mode = REQUIREMENTS_BASED وتختفي عند OFFICIAL.",
+    ),
+    (
+        "clearance_form_code",
+        "CS Fm 7.18 Rev A",
+        S,
+        "§6.4 تسمّي النموذج بهذا الرمز. صحة الرمز لا تعني صحة التخطيط — لذلك document_mode.",
+    ),
+    ("clearance_form_title_ar", "نموذج براءة ذمة", S, "عنوان نموذج براءة الذمة."),
+    (
+        "clearance_custody_items",
+        '["هوية المركز","بطاقة المواصلات"]',
+        S,
+        "§6.4 الخطوة 1 — القائمة المعيارية للعُهد المُسترجَعة. أُجّلت من Sprint 8B-2 "
+        "وهبطت هنا مع النموذج الذي تنتمي إليه. قائمة فارغة تعني «لا قائمة معيارية» "
+        "فيُدخل الموظف ما استُرجع، وهي حالة مسموحة لا خطأ.",
+    ),
+    (
+        "clearance_signature_labels",
+        '["توقيع المشارك","مدير المركز","المحاسب","المدير المالي"]',
+        S,
+        "§6.4 — أسطر التواقيع على النموذج المطبوع.",
+    ),
+    ("certificate_title_ar", "شهادة مشاركة", S, "§7 — عنوان الشهادة."),
+    (
+        "certificate_body_ar",
+        "تشهد جامعة البترا — مركز التعليم المستمر وخدمة المجتمع — بأن المشارك المذكور "
+        "أعلاه قد أتمّ متطلبات البرنامج المبيَّن أدناه بنجاح.",
+        S,
+        "§7 — نصّ الشهادة. الشهادة تصدرها الجامعة لا الشريك.",
+    ),
+    (
+        "certificate_replacement_note_ar",
+        "بدل فاقد — صدرت هذه الشهادة بدلاً من الشهادة المذكورة رقمها أدناه.",
+        S,
+        "BR-038 — العبارة التي تميّز بدل الفاقد عن الأصل على الورق.",
+    ),
+    (
+        "certificate_signature_labels",
+        '["مدير المركز","رئيس الجامعة"]',
+        S,
+        "§7 — «توقيع وختم يدوي»: تُطبع المواضع فارغة لتُوقَّع باليد.",
+    ),
+    (
+        "certificate_stamp_labels",
+        '["ختم الجامعة","ختم وزارة التعليم العالي"]',
+        S,
+        "§7 — «+ ختم الوزارة». مواضع الأختام تُطبع فارغة ولا يضع النظام ختماً.",
+    ),
     (
         "clearance_custody_role",
         "CENTER_MANAGER",

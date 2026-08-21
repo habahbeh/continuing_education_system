@@ -27,6 +27,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.core.services.audit_service import write_audit
 from apps.core.services.numbering_service import ensure_sequence, next_number
@@ -447,6 +448,43 @@ def issuable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tupl
     ]
 
 
+def certificate_document(*, actor: Any, number: str, request: Any = None) -> dict[str, Any]:
+    """
+    Everything the printed certificate shows (§7).
+
+    ⚠️ Built from the REQUIREMENTS, not from the centre's blank certificate —
+    which was not in the client folder. The chrome carries the marker that
+    says so.
+
+    §7 lists exactly what the document contains: participant name, course
+    name, course duration, hours, GRADE, number, date. All seven are on the
+    ``Certificate`` row already, snapshotted at issue (ADR-012), so printing
+    one issued years ago shows the programme as it was named THEN.
+
+    The signature and both stamps are applied BY HAND — §7 says so — which is
+    why what prints is their labelled empty space. The system does not draw a
+    stamp it has no authority to apply.
+
+    ``clearance`` is carried through so the printed document can name the
+    clearance that authorised it (BR-075). A replacement carries none of its
+    own by design (C-08); it names the ORIGINAL, which is what proves the
+    clearance happened.
+    """
+    from apps.core.services import document_settings
+
+    policy.require(actor, Screen.CERTIFICATES, Action.VIEW, request=request)
+
+    rows = list_certificates(actor=actor, request=request)
+    detail = next((r for r in rows if r["certificate_number"] == number), None)
+    if detail is None:
+        raise Certificate.DoesNotExist(number)
+
+    as_of = timezone.now().date()
+    detail["chrome"] = document_settings.chrome(as_of=as_of)
+    detail["labels"] = document_settings.certificate_labels(as_of=as_of)
+    return detail
+
+
 __all__ = [
     "CERTIFICATE_SCOPE",
     "GRADES_KEY",
@@ -455,6 +493,7 @@ __all__ = [
     "OriginalCertificateRequiredError",
     "ReplacementFeeNotCollectedError",
     "available_grades",
+    "certificate_document",
     "certificate_instance",
     "completed_clearance_for",
     "deliver",

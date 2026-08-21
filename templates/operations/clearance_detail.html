@@ -2,6 +2,9 @@
 {% load i18n %}
 {% block content %}
 <h1>{{ title }} <span dir="ltr">{{ clearance.code }}</span></h1>
+<div class="toolbar">
+  <a class="btn2" href="{% url 'operations:clearance-print' clearance.code %}">{% translate "طباعة النموذج" %}</a>
+</div>
 
 <div class="card2"><div class="card2-body">
   <dl class="dl">
@@ -109,6 +112,7 @@
         {% elif can_handover %}
           <form method="post">{% csrf_token %}
             <input type="hidden" name="action" value="handover">
+            {% include "partials/_form.html" with form=handover_form %}
             <button class="btn2 primary" type="submit">{% translate "تسجيل تسليم الشهادة" %}</button>
           </form>
         {% else %}

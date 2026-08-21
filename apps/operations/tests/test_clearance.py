@@ -157,7 +157,9 @@ def test_steps_cannot_be_taken_out_of_order(settled, manager, finance) -> None:
     clearance = _open(manager, settled())
 
     with pytest.raises(clearance_service.StepOutOfOrderError, match="الخطوة 3"):
-        clearance_service.complete_handover_step(actor=manager, clearance=clearance)
+        clearance_service.complete_handover_step(
+            actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+        )
 
     with pytest.raises(clearance_service.StepOutOfOrderError, match="الخطوة 2"):
         clearance_service.certify_finance_step(actor=finance, clearance=clearance)
@@ -257,7 +259,9 @@ def test_one_signature_does_not_close_the_financial_step(settled, manager, finan
     assert step.is_done is False
 
     with pytest.raises(clearance_service.StepOutOfOrderError):
-        clearance_service.complete_handover_step(actor=manager, clearance=clearance)
+        clearance_service.complete_handover_step(
+            actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+        )
 
 
 def test_the_database_refuses_a_single_signature_close(settled, manager, finance) -> None:
@@ -368,7 +372,9 @@ def test_a_balance_that_moves_after_certification_stops_the_close(
     _through_step_1(manager, clearance)
     clearance_service.certify_finance_step(actor=finance, clearance=clearance)
     clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
-    clearance_service.complete_handover_step(actor=manager, clearance=clearance)
+    clearance_service.complete_handover_step(
+        actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+    )
 
     charge_service.create_charge_line(
         actor=registrar,
@@ -392,7 +398,9 @@ def test_a_clean_clearance_closes(settled, manager, finance, finance_manager) ->
     _through_step_1(manager, clearance)
     clearance_service.certify_finance_step(actor=finance, clearance=clearance)
     clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
-    clearance_service.complete_handover_step(actor=manager, clearance=clearance)
+    clearance_service.complete_handover_step(
+        actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+    )
     clearance_service.close_clearance(actor=manager, clearance=clearance)
 
     clearance.refresh_from_db()

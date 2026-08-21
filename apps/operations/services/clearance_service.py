@@ -263,6 +263,11 @@ def complete_custody_step(
 
     An item left outstanding keeps the step open; WORKFLOWS §6.7 is explicit
     that this is the correct outcome and not a nuisance.
+
+    An EMPTY list is refused once the centre has defined a standard one
+    (``clearance_custody_items``). Sprint 7 accepted it silently, which meant
+    the step could be completed by recovering nothing at all — on a controlled
+    form whose whole first section is the property being handed back.
     """
     policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
     _require_step_role(
@@ -272,6 +277,12 @@ def complete_custody_step(
         required_role=custody_role(as_of=timezone.now().date()),
         request=request,
     )
+
+    if not custody_items and standard_custody_items(as_of=timezone.now().date()):
+        raise ValidationError(
+            "قائمة العُهد فارغة — §6.4 تبدأ باسترجاع عُهد المركز، "
+            "والقائمة المعيارية معرّفة في الإعدادات."
+        )
 
     outstanding = [item for item in custody_items if not item.get("returned")]
     if outstanding:
@@ -524,15 +535,35 @@ def _second_certify(
     return step
 
 
+class ParticipantAcknowledgementRequiredError(ValidationError):
+    """§6.4 step 3 — a handover recorded without the receiver's name."""
+
+
 def complete_handover_step(
-    *, actor: Any, clearance: Clearance, request: Any = None
+    *,
+    actor: Any,
+    clearance: Clearance,
+    participant_ack_name: str = "",
+    request: Any = None,
 ) -> ClearanceStep:
     """
     Step 3 — the certificate changes hands (§6.4: «المركز — تسليم الشهادة»).
 
     The centre's step, like step 1, and gated the same way.
+
+    §6.4 asks for TWO signatures here — «توقيع المشارك ومدير المركز». The
+    manager's is ``certified_by``; the participant's is recorded by name,
+    because a handover attested only by the centre proves that the centre says
+    it happened. Refused in the service rather than by a CHECK constraint: a
+    constraint has to stay true for rows written years ago (DATA_MODEL §7.7),
+    and clearances completed before Sprint 8C-1 carry no acknowledgement.
     """
     policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+
+    if not participant_ack_name.strip():
+        raise ParticipantAcknowledgementRequiredError(
+            "تسليم الشهادة يحتاج إقرار المشارك باسمه — §6.4 تطلب توقيع المشارك ومدير المركز معاً."
+        )
     _require_step_role(
         actor=actor,
         clearance=clearance,
@@ -541,14 +572,23 @@ def complete_handover_step(
         request=request,
     )
     _require_previous_done(clearance, 3)
-    return _complete_handover(actor=actor, clearance=clearance, request=request)
+    return _complete_handover(
+        actor=actor,
+        clearance=clearance,
+        participant_ack_name=participant_ack_name.strip(),
+        request=request,
+    )
 
 
 @transaction.atomic
-def _complete_handover(*, actor: Any, clearance: Clearance, request: Any) -> ClearanceStep:
+def _complete_handover(
+    *, actor: Any, clearance: Clearance, participant_ack_name: str, request: Any
+) -> ClearanceStep:
     step = _step(clearance, 3)
     step.certified_by = actor
     step.certified_at = timezone.now()
+    step.participant_ack_name = participant_ack_name
+    step.participant_ack_at = timezone.now()
     step.is_done = True
     step.save()
 
@@ -557,9 +597,13 @@ def _complete_handover(*, actor: Any, clearance: Clearance, request: Any) -> Cle
         entity_type=STEP_ENTITY,
         entity_id=str(step.pk),
         reference=clearance.code,
-        summary_ar="مصادقة الخطوة 3 — تسليم الشهادة",
+        summary_ar=f"مصادقة الخطوة 3 — تسليم الشهادة إلى {participant_ack_name}",
         actor=actor,
-        changes={"event": "CERTIFY_STEP", "step": 3},
+        changes={
+            "event": "CERTIFY_STEP",
+            "step": 3,
+            "participant_ack_name": participant_ack_name,
+        },
         request=request,
     )
     return step
@@ -748,6 +792,9 @@ def get_clearance(*, actor: Any, code: str, request: Any = None) -> dict[str, An
             "certified_at": step.certified_at,
             "second_certified_by": person_name(step.second_certified_by),
             "second_certified_at": step.second_certified_at,
+            # §6.4 step 3's other signature — the participant's own.
+            "participant_ack_name": step.participant_ack_name,
+            "participant_ack_at": step.participant_ack_at,
             "has_credit_return": step.credit_return_id is not None,
         }
         for step in clearance.steps.order_by("step_number")
@@ -809,6 +856,43 @@ def clearable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tup
     ]
 
 
+def standard_custody_items(*, as_of: date) -> list[str]:
+    """
+    The centre's standard custody list, from settings (§6.4).
+
+    «هوية المركز + بطاقة المواصلات» are what the requirement names; the list
+    is data because a centre that starts issuing parking permits should not
+    need a deployment.
+    """
+    from apps.core.services import document_settings
+
+    return document_settings.custody_items(as_of=as_of)
+
+
+def clearance_document(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
+    """
+    Everything the printed clearance form shows (§6.4).
+
+    ⚠️ Built from the REQUIREMENTS, not from the centre's blank form — which
+    was not in the client folder. ``document_settings.chrome`` carries the
+    marker that says so, and the template prints it. Nothing here claims the
+    layout matches ``CS Fm 7.18 Rev A``; it claims to carry what §6.4 says the
+    form records.
+
+    The balance is read LIVE, as on the screen: WORKFLOWS §6.7 is about a
+    balance moving after certification, and a document printed from the
+    captured figure could assert a settled account that no longer is.
+    """
+    from apps.core.services import document_settings
+
+    detail = get_clearance(actor=actor, code=code, request=request)
+    as_of = timezone.now().date()
+    detail["chrome"] = document_settings.chrome(as_of=as_of)
+    detail["labels"] = document_settings.clearance_labels(as_of=as_of)
+    detail["standard_custody_items"] = standard_custody_items(as_of=as_of)
+    return detail
+
+
 __all__ = [
     "CUSTODY_ROLE_KEY",
     "FINANCE_STEP",
@@ -817,12 +901,14 @@ __all__ = [
     "STEP_NAMES",
     "ClearanceBlockedError",
     "DepositNotSettledError",
+    "ParticipantAcknowledgementRequiredError",
     "SecondCertifierRoleError",
     "StepOutOfOrderError",
     "StepRoleError",
     "cancel_clearance",
     "certify_finance_step",
     "clearable_enrollment_choices",
+    "clearance_document",
     "clearance_instance",
     "close_clearance",
     "complete_custody_step",
@@ -836,4 +922,5 @@ __all__ = [
     "return_credit_at_clearance",
     "second_certifier_role",
     "second_certify_finance_step",
+    "standard_custody_items",
 ]

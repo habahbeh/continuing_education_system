@@ -71,14 +71,18 @@ def cleared(
             code=f"CLR-{code}",
         )
         clearance_service.complete_custody_step(
-            actor=manager, clearance=clearance, custody_items=[]
+            actor=manager,
+            clearance=clearance,
+            custody_items=[{"name_ar": "هوية المركز", "returned": True}],
         )
         if not complete:
             return enrollment, clearance
 
         clearance_service.certify_finance_step(actor=finance, clearance=clearance)
         clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
-        clearance_service.complete_handover_step(actor=manager, clearance=clearance)
+        clearance_service.complete_handover_step(
+            actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+        )
         clearance_service.close_clearance(actor=manager, clearance=clearance)
         return enrollment, clearance
 
@@ -141,7 +145,11 @@ def test_a_blocked_clearance_is_not_a_completed_one(
         opened_on=TERM_START,
         code="CLR-BLK",
     )
-    clearance_service.complete_custody_step(actor=manager, clearance=clearance, custody_items=[])
+    clearance_service.complete_custody_step(
+        actor=manager,
+        clearance=clearance,
+        custody_items=[{"name_ar": "هوية المركز", "returned": True}],
+    )
     with pytest.raises(clearance_service.ClearanceBlockedError):
         clearance_service.certify_finance_step(actor=finance, clearance=clearance)
 

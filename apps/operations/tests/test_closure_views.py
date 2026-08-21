@@ -118,7 +118,11 @@ def test_the_finance_officer_cannot_hand_over_the_certificate(
     signed_in(finance).post(_url("CLR-UI-1"), {"action": "certify"}, follow=True)
     signed_in(finance_manager).post(_url("CLR-UI-1"), {"action": "second-certify"}, follow=True)
 
-    refused = signed_in(finance).post(_url("CLR-UI-1"), {"action": "handover"}, follow=True)
+    refused = signed_in(finance).post(
+        _url("CLR-UI-1"),
+        {"action": "handover", "participant_ack_name": "سالم أحمد العمري"},
+        follow=True,
+    )
     page = signed_in(manager).get(_url("CLR-UI-1"))
 
     assert "§6.4" in refused.content.decode() or "CENTER_MANAGER" in refused.content.decode()
@@ -134,7 +138,11 @@ def test_the_centre_manager_owns_both_of_its_steps(
     _custody(signed_in(manager), "CLR-UI-1")
     signed_in(finance).post(_url("CLR-UI-1"), {"action": "certify"}, follow=True)
     signed_in(finance_manager).post(_url("CLR-UI-1"), {"action": "second-certify"}, follow=True)
-    signed_in(manager).post(_url("CLR-UI-1"), {"action": "handover"}, follow=True)
+    signed_in(manager).post(
+        _url("CLR-UI-1"),
+        {"action": "handover", "participant_ack_name": "سالم أحمد العمري"},
+        follow=True,
+    )
 
     page = signed_in(manager).get(_url("CLR-UI-1"))
     assert all(step["is_done"] for step in page.context["clearance"]["steps"])
@@ -226,7 +234,9 @@ def _complete(signed_in, manager, finance, finance_manager, enrollment, code="CL
     _custody(signed_in(manager), code)
     signed_in(finance).post(_url(code), {"action": "certify"}, follow=True)
     signed_in(finance_manager).post(_url(code), {"action": "second-certify"}, follow=True)
-    signed_in(manager).post(_url(code), {"action": "handover"}, follow=True)
+    signed_in(manager).post(
+        _url(code), {"action": "handover", "participant_ack_name": "سالم أحمد العمري"}, follow=True
+    )
     signed_in(manager).post(_url(code), {"action": "close"}, follow=True)
 
 

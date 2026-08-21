@@ -949,6 +949,23 @@ class ClearanceStep(models.Model):
         related_name="clearance_steps_certified",
     )
     certified_at = models.DateTimeField(null=True, blank=True)
+
+    #: §6.4 step 3 — «تسليم الشهادة ← توقيع المشارك ومدير المركز». The centre
+    #: manager's certification is ``certified_by``; this is the OTHER
+    #: signature, the participant's own acknowledgement that they received the
+    #: certificate. A handover recorded without it proves only that the centre
+    #: says it happened.
+    #:
+    #: Not enforced as a CHECK that step 3 must carry it: a constraint has to
+    #: stay true for rows written years ago (DATA_MODEL §7.7), and clearances
+    #: completed before Sprint 8C-1 have none. The service refuses instead.
+    participant_ack_name = models.CharField(
+        max_length=150, blank=True, verbose_name=_("اسم مستلم الشهادة")
+    )
+    participant_ack_at = models.DateTimeField(
+        null=True, blank=True, verbose_name=_("وقت إقرار الاستلام")
+    )
+
     second_certified_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -1001,6 +1018,14 @@ class ClearanceStep(models.Model):
             models.CheckConstraint(
                 condition=models.Q(deposit_return_amount__isnull=True) | models.Q(step_number=2),
                 name="operations_clearance_step_deposit_fields_on_step_2",
+            ),
+            # The participant's acknowledgement belongs to the handover step
+            # alone — the mirror of the deposit fields being step 2's. True of
+            # every row that exists today, so it takes nothing away.
+            models.CheckConstraint(
+                condition=models.Q(step_number=3)
+                | (models.Q(participant_ack_name="") & models.Q(participant_ack_at__isnull=True)),
+                name="operations_clearance_step_ack_on_step_3",
             ),
             # BR-097 — a deposit is returned or forfeited, never both.
             models.CheckConstraint(

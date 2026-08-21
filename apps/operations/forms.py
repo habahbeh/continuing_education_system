@@ -122,6 +122,23 @@ class CustodyForm(forms.Form):
         return [{"name_ar": line, "returned": True} for line in lines]
 
 
+class HandoverForm(forms.Form):
+    """
+    §6.4 step 3 — «توقيع المشارك ومدير المركز».
+
+    The manager's signature is their certification; this is the participant's,
+    captured as the name of whoever actually took the certificate. The service
+    refuses a blank one, so this field is the readable prompt rather than the
+    rule.
+    """
+
+    participant_ack_name = forms.CharField(
+        label=_("اسم مستلم الشهادة"),
+        max_length=150,
+        help_text=_("يُسجَّل اسم من استلم الشهادة فعلاً — إثبات التسليم على النموذج"),
+    )
+
+
 class ClearanceCancelForm(forms.Form):
     """A cancelled clearance names why — WORKFLOWS §6.3 C6."""
 
@@ -195,4 +212,5 @@ __all__ = [
     "CustodyForm",
     "DepositSettlementForm",
     "EnrollmentForm",
+    "HandoverForm",
 ]

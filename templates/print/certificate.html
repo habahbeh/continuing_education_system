@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% comment %}
+  الشهادة — §7.
+  ⚠ Requirements-based. The centre's blank certificate was not available.
+  §7's seven fields are all here: participant name · course name · duration ·
+  hours · GRADE · number · date. The signature and both stamps print as
+  labelled empty space, because §7 says they are applied by hand.
+{% endcomment %}
+{% block content %}
+<div class="no-print">
+  <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+  <a class="btn2" href="{% url 'operations:certificates' %}">{% translate "رجوع" %}</a>
+</div>
+
+<div class="doc">
+  {% include "print/_doc_head.html" with chrome=certificate.chrome reference=certificate.certificate_number %}
+
+  {% if not certificate.chrome.is_verified and certificate.chrome.unverified_note_ar %}
+    <div class="doc-warn">{{ certificate.chrome.unverified_note_ar }}</div>
+  {% endif %}
+
+  <h1>{{ certificate.labels.title_ar }}</h1>
+
+  {% if certificate.is_replacement %}
+    <div class="doc-warn">
+      {{ certificate.labels.replacement_note_ar }}
+      <strong dir="ltr">{{ certificate.replaces }}</strong>
+    </div>
+  {% endif %}
+
+  <div class="doc-section">
+    <h2>{% translate "المشارك" %}</h2>
+    <dl class="doc-grid">
+      <dt>{% translate "الاسم" %}</dt><dd>{{ certificate.participant_name }}</dd>
+      <dt>{% translate "الرقم الجامعي" %}</dt><dd dir="ltr">{{ certificate.participant_number }}</dd>
+    </dl>
+  </div>
+
+  <p>{{ certificate.labels.body_ar }}</p>
+
+  <div class="doc-section">
+    <h2>{% translate "البرنامج" %}</h2>
+    <dl class="doc-grid">
+      <dt>{% translate "اسم الدورة" %}</dt><dd>{{ certificate.program_name }}</dd>
+      <dt>{% translate "مدة الدورة" %}</dt><dd>{{ certificate.duration_text|default:"—" }}</dd>
+      <dt>{% translate "عدد الساعات" %}</dt><dd>{{ certificate.training_hours|default:"—" }}</dd>
+      <dt>{% translate "التقدير" %}</dt><dd>{{ certificate.grade }}</dd>
+      <dt>{% translate "رقم الشهادة" %}</dt><dd dir="ltr">{{ certificate.certificate_number }}</dd>
+      <dt>{% translate "تاريخ الإصدار" %}</dt><dd>{{ certificate.issued_on }}</dd>
+    </dl>
+  </div>
+
+  <div class="sign-row">
+    {% for label in certificate.labels.signature_labels %}
+      <div class="sign-box"><div class="sign-line"></div>{{ label }}</div>
+    {% endfor %}
+    {% for label in certificate.labels.stamp_labels %}
+      <div class="stamp-box"><div class="stamp-ring"></div>{{ label }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="doc-note">{{ certificate.chrome.footer_ar }}</div>
+</div>
+{% endblock %}

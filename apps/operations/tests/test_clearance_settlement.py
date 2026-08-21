@@ -271,7 +271,11 @@ def test_a_programme_without_a_policy_raises_no_deposit_question(
         opened_on=TERM_START,
         code="CLR-NODEP",
     )
-    clearance_service.complete_custody_step(actor=manager, clearance=clearance, custody_items=[])
+    clearance_service.complete_custody_step(
+        actor=manager,
+        clearance=clearance,
+        custody_items=[{"name_ar": "هوية المركز", "returned": True}],
+    )
     clearance_service.certify_finance_step(actor=finance, clearance=clearance)
     step = clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
     assert step.is_done is True
@@ -316,7 +320,11 @@ def test_an_unsettled_deposit_holds_the_financial_step(
         opened_on=TERM_START,
         code="CLR-DEP",
     )
-    clearance_service.complete_custody_step(actor=manager, clearance=clearance, custody_items=[])
+    clearance_service.complete_custody_step(
+        actor=manager,
+        clearance=clearance,
+        custody_items=[{"name_ar": "هوية المركز", "returned": True}],
+    )
 
     assert clearance_service.deposit_settlement_state(enrollment)["applies"] is True
     with pytest.raises(clearance_service.DepositNotSettledError, match="تسوية التأمين"):
@@ -361,7 +369,11 @@ def test_returning_the_deposit_releases_the_step(
         opened_on=TERM_START,
         code="CLR-DEP2",
     )
-    clearance_service.complete_custody_step(actor=manager, clearance=clearance, custody_items=[])
+    clearance_service.complete_custody_step(
+        actor=manager,
+        clearance=clearance,
+        custody_items=[{"name_ar": "هوية المركز", "returned": True}],
+    )
     deposit_service.return_deposit(actor=finance, enrollment=enrollment, returned_on=TERM_START)
 
     clearance_service.certify_finance_step(actor=finance, clearance=clearance)

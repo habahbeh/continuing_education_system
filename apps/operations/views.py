@@ -14,6 +14,7 @@ paraphrase would drop the reference the centre needs in order to act.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from django.contrib import messages
@@ -37,6 +38,7 @@ from apps.operations.forms import (
     CustodyForm,
     DepositSettlementForm,
     EnrollmentForm,
+    HandoverForm,
 )
 from apps.operations.services import (
     certificate_service,
@@ -387,7 +389,12 @@ def clearance_detail_view(request: HttpRequest, code: str) -> HttpResponse:
             "title": _("براءة ذمة"),
             "active_screen": Screen.CLEARANCE,
             "clearance": clearance,
-            "custody_form": CustodyForm(),
+            "custody_form": CustodyForm(
+                initial={
+                    "items": "\n".join(clearance_service.standard_custody_items(as_of=date.today()))
+                }
+            ),
+            "handover_form": HandoverForm(),
             "cancel_form": ClearanceCancelForm(),
             "deposit_form": DepositSettlementForm(),
             "credit_form": CreditReturnAtClearanceForm(),
@@ -452,10 +459,17 @@ def _dispatch_clearance(request: HttpRequest, clearance: Any, action: str) -> bo
         )
         messages.success(request, _("تمّت المصادقة الثانية وأُغلقت الخطوة المالية"))
     elif action == "handover":
+        handover_form = HandoverForm(request.POST)
+        if not handover_form.is_valid():
+            messages.error(request, _("اسم مستلم الشهادة إلزامي"))
+            return True
         clearance_service.complete_handover_step(
-            actor=request.user, clearance=clearance, request=request
+            actor=request.user,
+            clearance=clearance,
+            participant_ack_name=handover_form.cleaned_data["participant_ack_name"],
+            request=request,
         )
-        messages.success(request, _("سُجِّل تسليم الشهادة"))
+        messages.success(request, _("سُجِّل تسليم الشهادة وإقرار المستلِم"))
     elif action == "close":
         clearance_service.close_clearance(actor=request.user, clearance=clearance, request=request)
         messages.success(request, _("أُغلقت براءة الذمة"))
@@ -632,3 +646,51 @@ def _certificate_transition(request: HttpRequest, action: str) -> None:
             actor=request.user, original=certificate, issued_on=on_date, request=request
         )
         messages.success(request, _("صدر بدل الفاقد %(n)s") % {"n": replacement.certificate_number})
+
+
+# ---------------------------------------------------------------------------
+# Printed documents (Sprint 8C-1)
+# ---------------------------------------------------------------------------
+# ⚠️ Requirements-based output. The centre's own blank forms were not in the
+# client folder, so these follow §6.4 and §7 and carry a printed marker saying
+# so until someone verifies them and flips ``document_mode``.
+#
+# The print route runs the SAME permission check as the screen it prints. A
+# document route that read more loosely than its screen would be a way around
+# the matrix wearing a printer icon.
+def clearance_print_view(request: HttpRequest, code: str) -> HttpResponse:
+    """
+    The clearance form (§6.4).
+
+    Printable at any stage, deliberately: the form is a checklist a
+    participant is handed at the counter, and WORKFLOWS §6.3 wants what is
+    still outstanding visible. Completion is shown, not required.
+    """
+    try:
+        document = clearance_service.clearance_document(
+            actor=request.user, code=code, request=request
+        )
+    except ObjectDoesNotExist as exc:
+        raise Http404 from exc
+
+    return render(request, "print/clearance_form.html", {"clearance": document})
+
+
+def certificate_print_view(request: HttpRequest, number: str) -> HttpResponse:
+    """
+    The certificate, or a replacement (§7).
+
+    BR-075 is not re-checked here and does not need to be: a Certificate row
+    only exists because ``issue_certificate`` found a COMPLETED clearance, and
+    a replacement only because ``issue_replacement`` found an original whose
+    fee had been collected. Printing reads what those refusals already
+    permitted — it cannot conjure a certificate that was never issued.
+    """
+    try:
+        document = certificate_service.certificate_document(
+            actor=request.user, number=number, request=request
+        )
+    except ObjectDoesNotExist as exc:
+        raise Http404 from exc
+
+    return render(request, "print/certificate.html", {"certificate": document})
