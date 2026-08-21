@@ -372,6 +372,81 @@ def record_reprint(*, actor: Any, certificate: Certificate, request: Any = None)
     return certificate
 
 
+def list_certificates(*, actor: Any, query: str = "", request: Any = None) -> list[dict[str, Any]]:
+    """Certificates as rows, replacements shown against what they replace."""
+    from apps.core.display import person_name, text_of
+
+    policy.require(actor, Screen.CERTIFICATES, Action.VIEW, request=request)
+
+    queryset = Certificate.objects.select_related(
+        "participant", "enrollment", "clearance", "replaces", "issued_by"
+    )
+    if query:
+        queryset = queryset.filter(certificate_number__icontains=query) | queryset.filter(
+            participant__name_ar__icontains=query
+        )
+
+    return [
+        {
+            "certificate_number": c.certificate_number,
+            "participant_name": c.participant.name_ar,
+            "participant_number": c.participant.participant_number,
+            "enrollment_code": c.enrollment.code,
+            "program_name": c.program_name_snapshot,
+            "duration_text": c.duration_text,
+            "training_hours": c.training_hours,
+            "grade": c.grade,
+            "issued_on": c.issued_on,
+            "issued_by": person_name(c.issued_by),
+            "status": c.status,
+            "status_display": c.get_status_display(),
+            "delivered_on": c.delivered_on,
+            "is_replacement": c.is_replacement,
+            "replaces": text_of(c.replaces, "certificate_number"),
+            "clearance_code": text_of(c.clearance, "code"),
+        }
+        for c in queryset.order_by("-issued_on", "-certificate_number")
+    ]
+
+
+def certificate_instance(*, actor: Any, number: str, request: Any = None) -> Certificate:
+    """The Certificate object, for handing back into this module (A-05)."""
+    policy.require(actor, Screen.CERTIFICATES, Action.VIEW, request=request)
+    return Certificate.objects.select_related("enrollment", "participant").get(
+        certificate_number=number
+    )
+
+
+def issuable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    Enrolments a certificate may be issued for — BR-075, enforced as a LIST.
+
+    «لا شهادة بلا براءة ذمة». A participant whose clearance is blocked simply
+    does not appear here, which is what the demo's own guidance promised
+    («المحجوبون لا يظهرون») and what its code never actually did. The service
+    refuses the forged request too; this spares the honest user the trip.
+    """
+    from apps.operations.models import Enrollment
+
+    policy.require(actor, Screen.CERTIFICATES, Action.CREATE, request=request)
+
+    cleared = set(
+        Clearance.objects.filter(status=ClearanceStatus.COMPLETED).values_list(
+            "enrollment_id", flat=True
+        )
+    )
+    already = set(
+        Certificate.objects.filter(is_replacement=False).values_list("enrollment_id", flat=True)
+    )
+    return [
+        (e.code, f"{e.code} — {e.participant.name_ar}")
+        for e in Enrollment.objects.select_related("participant")
+        .filter(pk__in=cleared)
+        .order_by("-enrolled_on")
+        if e.pk not in already
+    ]
+
+
 __all__ = [
     "CERTIFICATE_SCOPE",
     "GRADES_KEY",
@@ -380,10 +455,13 @@ __all__ = [
     "OriginalCertificateRequiredError",
     "ReplacementFeeNotCollectedError",
     "available_grades",
+    "certificate_instance",
     "completed_clearance_for",
     "deliver",
+    "issuable_enrollment_choices",
     "issue_certificate",
     "issue_replacement",
+    "list_certificates",
     "record_reprint",
     "replacement_fee_is_collected",
 ]

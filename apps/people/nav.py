@@ -81,6 +81,23 @@ NAV: tuple[NavGroup, ...] = (
         ),
     ),
     NavGroup(
+        _("الشركاء والمخالصات"),
+        (
+            NavItem(Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),
+            NavItem(Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
+            NavItem(Screen.CLAIMS, "settlements:claims", _("المطالبات")),
+            NavItem(Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
+            NavItem(Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
+        ),
+    ),
+    NavGroup(
+        _("الإنهاء والشهادات"),
+        (
+            NavItem(Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
+            NavItem(Screen.CERTIFICATES, "operations:certificates", _("الشهادات")),
+        ),
+    ),
+    NavGroup(
         _("النظام"),
         (
             NavItem(Screen.USERS, "people:users", _("المستخدمون والصلاحيات")),

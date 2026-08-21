@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "شاشة قراءة — الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها، ولا يُنشئها." %}
+</div>
+<form method="get" class="toolbar">
+  <input name="q" value="{{ query }}" placeholder="{% translate 'بحث بالاسم أو الرمز' %}">
+  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+</form>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th><th>{% translate "النوع" %}</th>
+      <th>{% translate "السجل" %}</th><th>{% translate "الاتفاقيات" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for p in partners %}
+        <tr>
+          <td dir="ltr">{{ p.code }}</td>
+          <td>{{ p.name_ar }}</td>
+          <td>{{ p.partner_type_display }}</td>
+          <td dir="ltr">{{ p.registry_number|default:"—" }}</td>
+          <td class="num">{{ p.agreement_count }}</td>
+          <td><span class="chip">{{ p.status_display }}</span></td>
+          <td><a class="btn2" href="{% url 'partners:partner-detail' p.code %}">{% translate "عرض" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="7" class="empty">{% translate "لا شركاء" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

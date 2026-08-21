@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }} <span dir="ltr">{{ clearance.code }}</span></h1>
+
+<div class="card2"><div class="card2-body">
+  <dl class="dl">
+    <dt>{% translate "المشارك" %}</dt><dd>{{ clearance.participant_name }} <span dir="ltr">({{ clearance.participant_number }})</span></dd>
+    <dt>{% translate "التسجيل" %}</dt><dd dir="ltr">{{ clearance.enrollment_code }} — {{ clearance.program_name }}</dd>
+    <dt>{% translate "الحالة" %}</dt><dd>{{ clearance.case_type_display }} · <span class="chip">{{ clearance.status_display }}</span></dd>
+    <dt>{% translate "فُتحت" %}</dt><dd class="num">{{ clearance.opened_on }} — {{ clearance.opened_by }}</dd>
+    {% if clearance.cancellation_reason_ar %}
+      <dt>{% translate "سبب الإلغاء" %}</dt><dd>{{ clearance.cancellation_reason_ar }}</dd>
+    {% endif %}
+  </dl>
+</div></div>
+
+{% if clearance.participant_owes %}
+  <div class="note danger">{% translate "الرصيد" %}: {{ clearance.balance }} — {% translate "عليه ذمة. لا تُغلق الخطوة المالية حتى تُسدَّد." %}</div>
+{% elif clearance.centre_owes %}
+  <div class="note warn">{% translate "رصيد دائن" %}: {{ clearance.credit_outstanding }} — {% translate "يجب ردّه قبل إغلاق الخطوة المالية." %}</div>
+{% else %}
+  <div class="note ok">{% translate "الرصيد صفر — الحساب مسوّى." %}</div>
+{% endif %}
+
+{% for step in clearance.steps %}
+  <div class="card2">
+    <div class="card2-head">
+      <h2>{{ step.step_number }} — {{ step.name_ar }}</h2>
+      <span class="chip {% if step.is_done %}ok{% endif %}">
+        {% if step.is_done %}{% translate "مكتملة" %}{% else %}{% translate "قائمة" %}{% endif %}
+      </span>
+    </div>
+    <div class="card2-body">
+      {% if step.step_number == 1 %}
+        {% if step.custody_items %}
+          <ul>{% for item in step.custody_items %}<li>{{ item.name_ar }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% if step.certified_by %}
+          <div class="muted">{% translate "صادَق" %}: {{ step.certified_by }} · {{ step.certified_at }}</div>
+        {% elif can_custody %}
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="custody">
+            {% include "partials/_form.html" with form=custody_form %}
+            <button class="btn2 primary" type="submit">{% translate "إتمام استرجاع العُهد" %}</button>
+          </form>
+        {% else %}
+          <div class="note">{% translate "هذه الخطوة للدور" %} <span dir="ltr">{{ clearance.custody_role }}</span></div>
+        {% endif %}
+
+      {% elif step.step_number == 2 %}
+        {% if clearance.deposit.applies %}
+          <div class="note {% if clearance.deposit.is_settled %}ok{% else %}warn{% endif %}">
+            {% translate "التأمين المقبوض" %}: {{ clearance.deposit.collected }} ·
+            {% if clearance.deposit.is_settled %}{% translate "مُسوّى" %}{% else %}{% translate "غير مُسوّى — لا تُغلق الخطوة قبل إعادته أو مصادرته" %}{% endif %}
+          </div>
+          {% if can_settle_money and not clearance.deposit.is_settled %}
+            <form method="post">{% csrf_token %}
+              <input type="hidden" name="action" value="deposit">
+              {% include "partials/_form.html" with form=deposit_form %}
+              <button class="btn2" type="submit">{% translate "إعادة التأمين" %}</button>
+              <button class="btn2" type="submit" name="action" value="forfeit">{% translate "مصادرة التأمين" %}</button>
+            </form>
+          {% endif %}
+        {% endif %}
+
+        {% if clearance.centre_owes and can_settle_money %}
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="return-credit">
+            {% include "partials/_form.html" with form=credit_form %}
+            <button class="btn2" type="submit">{% translate "ردّ الرصيد الدائن" %}</button>
+          </form>
+        {% endif %}
+
+        {% if step.certified_by %}
+          <div class="calc-row"><span>{% translate "المصادقة الأولى" %}</span>
+            <span class="val">{{ step.certified_by }} · {{ step.certified_at }}</span></div>
+        {% endif %}
+        {% if step.second_certified_by %}
+          <div class="calc-row"><span>{% translate "المصادقة الثانية" %}</span>
+            <span class="val">{{ step.second_certified_by }} · {{ step.second_certified_at }}</span></div>
+        {% endif %}
+        {% if step.balance_at_check is not None %}
+          <div class="calc-row"><span>{% translate "الرصيد عند الفحص" %}</span>
+            <span class="val num">{{ step.balance_at_check }}</span></div>
+        {% endif %}
+
+        {% if not step.certified_by and can_certify %}
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="certify">
+            <button class="btn2 primary" type="submit">{% translate "المصادقة المالية الأولى" %}</button>
+          </form>
+        {% elif step.certified_by and not step.is_done %}
+          {% if can_second_certify %}
+            <form method="post">{% csrf_token %}
+              <input type="hidden" name="action" value="second-certify">
+              <button class="btn2 primary" type="submit">{% translate "المصادقة الثانية" %}</button>
+            </form>
+          {% else %}
+            <div class="note">{% translate "المصادقة الثانية للدور" %}
+              <span dir="ltr">{{ clearance.second_certifier_role }}</span> —
+              {% translate "ومن شخص غير الموقّع الأول." %}</div>
+          {% endif %}
+        {% endif %}
+
+      {% else %}
+        {% if step.certified_by %}
+          <div class="muted">{% translate "صادَق" %}: {{ step.certified_by }} · {{ step.certified_at }}</div>
+        {% elif can_handover %}
+          <form method="post">{% csrf_token %}
+            <input type="hidden" name="action" value="handover">
+            <button class="btn2 primary" type="submit">{% translate "تسجيل تسليم الشهادة" %}</button>
+          </form>
+        {% else %}
+          <div class="note">{% translate "هذه الخطوة للدور" %} <span dir="ltr">{{ clearance.handover_role }}</span></div>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
+
+{% if can_close and not clearance.pending_step %}
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="action" value="close">
+    <button class="btn2 primary" type="submit">{% translate "إغلاق براءة الذمة" %}</button>
+  </form>
+{% endif %}
+
+{% if can_close and clearance.status != "COMPLETED" and clearance.status != "CANCELLED" %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "إلغاء البراءة" %}</h2></div>
+    <div class="card2-body">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="cancel">
+        {% include "partials/_form.html" with form=cancel_form %}
+        <button class="btn2" type="submit">{% translate "إلغاء" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

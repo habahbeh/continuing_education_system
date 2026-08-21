@@ -137,4 +137,28 @@ def agreement_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str
     ]
 
 
-__all__ = ["agreement_choices", "get_agreement", "list_agreements", "list_partners"]
+def get_partner(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
+    """One partner with the agreements held under them."""
+    rows = list_partners(actor=actor, request=request)
+    partner = next((r for r in rows if r["code"] == code), {})
+    if partner:
+        partner["agreements"] = list_agreements(actor=actor, partner_code=code, request=request)
+    return partner
+
+
+def agreement_instance(*, actor: Any, agreement_number: str, request: Any = None) -> Any:
+    """The Agreement model object, for handing to another service (A-05)."""
+    from apps.partners.models import Agreement
+
+    policy.require(actor, Screen.AGREEMENTS, Action.VIEW, request=request)
+    return Agreement.objects.select_related("partner").get(agreement_number=agreement_number)
+
+
+__all__ = [
+    "agreement_choices",
+    "agreement_instance",
+    "get_agreement",
+    "get_partner",
+    "list_agreements",
+    "list_partners",
+]

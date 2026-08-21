@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الاتفاقية" %}</th>
+      <th>{% translate "الفترة" %}</th><th>{% translate "المشاركون" %}</th><th>{% translate "الوعاء" %}</th>
+      <th>{% translate "حصة الشريك" %}</th><th>{% translate "الحسومات" %}</th><th>{% translate "الصافي" %}</th>
+      <th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for c in claims %}
+        <tr>
+          <td dir="ltr">{{ c.code }}</td><td>{{ c.partner_name }}</td>
+          <td dir="ltr">{{ c.agreement_number }}</td>
+          <td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
+          <td class="num">{{ c.student_count|default:"0" }}</td>
+          <td class="num">{{ c.distribution_base }}</td>
+          <td class="num">{{ c.partner_share }}</td>
+          <td class="num">{{ c.total_deductions }}</td>
+          <td class="num">{{ c.net_payable }}</td>
+          <td>
+            <span class="chip">{{ c.status_display }}</span>
+            {% if c.is_frozen %}<span class="chip ok">{% translate "مختومة" %}</span>{% endif %}
+          </td>
+          <td><a class="btn2" href="{% url 'settlements:claim-detail' c.code %}">{% translate "عرض" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="11" class="empty">{% translate "لا مطالبات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "بناء مطالبة" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "تُعرض الدفعات التي تحمل اتفاقية فقط. الاستحقاق على أساس نقدي وبحدود ما دفعه المشارك فعلاً، وغير المستحقّين يظهرون في الكشف بأسبابهم لا يُحذفون." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="build">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "بناء المطالبة" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

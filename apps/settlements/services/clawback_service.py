@@ -28,6 +28,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.billing.services.account_service import ZERO
+from apps.core.display import text_of
 from apps.core.services.audit_service import write_audit
 from apps.settlements.models import ObligationType, PartnerObligation
 from apps.settlements.services import entitlement_service
@@ -181,9 +182,51 @@ def record_refund_recovery(
     return obligation
 
 
+def list_obligations(
+    *, actor: Any, partner_code: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """
+    Partner obligations as rows — what is owed back and what has been recovered.
+
+    Read only in Sprint 8B-2. §5.6's obligations (trainer salaries, field
+    training expenses, the absence penalty) have no creating service yet; the
+    two that exist are raised automatically by this module and by a refund.
+    """
+    from apps.people.constants import Action, Screen
+    from apps.people.permissions import policy
+
+    policy.require(actor, Screen.OBLIGATIONS, Action.VIEW, request=request)
+
+    queryset = PartnerObligation.objects.select_related(
+        "partner", "restricted_to_agreement", "cohort"
+    )
+    if partner_code:
+        queryset = queryset.filter(partner__code=partner_code)
+
+    return [
+        {
+            "code": o.code,
+            "partner_name": o.partner.name_ar,
+            "obligation_type": o.obligation_type,
+            "obligation_type_display": o.get_obligation_type_display(),
+            "amount": o.amount,
+            "recovered_amount": o.recovered_amount,
+            "outstanding": o.amount - o.recovered_amount,
+            "status": o.status,
+            "status_display": o.get_status_display(),
+            "occurred_on": o.occurred_on,
+            "statement_reference": o.statement_reference,
+            "cohort_code": text_of(o.cohort, "code"),
+            "restricted_to": text_of(o.restricted_to_agreement, "agreement_number"),
+        }
+        for o in queryset.order_by("-occurred_on", "-id")
+    ]
+
+
 __all__ = [
     "close_name_list",
     "exposure_for",
+    "list_obligations",
     "name_list_deadline",
     "record_refund_recovery",
 ]

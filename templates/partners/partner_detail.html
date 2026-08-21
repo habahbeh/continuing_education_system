@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ partner.name_ar }}</h1>
+<div class="card2"><div class="card2-body">
+  <dl class="dl">
+    <dt>{% translate "الرمز" %}</dt><dd dir="ltr">{{ partner.code }}</dd>
+    <dt>{% translate "النوع" %}</dt><dd>{{ partner.partner_type_display }}</dd>
+    <dt>{% translate "الحالة" %}</dt><dd>{{ partner.status_display }}</dd>
+    <dt>{% translate "السجل التجاري" %}</dt><dd dir="ltr">{{ partner.registry_number|default:"—" }} {% if partner.registry_date %}· {{ partner.registry_date }}{% endif %}</dd>
+    <dt>{% translate "جهة الاتصال" %}</dt><dd>{{ partner.contact_name|default:"—" }}</dd>
+    <dt>{% translate "الهاتف" %}</dt><dd dir="ltr">{{ partner.phone|default:"—" }}</dd>
+  </dl>
+</div></div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الاتفاقيات" %}</h2></div>
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرقم" %}</th><th>{% translate "العنوان" %}</th><th>{% translate "النموذج" %}</th>
+      <th>{% translate "السريان" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for a in partner.agreements %}
+        <tr>
+          <td dir="ltr">{{ a.agreement_number }}</td><td>{{ a.title_ar }}</td>
+          <td>{{ a.calculation_model_display }}</td>
+          <td class="num">{{ a.valid_from }} — {{ a.valid_to }}</td>
+          <td><span class="chip">{{ a.status_display }}</span></td>
+          <td><a class="btn2" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="6" class="empty">{% translate "لا اتفاقيات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

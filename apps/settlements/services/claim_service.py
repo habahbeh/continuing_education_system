@@ -26,6 +26,7 @@ from django.utils import timezone
 
 from apps.billing.services import discount_service
 from apps.billing.services.account_service import ZERO
+from apps.core.display import text_of
 from apps.core.exceptions import ImmutableRecordError
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
@@ -468,13 +469,134 @@ def verify_hash(claim: PartnerClaim) -> bool:
     return bool(claim.content_hash) and claim.content_hash == content_hash_for(claim)
 
 
+def list_claims(
+    *, actor: Any, partner_code: str = "", status: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Claims as rows for the claims screen (BR-051)."""
+    policy.require(actor, Screen.CLAIMS, Action.VIEW, request=request)
+
+    queryset = PartnerClaim.objects.select_related("partner", "agreement", "cohort", "settlement")
+    if partner_code:
+        queryset = queryset.filter(partner__code=partner_code)
+    if status:
+        queryset = queryset.filter(status=status)
+
+    return [
+        {
+            "code": c.code,
+            "partner_name": c.partner.name_ar,
+            "agreement_number": c.agreement.agreement_number,
+            "cohort_code": text_of(c.cohort, "code"),
+            "period_from": c.period_from,
+            "period_to": c.period_to,
+            "student_count": c.student_count,
+            "distribution_base": c.distribution_base,
+            "partner_share": c.partner_share,
+            "total_deductions": c.total_deductions,
+            "net_payable": c.net_payable,
+            "status": c.status,
+            "status_display": c.get_status_display(),
+            "is_frozen": c.is_frozen,
+            "created_by_id": c.created_by_id,
+            "settlement_code": text_of(c.settlement, "code"),
+        }
+        for c in queryset.order_by("-created_at")
+    ]
+
+
+def get_claim(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
+    """
+    One claim with its lines, its deductions and its excluded participants.
+
+    The excluded are carried WITH the included, each naming its reason: §5.4
+    says a withdrawn or overdue participant earns the partner nothing, and a
+    claim that simply omitted them would look like a claim nobody had checked.
+    """
+    policy.require(actor, Screen.CLAIMS, Action.VIEW, request=request)
+
+    claim = PartnerClaim.objects.select_related(
+        "partner", "agreement", "cohort", "created_by", "approved_by", "settlement"
+    ).get(code=code)
+
+    rows = list_claims(actor=actor, request=request)
+    detail = next((r for r in rows if r["code"] == code), {})
+    detail.update(
+        {
+            "gross_collected": claim.gross_collected,
+            "excluded_registration": claim.excluded_registration,
+            "excluded_consumables": claim.excluded_consumables,
+            "excluded_deposits": claim.excluded_deposits,
+            "discount_partner_burden": claim.discount_partner_burden,
+            "model_snapshot": claim.model_snapshot,
+            "rate_snapshot": claim.rate_snapshot,
+            "fixed_amount_snapshot": claim.fixed_amount_snapshot,
+            "base_mode_snapshot": claim.base_mode_snapshot,
+            "exclusions_snapshot": claim.exclusions_snapshot,
+            "content_hash": claim.content_hash,
+            "hash_verifies": verify_hash(claim) if claim.content_hash else None,
+            "trigger_reference_ar": claim.trigger_reference_ar,
+            "lines": [
+                {
+                    "participant_number": line.participant_number_snapshot,
+                    "participant_name": line.participant_name_snapshot,
+                    "enrollment_status": line.enrollment_status_snapshot,
+                    "paid_amount": line.paid_amount,
+                    "distribution_base": line.distribution_base,
+                    "partner_share": line.partner_share,
+                    "is_included": line.is_included,
+                    "exclusion_reason": line.exclusion_reason,
+                }
+                for line in claim.lines.order_by("-is_included", "participant_number_snapshot")
+            ],
+            "deductions": [
+                {
+                    "deduction_type": d.deduction_type,
+                    "label_ar": d.label_ar,
+                    "amount": d.amount,
+                }
+                for d in claim.deductions.order_by("id")
+            ],
+        }
+    )
+    return detail
+
+
+def claim_instance(*, actor: Any, code: str, request: Any = None) -> PartnerClaim:
+    """The PartnerClaim object, for handing back into this module (A-05)."""
+    policy.require(actor, Screen.CLAIMS, Action.VIEW, request=request)
+    return PartnerClaim.objects.select_related("agreement", "cohort").get(code=code)
+
+
+def claimable_cohort_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    (code, label) pairs of cohorts that CARRY an agreement.
+
+    A cohort with no partner has no claim to build, so offering one would lead
+    only to a refusal the user could have been spared.
+    """
+    from apps.operations.models import Cohort
+
+    policy.require(actor, Screen.CLAIMS, Action.VIEW, request=request)
+    return [
+        (c.code, f"{c.code} — {c.name_ar} · {text_of(c.agreement.partner, 'name_ar')}")
+        for c in Cohort.objects.select_related("agreement__partner")
+        .filter(agreement__isnull=False)
+        .order_by("-starts_on")
+        if c.agreement is not None
+    ]
+
+
 __all__ = [
     "MUTABLE_AFTER_APPROVAL",
     "apply_offsets",
     "approve_claim",
     "build_claim",
     "canonical_content",
+    "claim_instance",
+    "claimable_cohort_choices",
     "content_hash_for",
+    "get_claim",
+    "list_claims",
     "open_obligations_for",
     "verify_hash",
 ]

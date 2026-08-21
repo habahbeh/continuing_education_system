@@ -104,6 +104,20 @@ SEED: list[tuple[str, Any, str, str]] = [
     ("registration_fee_center_default", "50.000", D, "BR-009: رسم تسجيل طالب المركز."),
     ("registration_fee_university_default", "15.000", D, "BR-009: رسم تسجيل الطالب الجامعي."),
     (
+        "clearance_custody_role",
+        "CENTER_MANAGER",
+        S,
+        "§6.4 — «المركز: استرجاع العُهد». المصفوفة تمنح الموظف المالي صلاحية "
+        "الاعتماد على شاشة البراءة كلها، فلا تكفي وحدها للتفريق بين خطوة المركز "
+        "وخطوة المالية — هذا الإعداد هو ما يجعل توزيع §6.4 قابلاً للتعبير.",
+    ),
+    (
+        "clearance_handover_role",
+        "CENTER_MANAGER",
+        S,
+        "§6.4 — «المركز: تسليم الشهادة». نظير clearance_custody_role للخطوة الثالثة.",
+    ),
+    (
         "clearance_second_certifier_role",
         "FINANCE_MANAGER",
         S,

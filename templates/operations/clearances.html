@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "نموذج CS Fm 7.18 Rev A — ثلاث خطوات لا تُعاد ترتيبها: استرجاع العُهد (المركز) · التحقق المالي بتوقيعين (المالية) · تسليم الشهادة (المركز). ولا شهادة بلا براءة ذمة مكتملة." %}
+</div>
+<form method="get" class="toolbar">
+  <input name="q" value="{{ query }}" placeholder="{% translate 'رمز البراءة أو اسم المشارك' %}">
+  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+</form>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "البرنامج" %}</th>
+      <th>{% translate "الحالة" %}</th><th>{% translate "فُتحت" %}</th>
+      <th>{% translate "الخطوة القائمة" %}</th><th>{% translate "الوضع" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for c in clearances %}
+        <tr>
+          <td dir="ltr">{{ c.code }}</td>
+          <td>{{ c.participant_name }}<br><small class="muted" dir="ltr">{{ c.participant_number }}</small></td>
+          <td>{{ c.program_name }}</td>
+          <td>{{ c.case_type_display }}</td>
+          <td class="num">{{ c.opened_on }}</td>
+          <td>{% if c.pending_step %}{{ c.pending_step }} — {{ c.pending_step_name }}{% else %}—{% endif %}</td>
+          <td><span class="chip">{{ c.status_display }}</span></td>
+          <td><a class="btn2" href="{% url 'operations:clearance-detail' c.code %}">{% translate "عرض" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="8" class="empty">{% translate "لا براءات ذمة" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "فتح براءة ذمة" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "تُعرض التسجيلات المنتهية (تخرج · انسحاب · فصل) التي لا براءة قائمة لها." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="open">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "فتح البراءة" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

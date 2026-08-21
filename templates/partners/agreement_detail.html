@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }} <span dir="ltr">{{ agreement.agreement_number }}</span></h1>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الأطراف والسريان" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "الشريك" %}</dt><dd>{{ agreement.partner_name }}</dd>
+      <dt>{% translate "العنوان" %}</dt><dd>{{ agreement.title_ar }}</dd>
+      <dt>{% translate "التوقيع" %}</dt><dd class="num">{{ agreement.signed_on }}</dd>
+      <dt>{% translate "السريان" %}</dt><dd class="num">{{ agreement.valid_from }} — {{ agreement.valid_to }}</dd>
+      <dt>{% translate "الحالة" %}</dt><dd>{{ agreement.status_display }}</dd>
+      {% if agreement.supersedes %}<dt>{% translate "ملحق لاتفاقية" %}</dt><dd dir="ltr">{{ agreement.supersedes }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "نموذج الاحتساب" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "النموذج" %}</dt><dd>{{ agreement.calculation_model_display }}</dd>
+      {% if agreement.percent_rate %}<dt>{% translate "النسبة" %}</dt><dd class="num">{{ agreement.percent_rate }}%</dd>{% endif %}
+      {% if agreement.fixed_amount_per_student %}<dt>{% translate "المبلغ لكل طالب" %}</dt><dd class="num">{{ agreement.fixed_amount_per_student }}</dd>{% endif %}
+      {% if agreement.sell_price %}<dt>{% translate "سعر البيع المرجعي" %}</dt><dd class="num">{{ agreement.sell_price }}</dd>{% endif %}
+      {% if agreement.service_name_ar %}<dt>{% translate "الخدمة" %}</dt><dd>{{ agreement.service_name_ar }}</dd>{% endif %}
+      {% if agreement.commission_amount %}<dt>{% translate "العمولة" %}</dt><dd class="num">{{ agreement.commission_amount }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الاستثناءات من وعاء القسمة" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "رسوم التسجيل" %}</dt><dd>{% if agreement.exclude_registration_fee %}<span class="chip ok">{% translate "مستثناة" %}</span>{% else %}<span class="chip">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
+      <dt>{% translate "التأمينات" %}</dt><dd>{% if agreement.exclude_deposits %}<span class="chip ok">{% translate "مستثناة" %}</span>{% else %}<span class="chip warn">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
+      <dt>{% translate "المواد المستهلكة" %}</dt><dd>{% if agreement.exclude_consumables %}<span class="chip ok">{% translate "مستثناة" %}</span>{% else %}<span class="chip">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
+      {% if agreement.consumables_cap_per_student %}<dt>{% translate "سقف المستهلكات لكل طالب" %}</dt><dd class="num">{{ agreement.consumables_cap_per_student }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "التوقيت والتقاسم" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "صيغة تقاسم الخصم" %}</dt><dd>{{ agreement.discount_split_mode_display }}</dd>
+      <dt>{% translate "توقيت الصرف" %}</dt><dd>{{ agreement.payout_timing_display }}</dd>
+      <dt>{% translate "دورة المخالصة" %}</dt><dd>{{ agreement.settlement_cycle_display }}</dd>
+      {% if agreement.name_list_due_days %}<dt>{% translate "مهلة كشف الأسماء" %}</dt><dd class="num">{{ agreement.name_list_due_days }} {% translate "يوماً" %}</dd>{% endif %}
+    </dl>
+    {% if agreement.entitlement_rule_ar %}<div class="note">{{ agreement.entitlement_rule_ar }}</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

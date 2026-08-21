@@ -35,6 +35,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.billing.services.account_service import ZERO
+from apps.core.display import text_of
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -323,14 +324,135 @@ def _require_open(settlement: PartnerSettlement) -> None:
         raise SettlementStateError(f"المخالصة {settlement.code} موقّعة — لا يُعدَّل ما وقّعه الطرفان.")
 
 
+def list_settlements(
+    *, actor: Any, partner_code: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Settlements as rows (BR-053)."""
+    policy.require(actor, Screen.SETTLEMENTS, Action.VIEW, request=request)
+
+    queryset = PartnerSettlement.objects.select_related("partner", "agreement")
+    if partner_code:
+        queryset = queryset.filter(partner__code=partner_code)
+
+    return [
+        {
+            "code": s.code,
+            "partner_name": s.partner.name_ar,
+            "agreement_number": text_of(s.agreement, "agreement_number"),
+            "cycle_type": s.cycle_type,
+            "period_from": s.period_from,
+            "period_to": s.period_to,
+            "total_due": s.total_due,
+            "total_paid": s.total_paid,
+            "balance": s.balance,
+            "status": s.status,
+            "status_display": s.get_status_display(),
+            "signed_on": s.signed_on,
+            "is_open": s.status == SettlementStatus.OPEN,
+            "claim_count": s.claims.count(),
+        }
+        for s in queryset.order_by("-period_to", "-id")
+    ]
+
+
+def get_settlement(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
+    """One settlement with the claims it closes and what is still attachable."""
+    policy.require(actor, Screen.SETTLEMENTS, Action.VIEW, request=request)
+
+    settlement = PartnerSettlement.objects.select_related("partner", "agreement").get(code=code)
+    rows = list_settlements(actor=actor, request=request)
+    detail = next((r for r in rows if r["code"] == code), {})
+    detail.update(
+        {
+            "claims": [
+                {
+                    "code": c.code,
+                    "period_from": c.period_from,
+                    "period_to": c.period_to,
+                    "net_payable": c.net_payable,
+                    "status": c.status,
+                }
+                for c in settlement.claims.order_by("period_to", "id")
+            ],
+            "attachable": [
+                {"code": c.code, "net_payable": c.net_payable, "period_to": c.period_to}
+                for c in attachable_claims(settlement)
+            ],
+        }
+    )
+    return detail
+
+
+def settlement_instance(*, actor: Any, code: str, request: Any = None) -> PartnerSettlement:
+    """The PartnerSettlement object, for handing back into this module (A-05)."""
+    policy.require(actor, Screen.SETTLEMENTS, Action.VIEW, request=request)
+    return PartnerSettlement.objects.select_related("agreement").get(code=code)
+
+
+def open_agreement_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    (number, label) pairs of agreements with no settlement currently open.
+
+    One open cycle per agreement is the rule ``open_settlement`` enforces;
+    filtering here means the form does not offer a choice that will be refused.
+    """
+    from apps.partners.models import Agreement, AgreementStatus
+
+    policy.require(actor, Screen.SETTLEMENTS, Action.VIEW, request=request)
+
+    busy = set(
+        PartnerSettlement.objects.filter(status=SettlementStatus.OPEN).values_list(
+            "agreement_id", flat=True
+        )
+    )
+    return [
+        (a.agreement_number, f"{a.agreement_number} — {a.partner.name_ar}")
+        for a in Agreement.objects.select_related("partner")
+        .filter(status=AgreementStatus.ACTIVE)
+        .order_by("agreement_number")
+        if a.pk not in busy
+    ]
+
+
+def settleable_cohort_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    (code, label) pairs of cohorts a settlement may close.
+
+    Deliberately NOT ``cohort_service.cohort_choices``, which filters to
+    ministry-APPROVED cohorts because BR-013 gates enrolment on that approval.
+    Settling a cohort that has already run is a different question entirely:
+    the money was collected and the partner earned their share whatever the
+    submission record now says. Borrowing that list here would import a rule
+    from a neighbouring screen and quietly refuse legitimate settlements.
+
+    What DOES matter is that the cohort carries an agreement — a cohort with
+    no partner has nothing to settle.
+    """
+    from apps.operations.models import Cohort
+
+    policy.require(actor, Screen.SETTLEMENTS, Action.VIEW, request=request)
+
+    return [
+        (c.code, f"{c.code} — {c.name_ar}")
+        for c in Cohort.objects.select_related("agreement")
+        .filter(agreement__isnull=False)
+        .order_by("-starts_on")
+    ]
+
+
 __all__ = [
     "MONTHS_IN_CYCLE",
     "SettlementCycleError",
     "SettlementStateError",
     "attach_claims",
     "attachable_claims",
+    "get_settlement",
+    "list_settlements",
+    "open_agreement_choices",
     "open_settlement",
     "period_for",
     "record_payment",
+    "settleable_cohort_choices",
+    "settlement_instance",
     "sign_settlement",
 ]

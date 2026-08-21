@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "المخالصة إقرار بعدم بقاء مستحقات في الفترة — لا تُوقَّع ورصيدها غير صفري. وفترتها تُشتق من دورة الاتفاقية: كل أربعة أشهر للدبلوم، ونهاية كل دورة للقصيرة." %}
+</div>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الاتفاقية" %}</th>
+      <th>{% translate "الفترة" %}</th><th>{% translate "المطالبات" %}</th><th>{% translate "المستحق" %}</th>
+      <th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for s in settlements %}
+        <tr>
+          <td dir="ltr">{{ s.code }}</td><td>{{ s.partner_name }}</td>
+          <td dir="ltr">{{ s.agreement_number }}</td>
+          <td class="num">{{ s.period_from }} — {{ s.period_to }}</td>
+          <td class="num">{{ s.claim_count }}</td>
+          <td class="num">{{ s.total_due }}</td>
+          <td class="num">{{ s.total_paid }}</td>
+          <td class="num">{{ s.balance }}</td>
+          <td><span class="chip">{{ s.status_display }}</span></td>
+          <td><a class="btn2" href="{% url 'settlements:settlement-detail' s.code %}">{% translate "عرض" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="10" class="empty">{% translate "لا مخالصات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "فتح مخالصة" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "تُعرض الاتفاقيات السارية التي لا مخالصة مفتوحة لها — مخالصة واحدة مفتوحة لكل اتفاقية." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="open">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "فتح المخالصة" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

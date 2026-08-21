@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }} <span dir="ltr">{{ claim.code }}</span></h1>
+
+{% if claim.is_frozen %}
+  <div class="note ok">
+    {% translate "مطالبة معتمدة ومختومة — لا تُعدَّل بعد الاعتماد." %}
+    {% if claim.hash_verifies %} {% translate "بصمة المحتوى مطابقة." %}
+    {% elif claim.hash_verifies is False %} <strong>{% translate "⚠ بصمة المحتوى غير مطابقة." %}</strong>{% endif %}
+  </div>
+{% endif %}
+
+<div class="grid2">
+  <div class="kpi"><div class="label">{% translate "وعاء القسمة" %}</div><div class="value num">{{ claim.distribution_base }}</div></div>
+  <div class="kpi"><div class="label">{% translate "حصة الشريك" %}</div><div class="value num">{{ claim.partner_share }}</div></div>
+  <div class="kpi"><div class="label">{% translate "الحسومات" %}</div><div class="value num">{{ claim.total_deductions }}</div></div>
+  <div class="kpi"><div class="label">{% translate "الصافي المستحق" %}</div><div class="value num">{{ claim.net_payable }}</div></div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "كيف تكوّن الوعاء" %}</h2></div>
+  <div class="card2-body">
+    <div class="calc-row"><span>{% translate "إجمالي المقبوض" %}</span><span class="val num">{{ claim.gross_collected }}</span></div>
+    <div class="calc-row"><span>− {% translate "رسوم التسجيل المستثناة" %}</span><span class="val num">{{ claim.excluded_registration }}</span></div>
+    <div class="calc-row"><span>− {% translate "المستهلكات المستثناة" %}</span><span class="val num">{{ claim.excluded_consumables }}</span></div>
+    <div class="calc-row"><span>− {% translate "التأمينات المستثناة" %}</span><span class="val num">{{ claim.excluded_deposits }}</span></div>
+    <div class="calc-row"><span>− {% translate "حصة الشريك من الخصم" %}</span><span class="val num">{{ claim.discount_partner_burden }}</span></div>
+    <div class="calc-row"><strong>= {% translate "وعاء القسمة" %}</strong><strong class="val num">{{ claim.distribution_base }}</strong></div>
+    <div class="note">
+      {% translate "حصة الشريك من الخصم صفر لأن الخصم خفّض المقبوض أصلاً — فحسمها مرة ثانية يخصم الخصم مرتين." %}
+      {% translate "الوعاء" %}: <span dir="ltr">{{ claim.base_mode_snapshot }}</span> ·
+      {% translate "النموذج" %}: <span dir="ltr">{{ claim.model_snapshot }}</span>
+      {% if claim.rate_snapshot %} · {{ claim.rate_snapshot }}%{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "المشاركون" %}</h2></div>
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرقم" %}</th><th>{% translate "الاسم" %}</th><th>{% translate "الحالة" %}</th>
+      <th>{% translate "المقبوض" %}</th><th>{% translate "الوعاء" %}</th><th>{% translate "الحصة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for line in claim.lines %}
+        <tr>
+          <td dir="ltr">{{ line.participant_number }}</td>
+          <td>{{ line.participant_name }}</td>
+          <td>{{ line.enrollment_status }}</td>
+          <td class="num">{{ line.paid_amount }}</td>
+          <td class="num">{{ line.distribution_base }}</td>
+          <td class="num">{{ line.partner_share }}</td>
+          <td>
+            {% if line.is_included %}<span class="chip ok">{% translate "مستحَق" %}</span>
+            {% else %}<span class="chip danger">{{ line.exclusion_reason }}</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if claim.deductions %}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الحسومات" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "البيان" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+    <tbody>
+      {% for d in claim.deductions %}
+        <tr><td>{{ d.deduction_type }}</td><td>{{ d.label_ar }}</td><td class="num">{{ d.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if can_edit or can_approve %}
+  <div class="toolbar">
+    {% if can_edit %}
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="offsets">
+        <button class="btn2" type="submit">{% translate "تطبيق المقاصّات" %}</button>
+      </form>
+    {% endif %}
+    {% if can_approve and claim.created_by_id != current_user_id %}
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="approve">
+        <button class="btn2 primary" type="submit">{% translate "اعتماد وختم" %}</button>
+      </form>
+    {% elif can_approve %}
+      <span class="chip warn">{% translate "الاعتماد لغير من أنشأ المطالبة" %}</span>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

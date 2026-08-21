@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "شاشة قراءة. الالتزامات التي يرفعها النظام اليوم اثنان — استرجاع صرف مقدّم واسترجاع حصة شريك عن استرداد — وكلاهما آلي. أما رواتب المدربين ومصاريف التدريب العملي وغرامة الغياب فلا خدمة تُنشئها بعد، فلا يُعرض زرّ لقدرة غير موجودة." %}
+</div>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النوع" %}</th>
+      <th>{% translate "المبلغ" %}</th><th>{% translate "المُستوفى" %}</th><th>{% translate "المتبقّي" %}</th>
+      <th>{% translate "مقيَّد باتفاقية" %}</th><th>{% translate "البيان" %}</th><th>{% translate "الحالة" %}</th>
+    </tr></thead>
+    <tbody>
+      {% for o in obligations %}
+        <tr>
+          <td dir="ltr">{{ o.code }}</td>
+          <td>{{ o.partner_name }}</td>
+          <td>{{ o.obligation_type_display }}</td>
+          <td class="num">{{ o.amount }}</td>
+          <td class="num">{{ o.recovered_amount }}</td>
+          <td class="num">{{ o.outstanding }}</td>
+          <td dir="ltr">{{ o.restricted_to|default:"—" }}</td>
+          <td>{{ o.statement_reference }}</td>
+          <td><span class="chip">{{ o.status_display }}</span></td>
+        </tr>
+      {% empty %}<tr><td colspan="9" class="empty">{% translate "لا التزامات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -18,4 +18,7 @@ urlpatterns = [
         name="enrollment-action",
     ),
     path("operations/enrollments/<str:code>/account/", views.account_view, name="account"),
+    path("operations/clearance/", views.clearances_view, name="clearances"),
+    path("operations/clearance/<str:code>/", views.clearance_detail_view, name="clearance-detail"),
+    path("operations/certificates/", views.certificates_view, name="certificates"),
 ]

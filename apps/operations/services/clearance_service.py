@@ -66,12 +66,35 @@ FINANCE_STEP = 2
 #: DEFAULT stays FINANCE_MANAGER because that is what §6.4 names.
 SECOND_CERTIFIER_ROLE_KEY = "clearance_second_certifier_role"
 
+#: §6.4 assigns the three steps to two DEPARTMENTS, not to one authority:
+#: step 1 «المركز» · step 2 «المالية» · step 3 «المركز». The permission matrix
+#: cannot express that on its own — every action on this screen needs
+#: ``CLEARANCE.APPROVE``, and the finance officer holds it, so without these
+#: settings a finance officer could recover the centre's property and hand
+#: over the certificate.
+#:
+#: A role check on top of the permission check, in the same shape as
+#: ``SECOND_CERTIFIER_ROLE_KEY``: the permission decides who may reach the
+#: screen, the setting decides whose step this is.
+CUSTODY_ROLE_KEY = "clearance_custody_role"
+HANDOVER_ROLE_KEY = "clearance_handover_role"
+
 
 def second_certifier_role(*, as_of: date) -> str:
     """The role authorised to countersign the financial step."""
     return str(
         get_setting(SECOND_CERTIFIER_ROLE_KEY, as_of=as_of, default=Role.FINANCE_MANAGER)
     ).upper()
+
+
+def custody_role(*, as_of: date) -> str:
+    """§6.4 step 1 — «المركز: استرجاع العُهد»."""
+    return str(get_setting(CUSTODY_ROLE_KEY, as_of=as_of, default=Role.CENTER_MANAGER)).upper()
+
+
+def handover_role(*, as_of: date) -> str:
+    """§6.4 step 3 — «المركز: تسليم الشهادة»."""
+    return str(get_setting(HANDOVER_ROLE_KEY, as_of=as_of, default=Role.CENTER_MANAGER)).upper()
 
 
 class ClearanceBlockedError(ValidationError):
@@ -88,6 +111,51 @@ class DepositNotSettledError(ValidationError):
 
 class SecondCertifierRoleError(PermissionDenied):
     """BR-074 — the second signature belongs to the finance manager alone."""
+
+
+class StepRoleError(PermissionDenied):
+    """§6.4 — a step attempted by a department it does not belong to."""
+
+
+def _require_step_role(
+    *,
+    actor: Any,
+    clearance: Clearance,
+    step_number: int,
+    required_role: str,
+    request: Any,
+) -> None:
+    """
+    Refuse a step to a role it does not belong to, and record the attempt.
+
+    Audited like any other denial (BR-085 · BR-100): the whole point of
+    separating the centre's steps from finance's is that someone can later ask
+    who tried to cross the line.
+    """
+    if getattr(actor, "role", None) == required_role:
+        return
+
+    write_audit(
+        action="DENIED_ATTEMPT",
+        entity_type=STEP_ENTITY,
+        reference=clearance.code,
+        summary_ar=(
+            f"محاولة إتمام الخطوة {step_number} بدور غير {required_role} — "
+            f"{getattr(actor, 'role', None)}"
+        ),
+        actor=actor,
+        denial_rule="BR-072",
+        changes={
+            "step": step_number,
+            "role": getattr(actor, "role", None),
+            "required_role": required_role,
+        },
+        request=request,
+    )
+    raise StepRoleError(
+        f"الخطوة {step_number} ({STEP_NAMES[step_number]}) للدور {required_role} حصراً — "
+        f"§6.4 تُسند خطوتَي العُهد والتسليم إلى المركز والخطوة المالية إلى المالية."
+    )
 
 
 def open_clearance(
@@ -186,12 +254,24 @@ def complete_custody_step(
     request: Any = None,
 ) -> ClearanceStep:
     """
-    Step 1 — the centre's property back. Certified by the centre manager.
+    Step 1 — the centre's property back (§6.4: «المركز — استرجاع العُهد»).
+
+    Two checks, and they answer different questions: the PERMISSION asks
+    whether this user may act on clearances at all, and ``clearance_custody_role``
+    asks whether this step is theirs. The finance officer passes the first and
+    fails the second, which is what §6.4 intends.
 
     An item left outstanding keeps the step open; WORKFLOWS §6.7 is explicit
     that this is the correct outcome and not a nuisance.
     """
     policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+    _require_step_role(
+        actor=actor,
+        clearance=clearance,
+        step_number=1,
+        required_role=custody_role(as_of=timezone.now().date()),
+        request=request,
+    )
 
     outstanding = [item for item in custody_items if not item.get("returned")]
     if outstanding:
@@ -447,8 +527,19 @@ def _second_certify(
 def complete_handover_step(
     *, actor: Any, clearance: Clearance, request: Any = None
 ) -> ClearanceStep:
-    """Step 3 — the certificate changes hands. Certified by the centre manager."""
+    """
+    Step 3 — the certificate changes hands (§6.4: «المركز — تسليم الشهادة»).
+
+    The centre's step, like step 1, and gated the same way.
+    """
     policy.require(actor, Screen.CLEARANCE, Action.APPROVE, request=request)
+    _require_step_role(
+        actor=actor,
+        clearance=clearance,
+        step_number=3,
+        required_role=handover_role(as_of=timezone.now().date()),
+        request=request,
+    )
     _require_previous_done(clearance, 3)
     return _complete_handover(actor=actor, clearance=clearance, request=request)
 
@@ -585,20 +676,162 @@ def return_credit_at_clearance(
     return record
 
 
+def list_clearances(
+    *, actor: Any, status: str = "", query: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Clearances as rows, each showing which step it is waiting on."""
+    policy.require(actor, Screen.CLEARANCE, Action.VIEW, request=request)
+
+    queryset = Clearance.objects.select_related("participant", "enrollment__cohort__program")
+    if status:
+        queryset = queryset.filter(status=status)
+    if query:
+        queryset = queryset.filter(code__icontains=query) | queryset.filter(
+            participant__name_ar__icontains=query
+        )
+
+    rows: list[dict[str, Any]] = []
+    for clearance in queryset.order_by("-opened_on", "-id"):
+        steps = list(clearance.steps.order_by("step_number"))
+        pending = next((s.step_number for s in steps if not s.is_done), None)
+        rows.append(
+            {
+                "code": clearance.code,
+                "participant_name": clearance.participant.name_ar,
+                "participant_number": clearance.participant.participant_number,
+                "enrollment_code": clearance.enrollment.code,
+                "program_name": clearance.enrollment.cohort.program.name_ar,
+                "case_type": clearance.case_type,
+                "case_type_display": clearance.get_case_type_display(),
+                "opened_on": clearance.opened_on,
+                "status": clearance.status,
+                "status_display": clearance.get_status_display(),
+                "pending_step": pending,
+                "pending_step_name": STEP_NAMES.get(pending, "") if pending else "",
+                "is_completed": clearance.status == ClearanceStatus.COMPLETED,
+            }
+        )
+    return rows
+
+
+def get_clearance(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
+    """
+    One clearance with its three steps and the money as it stands NOW.
+
+    The balance is read live rather than from ``balance_at_check``: WORKFLOWS
+    §6.7 is about exactly this, a balance moving after step 2 was certified.
+    Showing the captured figure would tell the operator the account is settled
+    when it may no longer be.
+    """
+    from apps.core.display import person_name
+
+    policy.require(actor, Screen.CLEARANCE, Action.VIEW, request=request)
+
+    clearance = Clearance.objects.select_related(
+        "participant", "enrollment__cohort__program", "opened_by"
+    ).get(code=code)
+
+    state = get_account_state(clearance.enrollment)
+    deposit = deposit_settlement_state(clearance.enrollment)
+    as_of = timezone.now().date()
+
+    steps = [
+        {
+            "step_number": step.step_number,
+            "name_ar": step.name_ar,
+            "is_done": step.is_done,
+            "custody_items": step.custody_items,
+            "balance_at_check": step.balance_at_check,
+            "deposit_return_amount": step.deposit_return_amount,
+            "certified_by": person_name(step.certified_by),
+            "certified_by_id": step.certified_by_id,
+            "certified_at": step.certified_at,
+            "second_certified_by": person_name(step.second_certified_by),
+            "second_certified_at": step.second_certified_at,
+            "has_credit_return": step.credit_return_id is not None,
+        }
+        for step in clearance.steps.order_by("step_number")
+    ]
+    pending = next((s["step_number"] for s in steps if not s["is_done"]), None)
+
+    return {
+        "code": clearance.code,
+        "participant_name": clearance.participant.name_ar,
+        "participant_number": clearance.participant.participant_number,
+        "enrollment_code": clearance.enrollment.code,
+        "program_name": clearance.enrollment.cohort.program.name_ar,
+        "case_type_display": clearance.get_case_type_display(),
+        "opened_on": clearance.opened_on,
+        "opened_by": person_name(clearance.opened_by),
+        "status": clearance.status,
+        "status_display": clearance.get_status_display(),
+        "cancellation_reason_ar": clearance.cancellation_reason_ar,
+        "completed_at": clearance.completed_at,
+        "steps": steps,
+        "pending_step": pending,
+        "balance": state.balance,
+        "participant_owes": state.participant_owes,
+        "centre_owes": state.centre_owes,
+        "is_settled": state.is_settled,
+        "credit_outstanding": -state.balance if state.centre_owes else ZERO,
+        "deposit": deposit,
+        # The roles §6.4 assigns, so the screen can say whose turn it is.
+        "custody_role": custody_role(as_of=as_of),
+        "handover_role": handover_role(as_of=as_of),
+        "second_certifier_role": second_certifier_role(as_of=as_of),
+    }
+
+
+def clearance_instance(*, actor: Any, code: str, request: Any = None) -> Clearance:
+    """The Clearance object, for handing back into this module (A-05)."""
+    policy.require(actor, Screen.CLEARANCE, Action.VIEW, request=request)
+    return Clearance.objects.select_related("enrollment__participant").get(code=code)
+
+
+def clearable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    Enrolments a clearance may be opened for.
+
+    §6.4 — «عند انتهاء الدورة (أو الانسحاب أو الفصل)». An enrolment still
+    running has nothing to clear, and one that already carries a live
+    clearance would be refused, so neither is offered.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.CREATE, request=request)
+
+    finished = ("COMPLETED", "WITHDRAWN", "DISMISSED", "INCOMPLETE", "NOT_ATTENDED")
+    busy = set(Clearance.objects.filter(active_key=1).values_list("enrollment_id", flat=True))
+    return [
+        (e.code, f"{e.code} — {e.participant.name_ar} ({e.get_status_display()})")
+        for e in Enrollment.objects.select_related("participant")
+        .filter(status__in=finished)
+        .order_by("-enrolled_on")
+        if e.pk not in busy
+    ]
+
+
 __all__ = [
+    "CUSTODY_ROLE_KEY",
     "FINANCE_STEP",
+    "HANDOVER_ROLE_KEY",
     "SECOND_CERTIFIER_ROLE_KEY",
     "STEP_NAMES",
     "ClearanceBlockedError",
     "DepositNotSettledError",
     "SecondCertifierRoleError",
     "StepOutOfOrderError",
+    "StepRoleError",
     "cancel_clearance",
     "certify_finance_step",
+    "clearable_enrollment_choices",
+    "clearance_instance",
     "close_clearance",
     "complete_custody_step",
     "complete_handover_step",
+    "custody_role",
     "deposit_settlement_state",
+    "get_clearance",
+    "handover_role",
+    "list_clearances",
     "open_clearance",
     "return_credit_at_clearance",
     "second_certifier_role",
