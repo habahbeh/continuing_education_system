@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<div class="no-print">
+  <div class="toolbar">
+    <a class="btn2" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
+    <span class="spacer"></span>
+    <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+  </div>
+  <form method="get" class="toolbar">
+    <input name="enrollment" value="{{ request.GET.enrollment }}" placeholder="{% translate 'رمز التسجيل' %}">
+    <button class="btn2" type="submit">{% translate "عرض" %}</button>
+  </form>
+</div>
+<h1>{{ report.title }}</h1>
+{% if report.statement %}
+  {% include "operations/_statement.html" with statement=report.statement only %}
+{% else %}
+  <div class="note info">{% translate "أدخل رمز التسجيل لعرض كشف الحساب." %}</div>
+{% endif %}
+{% endblock %}

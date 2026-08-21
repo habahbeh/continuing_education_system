@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+{% include "reporting/_shell.html" %}
+<div class="note info">
+  {% translate "لا يُطرح إلا ما اعتُمد: حصص الشركاء من مطالبات معتمدة، والمصروفات من قيود معتمدة. والتأمينات مستثناة من الإيراد لأنها التزام لا دخل." %}
+</div>
+<div class="card2"><div class="card2-body">
+  <div class="calc-row"><span>{% translate "المقبوض (بلا تأمينات)" %}</span><span class="val num">{{ report.collected }}</span></div>
+  <div class="calc-row"><span>− {% translate "حصص الشركاء المعتمدة" %}</span><span class="val num">{{ report.partner_total }}</span></div>
+  <div class="calc-row"><span>− {% translate "المصروفات المعتمدة" %}</span><span class="val num">{{ report.expenses_total }}</span></div>
+  <div class="calc-row"><strong>= {% translate "صافي دخل المركز" %}</strong><strong class="val num">{{ report.net_income }}</strong></div>
+</div></div>
+{% if report.by_partner %}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "حسب الشريك" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الشريك" %}</th><th>{% translate "المستحق" %}</th></tr></thead>
+    <tbody>{% for name, amount in report.by_partner %}<tr><td>{{ name }}</td><td class="num">{{ amount }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

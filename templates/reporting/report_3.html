@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+{% include "reporting/_shell.html" %}
+<div class="grid2">
+  <div class="kpi"><div class="label">{% translate "إجمالي المطالبات" %}</div><div class="value num">{{ report.claims_total }}</div></div>
+  <div class="kpi"><div class="label">{% translate "المدفوع بالمخالصات" %}</div><div class="value num">{{ report.settled_total }}</div></div>
+  <div class="kpi"><div class="label">{% translate "التزامات قائمة" %}</div><div class="value num">{{ report.obligations_outstanding }}</div></div>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "المطالبات" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الفترة" %}</th>
+      <th>{% translate "الحصة" %}</th><th>{% translate "الحسومات" %}</th><th>{% translate "الصافي" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+    <tbody>
+      {% for c in report.claims %}
+        <tr><td dir="ltr">{{ c.code }}</td><td>{{ c.partner_name }}</td>
+            <td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
+            <td class="num">{{ c.partner_share }}</td><td class="num">{{ c.total_deductions }}</td>
+            <td class="num">{{ c.net_payable }}</td><td>{{ c.status_display }}</td></tr>
+      {% empty %}<tr><td colspan="7" class="empty">{% translate "لا مطالبات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "المخالصات" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الفترة" %}</th><th>{% translate "المستحق" %}</th>
+      <th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+    <tbody>
+      {% for s in report.settlements %}
+        <tr><td dir="ltr">{{ s.code }}</td><td class="num">{{ s.period_from }} — {{ s.period_to }}</td>
+            <td class="num">{{ s.total_due }}</td><td class="num">{{ s.total_paid }}</td>
+            <td class="num">{{ s.balance }}</td><td>{{ s.status_display }}</td></tr>
+      {% empty %}<tr><td colspan="6" class="empty">{% translate "لا مخالصات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الالتزامات" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "النوع" %}</th><th>{% translate "المبلغ" %}</th>
+      <th>{% translate "المُستوفى" %}</th><th>{% translate "المتبقّي" %}</th><th>{% translate "البيان" %}</th></tr></thead>
+    <tbody>
+      {% for o in report.obligations %}
+        <tr><td dir="ltr">{{ o.code }}</td><td>{{ o.obligation_type_display }}</td>
+            <td class="num">{{ o.amount }}</td><td class="num">{{ o.recovered_amount }}</td>
+            <td class="num">{{ o.outstanding }}</td><td>{{ o.statement_reference }}</td></tr>
+      {% empty %}<tr><td colspan="6" class="empty">{% translate "لا التزامات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

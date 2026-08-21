@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "منح شاشة التقارير ليس منح السبعة — لكل تقرير صلاحيته، والمحجوب عن دورك معلَّم أدناه." %}
+</div>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr><th>#</th><th>{% translate "التقرير" %}</th><th>{% translate "المصدر" %}</th><th></th></tr></thead>
+    <tbody>
+      {% for r in reports %}
+        <tr>
+          <td class="num">{{ r.number }}</td>
+          <td>{{ r.title }}</td>
+          <td class="muted">§9.{{ r.number }}</td>
+          <td>
+            {% if r.allowed %}
+              <a class="btn2" href="{% url 'reporting:report' r.number %}">{% translate "فتح" %}</a>
+            {% else %}
+              <span class="chip">{% translate "خارج نطاق دورك" %}</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

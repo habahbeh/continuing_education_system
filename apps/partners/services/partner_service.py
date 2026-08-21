@@ -154,6 +154,14 @@ def agreement_instance(*, actor: Any, agreement_number: str, request: Any = None
     return Agreement.objects.select_related("partner").get(agreement_number=agreement_number)
 
 
+def partner_instance(*, actor: Any, code: str, request: Any = None) -> Any:
+    """The Partner model object, for handing to another service (A-05)."""
+    from apps.partners.models import Partner
+
+    policy.require(actor, Screen.PARTNERS, Action.VIEW, request=request)
+    return Partner.objects.get(code=code)
+
+
 __all__ = [
     "agreement_choices",
     "agreement_instance",
@@ -161,4 +169,5 @@ __all__ = [
     "get_partner",
     "list_agreements",
     "list_partners",
+    "partner_instance",
 ]

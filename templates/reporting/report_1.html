@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+{% include "reporting/_shell.html" %}
+<div class="grid2">
+  <div class="kpi"><div class="label">{% translate "إجمالي المقبوض" %}</div><div class="value num">{{ report.total }}</div></div>
+  <div class="kpi"><div class="label">{% translate "رسوم التسجيل" %}</div><div class="value num">{{ report.registration_total }}</div>
+    <div class="muted">{% translate "مستثناة من وعاء الشركاء" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "الرسوم الدراسية" %}</div><div class="value num">{{ report.tuition_total }}</div></div>
+  <div class="kpi"><div class="label">{% translate "التأمينات" %}</div><div class="value num">{{ report.deposit_total }}</div>
+    <div class="muted">{% translate "التزام لا إيراد" %}</div></div>
+</div>
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "حسب نوع البند" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "المقبوض" %}</th></tr></thead>
+    <tbody>
+      {% for kind, amount in report.by_type %}<tr><td>{{ kind }}</td><td class="num">{{ amount }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

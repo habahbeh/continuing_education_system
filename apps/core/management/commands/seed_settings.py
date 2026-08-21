@@ -103,6 +103,26 @@ SEED: list[tuple[str, Any, str, str]] = [
     ("payment_overdue_days", 30, I, "Q-16 (مفتوح): مهلة اعتبار المشارك متأخراً."),
     ("registration_fee_center_default", "50.000", D, "BR-009: رسم تسجيل طالب المركز."),
     ("registration_fee_university_default", "15.000", D, "BR-009: رسم تسجيل الطالب الجامعي."),
+    # --- Expenses (Sprint 8C-2) ------------------------------------------
+    (
+        "expense_categories",
+        (
+            '[["CONSUMABLES","مستهلكات"],["MARKETING","تسويق"],'
+            '["CERTIFICATES","شهادات"],["OTHER","أخرى"]]'
+        ),
+        S,
+        "§9.7 — تصنيفات مصروفات المركز. بيانات لا choices في الكود، على نمط "
+        "certificate_grades، فإضافة تصنيف إدخال بيانات لا هجرة. "
+        "⚠️ «مستهلكات» هنا ما يشتريه المركز — غير ChargeType.CONSUMABLES "
+        "المحمَّل على المشارك وهو إيراد، وغير exclude_consumables الذي يقرّر "
+        "دخولها وعاء الشريك. ثلاثة معانٍ لكلمة واحدة، وخلطها يُنتج رقماً خاطئاً.",
+    ),
+    (
+        "report_export_encoding",
+        "utf-8-sig",
+        S,
+        "§9 — ترميز ملفات CSV المصدَّرة. BOM يجعل Excel يقرأ العربية صحيحةً بلا اعتمادية Excel.",
+    ),
     # --- Printed documents (Sprint 8C-1) ---------------------------------
     # The centre's own blank forms were NOT in the client folder — it carries
     # the signed agreements and the 2026 price list and no form of the

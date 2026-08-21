@@ -30,7 +30,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from apps.core.exceptions import ImmutableRecordError
-from apps.core.fields import Money, Rate, ShortCode
+from apps.core.fields import DisplayRef, Money, Rate, ShortCode
 
 
 class ImmutableClaimError(ImmutableRecordError):
@@ -446,6 +446,98 @@ class PartnerObligation(models.Model):
     @property
     def outstanding(self) -> object:
         return self.amount - self.recovered_amount
+
+
+class TrainerAbsence(models.Model):
+    """
+    One lecture a trainer missed (تناغم بند 13, BR-057, BR-058).
+
+    **Why a row per absence and not a counter.** The signed agreement fines
+    three times the lecture's cost «ما عدا الحالات الطارئة والتي يوافق عليها
+    الفريق الأول خطياً», and replaces the trainer «في حال تكرر الغياب لأكثر من
+    أربع محاضرات». Both clauses turn on WHICH absences count, not how many
+    were typed in — a waived one is neither fined nor counted toward
+    replacement, and a partner disputing the penalty is entitled to see the
+    written approval that excused it.
+
+    A counter cannot hold that. The excused absence would leave no trace at
+    all: not its date, not its approval, not the fact that anyone decided.
+    ``settlements_obligation_penalty_has_inputs`` already says the same thing
+    about the penalty itself — "a penalty without its inputs cannot be defended
+    to the partner" — and this is that principle extended to the exception.
+
+    ``ObligationStatus.WAIVED`` is a different act and is not reused here: it
+    forgives a whole obligation after the fact, where this excuses one lecture
+    before any obligation exists.
+    """
+
+    cohort = models.ForeignKey(
+        "operations.Cohort",
+        on_delete=models.PROTECT,
+        related_name="trainer_absences",
+        verbose_name=_("الدفعة"),
+    )
+    #: Text, matching ``Cohort.trainer_name`` — there is no trainer entity in
+    #: v1 and inventing one here would model a person the rest of the system
+    #: does not know.
+    trainer_name = models.CharField(max_length=150, verbose_name=_("المدرب"))
+    occurred_on = models.DateField(verbose_name=_("تاريخ المحاضرة"))
+
+    is_waived = models.BooleanField(default=False, verbose_name=_("حالة طارئة معفاة"))
+    waiver_approval_ref = DisplayRef(verbose_name=_("مرجع الموافقة الخطية"))
+    waiver_approval_date = models.DateField(null=True, blank=True)
+
+    #: Set when a penalty is raised covering this absence, so the same lecture
+    #: cannot be fined twice.
+    obligation = models.ForeignKey(
+        PartnerObligation,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="absences",
+        verbose_name=_("الغرامة"),
+    )
+
+    note_ar = models.CharField(max_length=255, blank=True, verbose_name=_("ملاحظة"))
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="absences_recorded"
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("غياب مدرب")
+        verbose_name_plural = _("غيابات المدربين")
+        ordering = ["-occurred_on", "-id"]
+        constraints = [
+            # The exception exists only in writing — «يوافق عليها الفريق الأول
+            # خطياً». An excused absence with no approval reference is exactly
+            # what the clause refuses.
+            models.CheckConstraint(
+                condition=models.Q(is_waived=False)
+                | (
+                    ~models.Q(waiver_approval_ref="") & models.Q(waiver_approval_date__isnull=False)
+                ),
+                name="settlements_absence_waiver_has_approval",
+            ),
+            # One lecture, one absence. Without this the same missed lecture
+            # could be entered twice and fined twice.
+            models.UniqueConstraint(
+                fields=["cohort", "trainer_name", "occurred_on"],
+                name="settlements_absence_unique_per_lecture",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["cohort", "trainer_name"], name="stl_abs_cohort_trainer_idx"),
+            models.Index(fields=["is_waived"], name="stl_abs_waived_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.trainer_name} — {self.occurred_on}"
+
+    @property
+    def counts_toward_penalty(self) -> bool:
+        """A waived absence is neither fined nor counted for replacement."""
+        return not self.is_waived
 
 
 class ClaimDeduction(models.Model):

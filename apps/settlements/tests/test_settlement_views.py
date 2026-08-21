@@ -311,16 +311,94 @@ def test_an_agreement_with_an_open_cycle_is_not_offered_again(
 # ---------------------------------------------------------------------------
 # Obligations
 # ---------------------------------------------------------------------------
-def test_obligations_are_read_only(signed_in, manager) -> None:
+def test_obligations_became_recordable_in_8c2(signed_in, manager) -> None:
     """
-    §5.6's other obligations have no creating service, so no button pretends.
+    Sprint 8B-2 left this screen read-only because no creating service existed.
 
-    Trainer salaries, field-training expenses and the absence penalty are all
-    still manual; only the advance clawback and the refund recovery exist, and
-    both are raised automatically.
+    Sprint 8C-2 built one for §5.6's three manual obligations, so the form is
+    now offered — to the roles the matrix grants CREATE, which is what this
+    asserts rather than the mere presence of a form tag.
     """
     page = signed_in(manager).get(reverse("settlements:obligations"))
-    body = page.content.decode()
+
     assert page.status_code == 200
-    assert body.count('<form method="post"') == 1  # sign-out only
-    assert "/auth/logout/" in body
+    assert page.context["can_create"] is True
+    assert page.context["form"] is not None
+
+    # The absence penalty is NOT offered by hand — BR-057 makes it a formula.
+    offered = dict(page.context["form"].fields["obligation_type"].choices)
+    assert "TRAINER_ABSENCE_PENALTY" not in offered
+    assert "TRAINER_SALARIES" in offered
+
+
+def test_the_audit_account_still_cannot_record_an_obligation(signed_in, seeded_settings) -> None:
+    """Read-only stays read-only for the role that is only ever read-only."""
+    from apps.people.models import Role, User
+
+    auditor = User.objects.create_user(
+        username="aud.obl", password=PASSWORD, role=Role.AUDIT_ACCOUNT
+    )
+    page = signed_in(auditor).get(reverse("settlements:obligations"))
+
+    assert page.status_code == 200
+    assert page.context["can_create"] is False
+    assert page.context["form"] is None
+
+
+def _record_obligation(client, partner, **extra):
+    payload = {
+        "action": "record",
+        "code": "OBL-UI-1",
+        "partner_code": partner.code,
+        "obligation_type": "FIELD_TRAINING_EXPENSE",
+        "amount": "300.000",
+        "occurred_on": TERM_START.isoformat(),
+        "statement_reference": "كشف المركز 2026/9",
+        "cohort_code": "",
+    }
+    payload.update(extra)
+    return client.post(reverse("settlements:obligations"), payload, follow=True)
+
+
+def test_an_obligation_is_recorded_through_the_screen(
+    signed_in, manager, partner, cohort_with_agreement
+) -> None:
+    """§5.6 · تناغم بند 7 — the centre's field-training costs, charged back."""
+    response = _record_obligation(signed_in(manager), partner)
+
+    assert response.status_code == 200
+    row = next(o for o in response.context["obligations"] if o["code"] == "OBL-UI-1")
+    assert row["amount"] == Decimal("300.000")
+    assert row["statement_reference"] == "كشف المركز 2026/9"
+
+
+def test_an_obligation_without_a_statement_is_refused(
+    signed_in, manager, partner, cohort_with_agreement
+) -> None:
+    """
+    «بموجب كشف من المركز» — the reference is what makes the debt provable.
+
+    A partner who cannot trace the charge back to a document will dispute it
+    at settlement time, which is exactly when it is too late.
+    """
+    response = _record_obligation(signed_in(manager), partner, statement_reference="")
+
+    assert response.status_code == 200
+    assert not any(o["code"] == "OBL-UI-1" for o in response.context["obligations"])
+
+
+def test_an_obligation_recorded_against_a_cohort_is_pinned_to_its_agreement(
+    signed_in, manager, partner, cohort_with_agreement
+) -> None:
+    """
+    Q-08 offsets partner-wide by default, but a debt arising under ONE
+    contract belongs to it — the same rule the clawback and the refund
+    recovery already follow.
+    """
+    response = _record_obligation(
+        signed_in(manager), partner, code="OBL-UI-2", cohort_code=cohort_with_agreement.code
+    )
+
+    row = next(o for o in response.context["obligations"] if o["code"] == "OBL-UI-2")
+    assert row["cohort_code"] == cohort_with_agreement.code
+    assert row["restricted_to"] == cohort_with_agreement.agreement.agreement_number

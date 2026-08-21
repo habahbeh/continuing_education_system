@@ -10,6 +10,7 @@ app_name = "settlements"
 
 urlpatterns = [
     path("settlements/obligations/", views.obligations_view, name="obligations"),
+    path("settlements/absences/", views.absences_view, name="absences"),
     path("settlements/claims/", views.claims_view, name="claims"),
     path("settlements/claims/<str:code>/", views.claim_detail_view, name="claim-detail"),
     path("settlements/settlements/", views.settlements_view, name="settlements"),

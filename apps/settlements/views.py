@@ -14,6 +14,8 @@ operator something untrue about a signed document.
 
 from __future__ import annotations
 
+from datetime import date
+
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -27,12 +29,21 @@ from apps.operations.services import cohort_service
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
 from apps.settlements.forms import (
+    AbsenceForm,
     ClaimBuildForm,
+    ObligationForm,
+    PenaltyForm,
     SettlementOpenForm,
     SettlementPaymentForm,
     SettlementSignForm,
 )
-from apps.settlements.services import claim_service, clawback_service, settlement_service
+from apps.settlements.services import (
+    absence_service,
+    claim_service,
+    clawback_service,
+    obligation_service,
+    settlement_service,
+)
 
 #: Which permission each POST action needs, checked before the service so a
 #: ROLE violation is a 403 and a RULE violation is a readable message.
@@ -53,29 +64,240 @@ def _message_of(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 # Obligations (Screen.OBLIGATIONS) — read only
 # ---------------------------------------------------------------------------
+@require_http_methods(["GET", "POST"])
 def obligations_view(request: HttpRequest) -> HttpResponse:
     """
-    §5.6's obligations, as they stand.
+    §5.6's obligations — now recordable, not only readable.
 
-    Read only: the two obligation types the system raises come from a name-list
-    closure and a refund recovery, both automatic. Trainer salaries, field
-    training expenses and the absence penalty have no creating service yet, so
-    no create button is offered for a capability that does not exist.
+    Three of the five types are entered by a human here (trainer salaries,
+    field-training expenses, a withdrawing partner's return). The advance
+    clawback and the refund recovery are still raised automatically, and the
+    absence penalty is computed from the absence register rather than typed,
+    because BR-057 makes it a formula that must show its inputs.
     """
-    rows = clawback_service.list_obligations(
-        actor=request.user,
-        partner_code=request.GET.get("partner", "").strip(),
-        request=request,
-    )
+    can_create = policy.is_allowed(request.user, Screen.OBLIGATIONS, Action.CREATE)
+    form = None
+    if can_create:
+        from apps.partners.services import partner_service
+
+        form = ObligationForm(
+            request.POST if request.POST.get("action") == "record" else None,
+            partner_choices=[
+                (p["code"], p["name_ar"])
+                for p in partner_service.list_partners(actor=request.user, request=request)
+            ]
+            if policy.is_allowed(request.user, Screen.PARTNERS, Action.VIEW)
+            else [],
+            type_choices=obligation_service.manual_type_choices(),
+            cohort_choices=settlement_service.settleable_cohort_choices(
+                actor=request.user, request=request
+            ),
+        )
+
+    if request.method == "POST":
+        response = _handle_obligation(request, form)
+        if response is not None:
+            return response
+
     return render(
         request,
         "settlements/obligations.html",
         {
             "title": _("التزامات الشركاء"),
             "active_screen": Screen.OBLIGATIONS,
-            "obligations": rows,
+            "obligations": clawback_service.list_obligations(
+                actor=request.user,
+                partner_code=request.GET.get("partner", "").strip(),
+                request=request,
+            ),
+            "form": form,
+            "can_create": can_create,
         },
     )
+
+
+def _handle_obligation(request: HttpRequest, form: ObligationForm | None) -> HttpResponse | None:
+    action = request.POST.get("action", "")
+    if action == "record":
+        policy.require(request.user, Screen.OBLIGATIONS, Action.CREATE, request=request)
+    if action != "record" or form is None or not form.is_valid():
+        return None
+
+    from apps.partners.services import partner_service
+
+    data = form.cleaned_data
+    try:
+        partner = partner_service.partner_instance(
+            actor=request.user, code=data["partner_code"], request=request
+        )
+        cohort = (
+            cohort_service.get_cohort_instance(
+                actor=request.user, code=data["cohort_code"], request=request
+            )
+            if data["cohort_code"]
+            else None
+        )
+        obligation_service.record_obligation(
+            actor=request.user,
+            partner=partner,
+            obligation_type=data["obligation_type"],
+            amount=data["amount"],
+            occurred_on=data["occurred_on"],
+            statement_reference=data["statement_reference"],
+            code=data["code"],
+            cohort=cohort,
+            request=request,
+        )
+    except (DjangoValidationError, PermissionDenied) as exc:
+        messages.error(request, _message_of(exc))
+        return None
+    except ObjectDoesNotExist:
+        messages.error(request, _("شريك أو دفعة غير معروفة"))
+        return None
+
+    messages.success(request, _("قُيّد الالتزام"))
+    return redirect("settlements:obligations")
+
+
+# ---------------------------------------------------------------------------
+# Trainer absences (Screen.OBLIGATIONS — the absence is a cause, not an entity)
+# ---------------------------------------------------------------------------
+@require_http_methods(["GET", "POST"])
+def absences_view(request: HttpRequest) -> HttpResponse:
+    """
+    The absence register (تناغم بند 13).
+
+    Governed by ``Screen.OBLIGATIONS`` rather than a screen of its own: an
+    absence exists in this system only because it causes an obligation, and
+    giving it a separate permission row would let the two drift apart.
+    """
+    can_create = policy.is_allowed(request.user, Screen.OBLIGATIONS, Action.CREATE)
+    absence_form = penalty_form = None
+    if can_create:
+        cohorts = settlement_service.settleable_cohort_choices(actor=request.user, request=request)
+        absence_form = AbsenceForm(
+            request.POST if request.POST.get("action") == "record" else None,
+            cohort_choices=cohorts,
+        )
+        penalty_form = PenaltyForm(
+            request.POST if request.POST.get("action") == "penalise" else None,
+            target_choices=absence_service.absent_trainer_choices(
+                actor=request.user, request=request
+            ),
+        )
+
+    if request.method == "POST":
+        response = _handle_absence(request, absence_form, penalty_form)
+        if response is not None:
+            return response
+
+    return render(
+        request,
+        "settlements/absences.html",
+        {
+            "title": _("غيابات المدربين"),
+            "active_screen": Screen.OBLIGATIONS,
+            "absences": absence_service.list_absences(
+                actor=request.user,
+                cohort_code=request.GET.get("cohort", "").strip(),
+                request=request,
+            ),
+            "alerts": absence_service.replacement_alerts(
+                actor=request.user, as_of=date.today(), request=request
+            ),
+            "replace_limit": absence_service.replace_limit(as_of=date.today()),
+            "multiplier": absence_service.multiplier(as_of=date.today()),
+            "absence_form": absence_form,
+            "penalty_form": penalty_form,
+            "can_create": can_create,
+        },
+    )
+
+
+def _handle_absence(
+    request: HttpRequest, absence_form: AbsenceForm | None, penalty_form: PenaltyForm | None
+) -> HttpResponse | None:
+    action = request.POST.get("action", "")
+    permission = {"record": Action.CREATE, "penalise": Action.CREATE, "waive": Action.EDIT}.get(
+        action
+    )
+    if permission is None:
+        return None
+    policy.require(request.user, Screen.OBLIGATIONS, permission, request=request)
+
+    try:
+        if action == "record":
+            if absence_form is None or not absence_form.is_valid():
+                return None
+            _record_absence(request, absence_form)
+        elif action == "penalise":
+            if penalty_form is None or not penalty_form.is_valid():
+                return None
+            _raise_penalty(request, penalty_form)
+        else:
+            _waive_absence(request)
+    except (DjangoValidationError, PermissionDenied) as exc:
+        messages.error(request, _message_of(exc))
+        return None
+    except ObjectDoesNotExist:
+        messages.error(request, _("سجل غير موجود"))
+        return None
+    return redirect("settlements:absences")
+
+
+def _record_absence(request: HttpRequest, form: AbsenceForm) -> None:
+    data = form.cleaned_data
+    cohort = cohort_service.get_cohort_instance(
+        actor=request.user, code=data["cohort_code"], request=request
+    )
+    absence_service.record_absence(
+        actor=request.user,
+        cohort=cohort,
+        trainer_name=data["trainer_name"],
+        occurred_on=data["occurred_on"],
+        is_waived=data["is_waived"],
+        waiver_approval_ref=data["waiver_approval_ref"],
+        waiver_approval_date=data["waiver_approval_date"],
+        note_ar=data["note_ar"],
+        request=request,
+    )
+    messages.success(request, _("سُجِّل الغياب"))
+
+
+def _raise_penalty(request: HttpRequest, form: PenaltyForm) -> None:
+    cohort_code, trainer_name = form.cleaned_data["target"].split("|", 1)
+    cohort = cohort_service.get_cohort_instance(
+        actor=request.user, code=cohort_code, request=request
+    )
+    obligation = absence_service.raise_penalty(
+        actor=request.user,
+        cohort=cohort,
+        trainer_name=trainer_name,
+        occurred_on=form.cleaned_data["occurred_on"],
+        code=form.cleaned_data["code"],
+        request=request,
+    )
+    messages.success(request, _("رُفعت غرامة الغياب %(a)s") % {"a": obligation.amount})
+
+
+def _waive_absence(request: HttpRequest) -> None:
+    absence = absence_service.absence_instance(
+        actor=request.user, absence_id=int(request.POST.get("id", "0")), request=request
+    )
+    raw = request.POST.get("approval_date", "")
+    try:
+        approval_date = date.fromisoformat(raw)
+    except ValueError as exc:
+        raise DjangoValidationError("تاريخ الموافقة غير صالح.") from exc
+
+    absence_service.waive_absence(
+        actor=request.user,
+        absence=absence,
+        approval_ref=request.POST.get("approval_ref", ""),
+        approval_date=approval_date,
+        request=request,
+    )
+    messages.success(request, _("أُعفي الغياب بموافقة خطية"))
 
 
 # ---------------------------------------------------------------------------

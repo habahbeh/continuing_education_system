@@ -78,6 +78,7 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.DISCOUNTS, "billing:discounts", _("الخصومات")),
             NavItem(Screen.REFUNDS, "billing:refunds", _("الاستردادات وردّ الأرصدة")),
             NavItem(Screen.EXTRA_FEES, "billing:extra-fees", _("الرسوم الإضافية")),
+            NavItem(Screen.EXPENSES, "expenses:expenses", _("المصروفات")),
         ),
     ),
     NavGroup(
@@ -88,6 +89,7 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.CLAIMS, "settlements:claims", _("المطالبات")),
             NavItem(Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
             NavItem(Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
+            NavItem(Screen.OBLIGATIONS, "settlements:absences", _("غيابات المدربين")),
         ),
     ),
     NavGroup(
@@ -100,6 +102,7 @@ NAV: tuple[NavGroup, ...] = (
     NavGroup(
         _("النظام"),
         (
+            NavItem(Screen.REPORTS, "reporting:reports", _("التقارير")),
             NavItem(Screen.USERS, "people:users", _("المستخدمون والصلاحيات")),
             NavItem(Screen.AUDIT, "people:audit", _("سجل التدقيق")),
         ),

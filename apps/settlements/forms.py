@@ -88,8 +88,86 @@ class SettlementSignForm(forms.Form):
     signed_on = forms.DateField(label=_("تاريخ التوقيع"), widget=forms.DateInput({"type": "date"}))
 
 
+class ObligationForm(forms.Form):
+    """
+    §5.6 — one of the three obligations a human records.
+
+    The absence penalty is absent from the choices on purpose: it is a formula
+    with inputs (BR-057) and ``absence_service`` computes it from the absences
+    actually recorded.
+    """
+
+    code = forms.CharField(label=_("رمز الالتزام"), max_length=32)
+    partner_code = forms.ChoiceField(label=_("الشريك"), choices=[])
+    obligation_type = forms.ChoiceField(label=_("نوع الالتزام"), choices=[])
+    amount = forms.DecimalField(label=_("المبلغ"), max_digits=12, decimal_places=3, min_value=0)
+    occurred_on = forms.DateField(label=_("التاريخ"), widget=forms.DateInput({"type": "date"}))
+    statement_reference = forms.CharField(
+        label=_("مرجع الكشف"),
+        max_length=255,
+        help_text=_("«بموجب كشف من المركز» — سند الذمة على الشريك"),
+    )
+    cohort_code = forms.ChoiceField(label=_("الدفعة (اختياري)"), choices=[], required=False)
+
+    def __init__(
+        self,
+        *args: Any,
+        partner_choices: list[tuple[str, str]] | None = None,
+        type_choices: list[tuple[str, str]] | None = None,
+        cohort_choices: list[tuple[str, str]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["partner_code"]).choices = partner_choices or []
+        cast(forms.ChoiceField, self.fields["obligation_type"]).choices = type_choices or []
+        cast(forms.ChoiceField, self.fields["cohort_code"]).choices = [("", "—")] + (
+            cohort_choices or []
+        )
+
+
+class AbsenceForm(forms.Form):
+    """One missed lecture (تناغم بند 13)."""
+
+    cohort_code = forms.ChoiceField(label=_("الدفعة"), choices=[])
+    trainer_name = forms.CharField(label=_("المدرب"), max_length=150)
+    occurred_on = forms.DateField(
+        label=_("تاريخ المحاضرة"), widget=forms.DateInput({"type": "date"})
+    )
+    is_waived = forms.BooleanField(label=_("حالة طارئة معفاة"), required=False)
+    waiver_approval_ref = forms.CharField(
+        label=_("مرجع الموافقة الخطية"), max_length=64, required=False
+    )
+    waiver_approval_date = forms.DateField(
+        label=_("تاريخ الموافقة"), widget=forms.DateInput({"type": "date"}), required=False
+    )
+    note_ar = forms.CharField(label=_("ملاحظة"), max_length=255, required=False)
+
+    def __init__(
+        self, *args: Any, cohort_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["cohort_code"]).choices = cohort_choices or []
+
+
+class PenaltyForm(forms.Form):
+    """Raise the penalty covering a trainer's outstanding absences."""
+
+    target = forms.ChoiceField(label=_("الدفعة والمدرب"), choices=[])
+    code = forms.CharField(label=_("رمز الالتزام"), max_length=32)
+    occurred_on = forms.DateField(label=_("التاريخ"), widget=forms.DateInput({"type": "date"}))
+
+    def __init__(
+        self, *args: Any, target_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["target"]).choices = target_choices or []
+
+
 __all__ = [
+    "AbsenceForm",
     "ClaimBuildForm",
+    "ObligationForm",
+    "PenaltyForm",
     "SettlementOpenForm",
     "SettlementPaymentForm",
     "SettlementSignForm",

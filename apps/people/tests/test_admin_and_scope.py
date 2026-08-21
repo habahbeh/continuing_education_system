@@ -154,9 +154,14 @@ def test_no_business_model_exists_yet() -> None:
 
     2A allowed no business model; 2B added people.Participant; 3 the
     catalogue; 4 billing and the till; 5 partners and settlements; 6 the rest
-    of the participant lifecycle; 7 clearance and certificates. Expenses,
-    reporting and the archive still belong to later sprints, and a model that
-    appears early is scope that was never approved.
+    of the participant lifecycle; 7 clearance and certificates; 8C-2 the
+    centre's own expenses and the trainer absence register. The historical
+    archive still belongs to a later sprint, and a model that appears early is
+    scope that was never approved.
+
+    ``reporting`` stays in ``business_apps`` on purpose even though its screens
+    now exist: the seven reports read what the other apps wrote, and a model
+    appearing there would mean a report had started keeping its own figures.
     """
     from django.apps import apps as django_apps
 
@@ -223,10 +228,15 @@ def test_no_business_model_exists_yet() -> None:
             "PartnerObligation",
             "ClaimDeduction",
             "PartnerSettlement",
+            # Sprint 8C-2 — one row per missed lecture. A counter would erase
+            # the excused absence, which the signed clause needs on record.
+            "TrainerAbsence",
         },
+        # Sprint 8C-2 — what the centre SPENT, a different ledger from what a
+        # partner owes it. Its own app so the two cannot be confused.
+        "expenses": {"Expense"},
     }
     business_apps = {
-        "expenses",
         "reporting",
         "datamigration",
     }
@@ -244,10 +254,10 @@ def test_later_sprint_models_do_not_exist() -> None:
     """
     The guard that keeps a PREREQUISITE from becoming a land grab.
 
-    ✅ Sprint 7 delivered clearance and certificates, so those have moved into
-    the allowed set above too. What remains is everything Sprint 8 and later
-    own — named individually, because a list of absences is only worth having
-    if it is specific.
+    ✅ Sprint 7 delivered clearance and certificates and Sprint 8C-2 delivered
+    ``Expense``, so both have moved into the allowed set above. What remains is
+    everything a later sprint owns — named individually, because a list of
+    absences is only worth having if it is specific.
     """
     from django.apps import apps as django_apps
 
@@ -259,10 +269,6 @@ def test_later_sprint_models_do_not_exist() -> None:
         "TaxRule",
         "OpeningBalance",
         "EnrollmentApplication",
-        # The expense side of the partner relationship (DATA_MODEL §10.1).
-        # Sprint 5 records what a partner is OWED and what they owe back;
-        # what the centre pays out is a separate ledger in a later sprint.
-        "Expense",
         "MigrationBatch",
         "MigrationRow",
     ):

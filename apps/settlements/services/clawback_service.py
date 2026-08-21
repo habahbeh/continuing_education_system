@@ -188,9 +188,13 @@ def list_obligations(
     """
     Partner obligations as rows — what is owed back and what has been recovered.
 
-    Read only in Sprint 8B-2. §5.6's obligations (trainer salaries, field
-    training expenses, the absence penalty) have no creating service yet; the
-    two that exist are raised automatically by this module and by a refund.
+    Every §5.6 obligation now reaches this list by one of three routes, and the
+    route matters when reading a row. Two are raised automatically — the
+    advance clawback here and the refund recovery next door. Three are recorded
+    by hand through ``obligation_service``, each against a centre statement.
+    The absence penalty is neither: ``absence_service`` computes it from the
+    absences on record, because BR-057 makes it a formula that must show its
+    inputs rather than an amount somebody typed.
     """
     from apps.people.constants import Action, Screen
     from apps.people.permissions import policy

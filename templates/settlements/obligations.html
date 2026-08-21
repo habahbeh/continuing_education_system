@@ -3,7 +3,7 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <div class="note info">
-  {% translate "شاشة قراءة. الالتزامات التي يرفعها النظام اليوم اثنان — استرجاع صرف مقدّم واسترجاع حصة شريك عن استرداد — وكلاهما آلي. أما رواتب المدربين ومصاريف التدريب العملي وغرامة الغياب فلا خدمة تُنشئها بعد، فلا يُعرض زرّ لقدرة غير موجودة." %}
+  {% translate "التزامات الشريك تجاه الجامعة — تُستوفى بالحسم من مطالباته لا نقداً. رواتب المدربين ومصاريف التدريب العملي وإعادة ما قُبض عن أجزاء لم تُنفَّذ تُقيَّد هنا. أما غرامة غياب المدرب فتُحتسب من سجل الغيابات لأنها صيغة بمدخلات، واسترجاع الصرف المقدّم واسترجاع الاسترداد يرفعهما النظام آلياً." %}
 </div>
 <div class="card2">
   <table class="tbl">
@@ -29,4 +29,19 @@
     </tbody>
   </table>
 </div>
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "قيد التزام" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "مرجع الكشف إلزامي — «بموجب كشف من المركز» وهو سند الذمة. والالتزام الناشئ عن دفعة يُقيَّد على اتفاقيتها." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="record">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "قيد الالتزام" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}
