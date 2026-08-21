@@ -43,6 +43,7 @@ from django.utils import timezone
 
 from apps.billing.models import Refund, RefundStatus
 from apps.billing.services.account_service import ZERO, get_account_state
+from apps.core.display import person_name
 from apps.core.money import round_money
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
@@ -396,12 +397,54 @@ def _execute(*, actor: Any, refund: Refund, executed_on: date, request: Any) -> 
     return refund
 
 
+def list_refunds(
+    *, actor: Any, enrollment_code: str = "", status: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Refunds as rows for the refunds screen (§5.3)."""
+    queryset = Refund.objects.select_related(
+        "enrollment__participant", "requested_by", "approved_by", "executed_by"
+    )
+    policy.require(actor, Screen.REFUNDS, Action.VIEW, request=request)
+
+    if enrollment_code:
+        queryset = queryset.filter(enrollment__code=enrollment_code)
+    if status:
+        queryset = queryset.filter(status=status)
+
+    return [
+        {
+            "code": r.code,
+            "enrollment_code": r.enrollment.code,
+            "participant_name": r.enrollment.participant.name_ar,
+            "refund_type": r.refund_type,
+            "amount": r.amount,
+            "reason_ar": r.reason_ar,
+            "official_letter_ref": r.official_letter_ref,
+            "president_approval_ref": r.president_approval_ref,
+            "status": r.status,
+            "status_display": r.get_status_display(),
+            "requested_by": person_name(r.requested_by),
+            "requested_by_id": r.requested_by_id,
+            "partner_recovery_amount": r.partner_recovery_amount,
+            "executed_at": r.executed_at,
+        }
+        for r in queryset.order_by("-created_at")
+    ]
+
+
+def get_refund(*, actor: Any, code: str, request: Any = None) -> Refund:
+    policy.require(actor, Screen.REFUNDS, Action.VIEW, request=request)
+    return Refund.objects.get(code=code)
+
+
 __all__ = [
     "RefundExceedsPaidError",
     "RefundStateError",
     "already_claimed",
     "approve_refund",
     "execute_refund",
+    "get_refund",
+    "list_refunds",
     "partner_recovery_for",
     "refundable_amount",
     "reject_refund",

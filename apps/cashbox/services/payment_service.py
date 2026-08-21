@@ -28,6 +28,7 @@ from django.utils import timezone
 
 from apps.billing.models import ALLOCATION_ORDER, ChargeLine
 from apps.billing.services.account_service import ZERO, outstanding_for_line
+from apps.core.display import person_name, text_of
 from apps.core.services.audit_service import write_audit
 from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.core.services.settings_service import get_setting
@@ -338,10 +339,133 @@ def approve_void(*, actor: Any, void_record: Any, request: Any = None) -> Any:
     return void_record
 
 
+def list_receipts(
+    *,
+    actor: Any,
+    query: str = "",
+    on_date: date | None = None,
+    cashier_id: int | None = None,
+    request: Any = None,
+) -> list[dict[str, Any]]:
+    """Receipts as rows for the payments screen (PERMISSIONS row 15)."""
+    from apps.cashbox.models import Receipt
+
+    policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
+
+    queryset = Receipt.objects.select_related("participant", "payment_method", "cashier")
+    if query:
+        queryset = queryset.filter(internal_receipt_number__icontains=query) | queryset.filter(
+            participant__name_ar__icontains=query
+        )
+    if on_date is not None:
+        queryset = queryset.filter(received_on=on_date)
+    if cashier_id is not None:
+        queryset = queryset.filter(cashier_id=cashier_id)
+
+    return [
+        {
+            "internal_receipt_number": r.internal_receipt_number,
+            "external_receipt_ref": r.external_receipt_ref,
+            "participant_name": r.participant.name_ar,
+            "participant_number": r.participant.participant_number,
+            "received_on": r.received_on,
+            "amount": r.amount,
+            "payment_method": r.payment_method.name_ar,
+            "cashier": person_name(r.cashier),
+            "status": r.status,
+            "status_display": r.get_status_display(),
+            "breakdown_text_ar": r.breakdown_text_ar,
+            "is_closed": r.daily_closing_id is not None,
+        }
+        for r in queryset.order_by("-received_on", "-id")
+    ]
+
+
+def get_receipt(*, actor: Any, number: str, request: Any = None) -> dict[str, Any]:
+    """One receipt with its allocations and any void request against it."""
+    from apps.cashbox.models import PaymentAllocation, Receipt, ReceiptVoid
+
+    policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
+
+    receipt = Receipt.objects.select_related("participant", "payment_method", "cashier").get(
+        internal_receipt_number=number
+    )
+
+    allocations = [
+        {
+            "enrollment_code": text_of(a.enrollment, "code"),
+            "against": text_of(a.charge_line, "description_ar", default="رصيد غير مخصَّص"),
+            "amount": a.amount,
+            "allocation_type": a.allocation_type,
+            "manual_reason_ar": a.manual_reason_ar,
+        }
+        for a in PaymentAllocation.objects.filter(receipt=receipt)
+        .select_related("enrollment", "charge_line")
+        .order_by("id")
+    ]
+
+    void = ReceiptVoid.objects.filter(receipt=receipt).order_by("-id").first()
+    return {
+        "internal_receipt_number": receipt.internal_receipt_number,
+        "external_receipt_ref": receipt.external_receipt_ref,
+        "participant_name": receipt.participant.name_ar,
+        "participant_number": receipt.participant.participant_number,
+        "received_on": receipt.received_on,
+        "amount": receipt.amount,
+        "payment_method": receipt.payment_method.name_ar,
+        "cashier": person_name(receipt.cashier),
+        "status": receipt.status,
+        "status_display": receipt.get_status_display(),
+        "breakdown_text_ar": receipt.breakdown_text_ar,
+        "allocations": allocations,
+        "void_id": void.pk if void else None,
+        "void_reason_ar": void.reason_ar if void else "",
+        "void_is_approved": bool(void and void.approved_by_id),
+    }
+
+
+def payment_method_choices() -> list[tuple[str, str]]:
+    """(code, name) pairs for the payment form."""
+    from apps.cashbox.models import PaymentMethod
+
+    return [
+        (m.code, m.name_ar) for m in PaymentMethod.objects.filter(is_active=True).order_by("code")
+    ]
+
+
+def method_by_code(code: str) -> Any:
+    from apps.cashbox.models import PaymentMethod
+
+    return PaymentMethod.objects.get(code=code)
+
+
+def receipt_instance(*, actor: Any, number: str, request: Any = None) -> Any:
+    """The Receipt object, for handing back into this module (A-05)."""
+    from apps.cashbox.models import Receipt
+
+    policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
+    return Receipt.objects.get(internal_receipt_number=number)
+
+
+def void_instance(*, actor: Any, number: str, request: Any = None) -> Any:
+    """The open void request on a receipt, for the approver."""
+    from apps.cashbox.models import Receipt, ReceiptVoid
+
+    policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
+    receipt = Receipt.objects.get(internal_receipt_number=number)
+    return ReceiptVoid.objects.filter(receipt=receipt, approved_by__isnull=True).latest("id")
+
+
 __all__ = [
     "allocate",
     "approve_void",
     "check_minimum_first_payment",
+    "get_receipt",
+    "list_receipts",
+    "method_by_code",
+    "payment_method_choices",
+    "receipt_instance",
     "request_void",
     "take_payment",
+    "void_instance",
 ]

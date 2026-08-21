@@ -1,0 +1,14 @@
+{% load i18n %}
+{% comment %}Renders a plain Form. Errors come from the form; service refusals arrive as messages.{% endcomment %}
+{% if form.non_field_errors %}
+  <div class="note danger">{{ form.non_field_errors }}</div>
+{% endif %}
+<div class="grid2">
+  {% for field in form %}
+    <div class="fld">
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.errors %}<div class="err">{{ field.errors|join:" · " }}</div>{% endif %}
+    </div>
+  {% endfor %}
+</div>

@@ -23,6 +23,7 @@ from django.db.models import Count, Sum
 from django.utils import timezone
 
 from apps.billing.services.account_service import ZERO
+from apps.core.display import person_name
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -136,4 +137,68 @@ def reconcile(
     return closing
 
 
-__all__ = ["open_closing", "reconcile", "system_total_for"]
+def list_closings(
+    *, actor: Any, on_date: date | None = None, request: Any = None
+) -> list[dict[str, Any]]:
+    """Daily closings as rows, newest first (§9 report 6)."""
+    from apps.cashbox.models import DailyClosing
+
+    policy.require(actor, Screen.CLOSING, Action.VIEW, request=request)
+
+    queryset = DailyClosing.objects.select_related("cashier", "approved_by")
+    if on_date is not None:
+        queryset = queryset.filter(closing_date=on_date)
+
+    return [
+        {
+            "code": c.code,
+            "closing_date": c.closing_date,
+            "cashier": person_name(c.cashier),
+            "cashier_id": c.cashier_id,
+            "system_total": c.system_total,
+            "counted_total": c.counted_total,
+            "variance": c.variance,
+            "receipt_count": c.receipt_count,
+            "status": c.status,
+            "status_display": c.get_status_display(),
+            "variance_resolution_ar": c.variance_resolution_ar,
+            "approved_by": person_name(c.approved_by),
+        }
+        for c in queryset.order_by("-closing_date", "-id")
+    ]
+
+
+def cashier_choices() -> list[tuple[str, str]]:
+    """Users who may hold a till, for the closing form."""
+    from apps.people.models import Role, User
+
+    return [
+        (str(u.pk), u.full_name_ar or u.get_username())
+        for u in User.objects.filter(role=Role.CASHIER, is_active=True).order_by("username")
+    ]
+
+
+def cashier_instance(user_id: int) -> Any:
+    """The cashier a closing belongs to."""
+    from apps.people.models import User
+
+    return User.objects.get(pk=user_id)
+
+
+def closing_instance(*, actor: Any, code: str, request: Any = None) -> Any:
+    """The DailyClosing object, for handing back into this module (A-05)."""
+    from apps.cashbox.models import DailyClosing
+
+    policy.require(actor, Screen.CLOSING, Action.VIEW, request=request)
+    return DailyClosing.objects.get(code=code)
+
+
+__all__ = [
+    "cashier_choices",
+    "cashier_instance",
+    "closing_instance",
+    "list_closings",
+    "open_closing",
+    "reconcile",
+    "system_total_for",
+]

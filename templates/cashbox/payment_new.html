@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "أقل دفعة أولى للدبلوم 400 دينار (300 تسجيل + 100 أول مادة) — يفرضها النظام عند الحفظ." %}
+</div>
+<div class="card2"><div class="card2-body">
+  <form method="post">
+    {% csrf_token %}
+    {% include "partials/_form.html" %}
+    <button class="btn2 primary" type="submit">{% translate "إصدار سند القبض" %}</button>
+  </form>
+</div></div>
+{% endblock %}

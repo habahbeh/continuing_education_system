@@ -58,6 +58,7 @@ from django.db import transaction
 
 from apps.billing.models import ChargeType, Discount, DiscountType
 from apps.billing.services.account_service import ZERO
+from apps.core.display import person_name
 from apps.core.money import round_money
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
@@ -376,6 +377,48 @@ def _approve(*, actor: Any, discount: Discount, request: Any) -> Discount:
     return discount
 
 
+def list_discounts(
+    *, actor: Any, enrollment_code: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Discounts as rows, with the split each one recorded (§5.1)."""
+    policy.require(actor, Screen.DISCOUNTS, Action.VIEW, request=request)
+
+    queryset = Discount.objects.select_related(
+        "enrollment__participant", "created_by", "approved_by"
+    )
+    if enrollment_code:
+        queryset = queryset.filter(enrollment__code=enrollment_code)
+
+    return [
+        {
+            "id": d.pk,
+            "enrollment_code": d.enrollment.code,
+            "participant_name": d.enrollment.participant.name_ar,
+            "discount_type": d.discount_type,
+            "rate": d.rate,
+            "amount": d.amount,
+            "base_amount": d.base_amount,
+            "reason_ar": d.reason_ar,
+            "president_approval_ref": d.president_approval_ref,
+            "president_approval_date": d.president_approval_date,
+            "university_burden": d.university_burden,
+            "partner_burden": d.partner_burden,
+            "split_mode": d.discount_split_mode_snapshot,
+            "created_by": person_name(d.created_by),
+            "created_by_id": d.created_by_id,
+            "is_approved": d.approved_by_id is not None,
+            "approved_by": person_name(d.approved_by),
+        }
+        for d in queryset.order_by("-created_at")
+    ]
+
+
+def get_discount(*, actor: Any, discount_id: int, request: Any = None) -> Discount:
+    """The Discount row itself, for a service call that needs the instance."""
+    policy.require(actor, Screen.DISCOUNTS, Action.VIEW, request=request)
+    return Discount.objects.get(pk=discount_id)
+
+
 __all__ = [
     "NO_AGREEMENT_MODE",
     "DiscountAfterPaymentError",
@@ -386,8 +429,10 @@ __all__ = [
     "agreement_for",
     "approve_discount",
     "claim_base_adjustment",
+    "get_discount",
     "grant_discount",
     "has_shareable_allocations",
+    "list_discounts",
     "split_for",
     "tuition_base",
 ]

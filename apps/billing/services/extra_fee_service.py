@@ -36,6 +36,7 @@ from django.db import transaction
 from apps.billing.models import ChargeType, ExtraFee, ExtraFeeType
 from apps.billing.services import charge_service
 from apps.billing.services.account_service import ZERO
+from apps.core.display import person_name, text_of
 from apps.core.services.audit_service import write_audit
 from apps.core.services.settings_service import get_setting
 from apps.people.constants import Action, Screen
@@ -220,6 +221,37 @@ def replacement_fee_for(enrollment: Any) -> ExtraFee | None:
     )
 
 
+def list_extra_fees(
+    *, actor: Any, enrollment_code: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Extra fees as rows, each with the ledger line it created (§5.5)."""
+    policy.require(actor, Screen.EXTRA_FEES, Action.VIEW, request=request)
+
+    queryset = ExtraFee.objects.select_related(
+        "enrollment__participant", "charge_line", "created_by"
+    )
+    if enrollment_code:
+        queryset = queryset.filter(enrollment__code=enrollment_code)
+
+    return [
+        {
+            "id": f.pk,
+            "enrollment_code": f.enrollment.code,
+            "participant_name": f.enrollment.participant.name_ar,
+            "fee_type": f.fee_type,
+            "fee_type_display": f.get_fee_type_display(),
+            "subject_name": f.subject_name,
+            "amount": f.amount,
+            "is_partner_shareable": f.is_partner_shareable,
+            "prior_agreement_with_participant": f.prior_agreement_with_participant,
+            "charged_on": f.charged_on,
+            "charge_line_description": text_of(f.charge_line, "description_ar"),
+            "created_by": person_name(f.created_by),
+        }
+        for f in queryset.order_by("-charged_on", "-id")
+    ]
+
+
 __all__ = [
     "DESCRIPTION_BY_TYPE",
     "FEE_SETTING_KEYS",
@@ -228,5 +260,6 @@ __all__ = [
     "PriorAgreementRequiredError",
     "charge_extra_fee",
     "default_amount_for",
+    "list_extra_fees",
     "replacement_fee_for",
 ]

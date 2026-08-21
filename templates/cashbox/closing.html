@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "الإجمالي النظامي محتسب من السندات الصادرة — لا يُدخَل يدوياً. والفرق يُغلق بتسوية مكتوبة لا صامتاً (BR-027)." %}
+</div>
+
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "الصندوق" %}</th>
+      <th>{% translate "النظامي" %}</th><th>{% translate "المعدود" %}</th><th>{% translate "الفرق" %}</th>
+      <th>{% translate "السندات" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for c in closings %}
+        <tr>
+          <td dir="ltr">{{ c.code }}</td>
+          <td class="num">{{ c.closing_date }}</td>
+          <td>{{ c.cashier }}</td>
+          <td class="num">{{ c.system_total }}</td>
+          <td class="num">{{ c.counted_total }}</td>
+          <td class="num">{{ c.variance }}</td>
+          <td class="num">{{ c.receipt_count }}</td>
+          <td><span class="chip">{{ c.status_display }}</span></td>
+          <td>
+            {% if can_approve and c.status != "RECONCILED" %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="action" value="reconcile">
+                <input type="hidden" name="code" value="{{ c.code }}">
+                <input name="variance_resolution_ar" placeholder="{% translate 'تسوية الفرق إن وُجد' %}">
+                <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}<tr><td colspan="9" class="empty">{% translate "لا إقفالات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "فتح إقفال" %}</h2></div>
+    <div class="card2-body">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="open">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "فتح الإقفال" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

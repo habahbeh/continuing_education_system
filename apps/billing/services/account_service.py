@@ -155,4 +155,123 @@ def outstanding_for_line(charge_line: Any) -> Decimal:
     return charge_line.gross_amount - allocated
 
 
-__all__ = ["ZERO", "AccountState", "get_account_state", "outstanding_for_line"]
+def account_statement(*, actor: Any, enrollment: Any, request: Any = None) -> dict[str, Any]:
+    """
+    The participant's financial statement — §9 report 5, as a screen.
+
+    Everything the statement must show is assembled HERE rather than in a
+    template, because §5.1 requires the discount to appear as an explicit
+    line and §9 requires transfers and refunds to be visible on it. A template
+    that recomputed any of these would be a second opinion about money.
+
+    Voided rows are carried with a flag rather than filtered out: a
+    participant holding a receipt that was later voided is entitled to find it
+    on the statement, marked, not to find it missing.
+    """
+    from apps.billing.models import ChargeLine, CreditReturn, Discount, Refund
+    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
+    from apps.core.display import text_of
+    from apps.people.constants import Action, Screen
+    from apps.people.permissions import policy
+
+    policy.require(actor, Screen.ENROLLMENTS, Action.VIEW, request=request)
+
+    state = get_account_state(enrollment)
+
+    charges = [
+        {
+            "charged_on": line.charged_on,
+            "charge_type": line.charge_type,
+            "charge_type_display": line.get_charge_type_display(),
+            "description_ar": line.description_ar,
+            "net_amount": line.net_amount,
+            "tax_amount": line.tax_amount,
+            "gross_amount": line.gross_amount,
+            "outstanding": outstanding_for_line(line),
+            "is_partner_shareable": line.is_partner_shareable,
+            "voided": line.voided,
+            "void_reason_ar": line.void_reason_ar,
+        }
+        for line in ChargeLine.objects.filter(enrollment=enrollment).order_by("charged_on", "id")
+    ]
+
+    payments = [
+        {
+            "received_on": allocation.receipt.received_on,
+            "receipt_number": allocation.receipt.internal_receipt_number,
+            "external_ref": allocation.receipt.external_receipt_ref,
+            "amount": allocation.amount,
+            "against": text_of(allocation.charge_line, "description_ar", default="رصيد غير مخصَّص"),
+            "allocation_type": allocation.allocation_type,
+            "manual_reason_ar": allocation.manual_reason_ar,
+            "is_reversal": allocation.amount < ZERO,
+            "voided": allocation.receipt.status != ReceiptStatus.ISSUED,
+        }
+        for allocation in PaymentAllocation.objects.filter(enrollment=enrollment)
+        .select_related("receipt", "charge_line")
+        .order_by("id")
+    ]
+
+    discounts = [
+        {
+            "amount": discount.amount,
+            "base_amount": discount.base_amount,
+            "reason_ar": discount.reason_ar,
+            "president_approval_ref": discount.president_approval_ref,
+            "president_approval_date": discount.president_approval_date,
+            "university_burden": discount.university_burden,
+            "partner_burden": discount.partner_burden,
+            "split_mode": discount.discount_split_mode_snapshot,
+            "is_approved": discount.approved_by_id is not None,
+        }
+        for discount in Discount.objects.filter(enrollment=enrollment).order_by("created_at")
+    ]
+
+    refunds = [
+        {
+            "code": refund.code,
+            "amount": refund.amount,
+            "status": refund.status,
+            "status_display": refund.get_status_display(),
+            "reason_ar": refund.reason_ar,
+            "official_letter_ref": refund.official_letter_ref,
+            "president_approval_ref": refund.president_approval_ref,
+            "partner_recovery_amount": refund.partner_recovery_amount,
+        }
+        for refund in Refund.objects.filter(enrollment=enrollment).order_by("created_at")
+    ]
+
+    credit_returns = [
+        {
+            "code": record.code,
+            "amount": record.amount,
+            "returned_on": record.returned_on,
+            "reason_ar": record.reason_ar,
+        }
+        for record in CreditReturn.objects.filter(enrollment=enrollment).order_by("returned_on")
+    ]
+
+    return {
+        "enrollment_code": enrollment.code,
+        "participant_name": enrollment.participant.name_ar,
+        "participant_number": enrollment.participant.participant_number,
+        "cohort_code": enrollment.cohort.code,
+        "program_name": enrollment.cohort.program.name_ar,
+        "status": enrollment.status,
+        "status_display": enrollment.get_status_display(),
+        "state": state,
+        "charges": charges,
+        "payments": payments,
+        "discounts": discounts,
+        "refunds": refunds,
+        "credit_returns": credit_returns,
+    }
+
+
+__all__ = [
+    "ZERO",
+    "AccountState",
+    "account_statement",
+    "get_account_state",
+    "outstanding_for_line",
+]

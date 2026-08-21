@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "الخصم على الرسوم الدراسية وحدها ولا يمسّ رسم التسجيل، ويسبق القبض. حصة الشريك من الخصم تُحتسب من صيغة الاتفاقية وتُسجَّل هنا — ولا تُحسم مرة ثانية من وعاء المطالبة." %}
+</div>
+
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
+      <th>{% translate "المبلغ" %}</th><th>{% translate "الوعاء" %}</th>
+      <th>{% translate "السبب" %}</th><th>{% translate "موافقة الرئيس" %}</th>
+      <th>{% translate "الجامعة" %}</th><th>{% translate "الشريك" %}</th>
+      <th>{% translate "الصيغة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for d in discounts %}
+        <tr>
+          <td dir="ltr">{{ d.enrollment_code }}</td>
+          <td>{{ d.participant_name }}</td>
+          <td class="num">{{ d.amount }}</td>
+          <td class="num">{{ d.base_amount }}</td>
+          <td>{{ d.reason_ar }}</td>
+          <td dir="ltr">{{ d.president_approval_ref }}</td>
+          <td class="num">{{ d.university_burden }}</td>
+          <td class="num">{{ d.partner_burden }}</td>
+          <td><span class="chip">{{ d.split_mode }}</span></td>
+          <td>
+            {% if d.is_approved %}<span class="chip ok">{% translate "معتمَد" %}</span>
+            {% elif can_approve and d.created_by_id != current_user_id %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="action" value="approve">
+                <input type="hidden" name="id" value="{{ d.id }}">
+                <button class="btn2" type="submit">{% translate "اعتماد" %}</button>
+              </form>
+            {% else %}<span class="chip warn">{% translate "بانتظار اعتماد غير المُنشئ" %}</span>{% endif %}
+          </td>
+        </tr>
+      {% empty %}<tr><td colspan="10" class="empty">{% translate "لا خصومات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "منح خصم" %}</h2></div>
+    <div class="card2-body">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="grant">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "منح الخصم" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

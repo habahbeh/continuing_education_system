@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<form method="get" class="toolbar">
+  <input name="q" value="{{ query }}" placeholder="{% translate 'رقم السند أو اسم المشارك' %}">
+  <input type="date" name="on" value="{{ on_date }}">
+  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+  <span class="spacer"></span>
+  {% if can_create %}<a class="btn2 primary" href="{% url 'cashbox:payment-new' %}">{% translate "استيفاء دفعة" %}</a>{% endif %}
+</form>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "رقم السند" %}</th><th>{% translate "سند الدائرة المالية" %}</th>
+      <th>{% translate "المشارك" %}</th><th>{% translate "التاريخ" %}</th>
+      <th>{% translate "المبلغ" %}</th><th>{% translate "الطريقة" %}</th>
+      <th>{% translate "الصندوق" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in receipts %}
+        <tr>
+          <td dir="ltr">{{ r.internal_receipt_number }}</td>
+          <td dir="ltr">{{ r.external_receipt_ref|default:"—" }}</td>
+          <td>{{ r.participant_name }}</td>
+          <td class="num">{{ r.received_on }}</td>
+          <td class="num">{{ r.amount }}</td>
+          <td>{{ r.payment_method }}</td>
+          <td>{{ r.cashier }}</td>
+          <td><span class="chip">{{ r.status_display }}</span>
+              {% if r.is_closed %}<span class="chip ok">{% translate "مقفل" %}</span>{% endif %}</td>
+          <td><a class="btn2" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}">{% translate "عرض" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="9" class="empty">{% translate "لا سندات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

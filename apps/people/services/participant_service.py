@@ -402,6 +402,19 @@ def _handle_duplicates(
     )
 
 
+def participant_instance(*, actor: Any, participant_number: str, request: Any = None) -> Any:
+    """
+    The Participant model object, for handing to another service.
+
+    Distinct from :func:`get_participant`, which projects the record down to
+    the fields the caller may see and is what a SCREEN should render. This one
+    exists so a view can pass a participant into ``enroll_with_charges``
+    without ever importing the model itself (A-05).
+    """
+    policy.require(actor, Screen.STUDENTS, Action.VIEW, request=request)
+    return Participant.objects.get(participant_number=participant_number)
+
+
 __all__ = [
     "FULL_FIELDS",
     "RESTRICTED_FIELDS",
@@ -414,6 +427,7 @@ __all__ = [
     "get_participant",
     "get_participant_display",
     "list_participants",
+    "participant_instance",
     "project",
     "update_participant",
     "visible_fields_for",

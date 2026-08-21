@@ -464,6 +464,179 @@ def _change_status(
     return enrollment
 
 
+def list_enrollments(
+    *,
+    actor: Any,
+    query: str = "",
+    cohort_code: str = "",
+    status: str = "",
+    request: Any = None,
+) -> list[dict[str, Any]]:
+    """
+    Enrolments as rows, each carrying its balance.
+
+    The balance comes from ``get_account_state`` rather than a stored column,
+    because there is exactly one place the balance equation lives and a list
+    screen is not entitled to a second opinion about it (DATA_MODEL §8.2).
+    """
+    from apps.billing.services.account_service import get_account_state
+
+    policy.require(actor, Screen.ENROLLMENTS, Action.VIEW, request=request)
+
+    queryset = Enrollment.objects.select_related(
+        "participant", "cohort__program", "cohort__agreement__partner"
+    )
+    if query:
+        queryset = queryset.filter(code__icontains=query) | queryset.filter(
+            participant__name_ar__icontains=query
+        )
+    if cohort_code:
+        queryset = queryset.filter(cohort__code=cohort_code)
+    if status:
+        queryset = queryset.filter(status=status)
+
+    rows: list[dict[str, Any]] = []
+    for enrollment in queryset.order_by("-enrolled_on", "code"):
+        state = get_account_state(enrollment)
+        rows.append(
+            {
+                "code": enrollment.code,
+                "participant_name": enrollment.participant.name_ar,
+                "participant_number": enrollment.participant.participant_number,
+                "cohort_code": enrollment.cohort.code,
+                "cohort_name": enrollment.cohort.name_ar,
+                "program_name": enrollment.cohort.program.name_ar,
+                "enrolled_on": enrollment.enrolled_on,
+                "status": enrollment.status,
+                "status_display": enrollment.get_status_display(),
+                "status_note_ar": enrollment.status_note_ar,
+                "voucher_received": enrollment.voucher_received,
+                "is_approved": enrollment.approved_by_id is not None,
+                "balance": state.balance,
+                "total_due": state.total_due,
+                "total_paid": state.total_paid,
+                "total_discount": state.total_discount,
+                "participant_owes": state.participant_owes,
+                "centre_owes": state.centre_owes,
+                "is_settled": state.is_settled,
+            }
+        )
+    return rows
+
+
+def get_enrollment(*, actor: Any, code: str, request: Any = None) -> Enrollment:
+    """The Enrollment instance, for handing to another service."""
+    policy.require(actor, Screen.ENROLLMENTS, Action.VIEW, request=request)
+    return Enrollment.objects.select_related("participant", "cohort__program").get(code=code)
+
+
+def enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """(code, label) pairs for forms that act on one enrolment."""
+    policy.require(actor, Screen.ENROLLMENTS, Action.VIEW, request=request)
+    return [
+        (e.code, f"{e.code} — {e.participant.name_ar}")
+        for e in Enrollment.objects.select_related("participant").order_by("-enrolled_on")[:200]
+    ]
+
+
+def enroll_with_charges(
+    *,
+    actor: Any,
+    participant: Any,
+    cohort: Cohort,
+    enrolled_on: date,
+    code: str,
+    request: Any = None,
+) -> Enrollment:
+    """
+    Enrol a participant AND raise the charges the price list says they owe.
+
+    One call rather than two, because the two halves are not independently
+    meaningful: an enrolment with no charge lines owes nothing, so the cashier
+    would find nothing to collect against and the balance would read zero on
+    someone who has paid nothing.
+
+    Resolving the price is a DECISION — which list is in force, whether the
+    programme is levelled, which category the participant falls in — and
+    decisions belong here rather than in a view assembling two service calls
+    (ADR-008).
+    """
+    from apps.billing.services import charge_service
+    from apps.catalog.models import PriceList
+    from apps.catalog.services import pricing_service
+
+    quote = pricing_service.resolve_price(
+        program=cohort.program,
+        participant_category=participant.category,
+        as_of=enrolled_on,
+        level=cohort.level,
+    )
+
+    enrollment = create_enrollment(
+        actor=actor,
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=enrolled_on,
+        # The quote names the list it came from, so the enrolment records the
+        # list that actually priced it rather than whichever is current later.
+        price_list=PriceList.objects.get(pk=quote.price_list_id),
+        code=code,
+        request=request,
+    )
+    charge_service.charge_lines_from_quote(
+        actor=actor,
+        enrollment=enrollment,
+        quote=quote,
+        charged_on=enrolled_on,
+        request=request,
+    )
+    return enrollment
+
+
+def payable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    Enrolments the cashier may collect against, with what is still owed.
+
+    Guarded by ``PAYMENT_NEW`` rather than ``ENROLLMENTS`` on purpose. §8 gives
+    the cashier the till and nothing else — they hold no permission on the
+    enrolments screen at all — yet taking a payment requires naming the
+    enrolment it pays. Choosing a target is part of the payment screen's own
+    authority, not a borrowed view of someone else's screen.
+
+    Settled enrolments are omitted: collecting against a zero balance produces
+    an unallocated credit that then has to be handed back at clearance.
+    """
+    from apps.billing.services.account_service import ZERO, get_account_state
+
+    policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
+
+    pairs: list[tuple[str, str]] = []
+    for enrollment in (
+        Enrollment.objects.select_related("participant")
+        .exclude(status=EnrollmentStatus.CANCELLED)
+        .order_by("-enrolled_on")[:200]
+    ):
+        balance = get_account_state(enrollment).balance
+        if balance <= ZERO:
+            continue
+        pairs.append(
+            (enrollment.code, f"{enrollment.code} — {enrollment.participant.name_ar} ({balance})")
+        )
+    return pairs
+
+
+def payable_enrollment(*, actor: Any, code: str, request: Any = None) -> Enrollment:
+    """
+    One enrolment, resolved under the PAYMENT screen's authority.
+
+    The cashier's counterpart to :func:`get_enrollment` — see
+    :func:`payable_enrollment_choices` for why the till does not borrow the
+    enrolments screen's permission.
+    """
+    policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
+    return Enrollment.objects.select_related("participant", "cohort__program").get(code=code)
+
+
 __all__ = [
     "AttendanceNotDocumentedError",
     "CohortNotApprovedError",
@@ -472,7 +645,13 @@ __all__ = [
     "approve_enrollment",
     "change_status",
     "create_enrollment",
+    "enroll_with_charges",
+    "enrollment_choices",
+    "get_enrollment",
+    "list_enrollments",
     "mark_uploaded_to_mohe",
+    "payable_enrollment",
+    "payable_enrollment_choices",
     "record_attendance",
     "record_status_change",
     "record_voucher",

@@ -35,6 +35,7 @@ from django.db import transaction
 
 from apps.billing.models import CreditReturn
 from apps.billing.services.account_service import ZERO, get_account_state
+from apps.core.display import person_name
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -181,4 +182,33 @@ def _return_credit(
     return record
 
 
-__all__ = ["NoCreditToReturnError", "outstanding_credit", "return_credit"]
+def list_credit_returns(
+    *, actor: Any, enrollment_code: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Credit returns as rows — BR-071, shown beside refunds and never as one."""
+    policy.require(actor, Screen.REFUNDS, Action.VIEW, request=request)
+
+    queryset = CreditReturn.objects.select_related("enrollment__participant", "returned_by")
+    if enrollment_code:
+        queryset = queryset.filter(enrollment__code=enrollment_code)
+
+    return [
+        {
+            "code": c.code,
+            "enrollment_code": c.enrollment.code,
+            "participant_name": c.enrollment.participant.name_ar,
+            "amount": c.amount,
+            "returned_on": c.returned_on,
+            "reason_ar": c.reason_ar,
+            "returned_by": person_name(c.returned_by),
+        }
+        for c in queryset.order_by("-returned_on", "-id")
+    ]
+
+
+__all__ = [
+    "NoCreditToReturnError",
+    "list_credit_returns",
+    "outstanding_credit",
+    "return_credit",
+]

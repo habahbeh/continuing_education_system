@@ -15,5 +15,11 @@ urlpatterns = [
     # are never confused with a future SSO callback mount point.
     path("", include("apps.people.urls")),
     path("", include("apps.catalog.urls")),
+    # Sprint 8B — the operational screens. Mounted at the root like the rest
+    # so every URL reads as a path through the centre's work rather than
+    # through the code that happens to implement it.
+    path("", include("apps.operations.urls")),
+    path("", include("apps.cashbox.urls")),
+    path("", include("apps.billing.urls")),
     path("admin/", admin.site.urls),
 ]

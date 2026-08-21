@@ -13,12 +13,25 @@
           <small>{% translate "جامعة البترا — عمّان، الأردن" %}</small>
         </span>
       </div>
+      {% if user.is_authenticated %}
+        <div class="topbar-user">
+          <span>{{ user.full_name_ar|default:user.get_username }}</span>
+          <span class="chip">{{ user.get_role_display }}</span>
+          <form method="post" action="{% url 'people:logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn2">{% translate "خروج" %}</button>
+          </form>
+        </div>
+      {% endif %}
     </header>
 
-    <main class="content flex-1">
-      {% include "partials/_messages.html" %}
-      {% block content %}{% endblock %}
-    </main>
+    <div class="layout">
+      {% include "partials/_nav.html" %}
+      <main class="content flex-1">
+        {% include "partials/_messages.html" %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
 
     <footer class="footer">
       <small>{% translate "نظام إدارة مركز التعليم المستمر" %}</small>

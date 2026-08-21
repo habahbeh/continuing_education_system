@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="grid2">
+  {% if counts.enrollments is not None %}
+    <div class="kpi"><div class="label">{% translate "التسجيلات" %}</div>
+      <div class="value num">{{ counts.enrollments }}</div></div>
+    <div class="kpi"><div class="label">{% translate "أرصدة غير مسوّاة" %}</div>
+      <div class="value num">{{ counts.unsettled }}</div></div>
+    <div class="kpi"><div class="label">{% translate "بانتظار الوصل" %}</div>
+      <div class="value num">{{ counts.awaiting_voucher }}</div></div>
+  {% endif %}
+  {% if counts.cohorts is not None %}
+    <div class="kpi"><div class="label">{% translate "الدفعات" %}</div>
+      <div class="value num">{{ counts.cohorts }}</div></div>
+  {% endif %}
+</div>
+<div class="note info">
+  {% translate "التقارير السبعة ضمن نطاق لاحق — هذه الشاشة عدّادات تشغيلية لا تقارير مالية." %}
+</div>
+{% endblock %}

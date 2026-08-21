@@ -114,6 +114,10 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "django.template.context_processors.i18n",
+                # The sidebar, built from the permission matrix (Sprint 8B).
+                # A context processor rather than a per-view context key so
+                # that no view can forget it and render a page with no way out.
+                "apps.people.nav.navigation",
             ],
         },
     },

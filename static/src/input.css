@@ -55,4 +55,28 @@
   .dl dd        { @apply m-0; }
 
   .messages     { @apply mb-4; }
+
+  /* --- Sprint 8B: the shell ------------------------------------------- */
+  .layout       { @apply flex flex-1 items-stretch; }
+  .sidebar      { @apply w-64 shrink-0 border-e border-line bg-white py-3 overflow-y-auto; }
+  .nav-group    { @apply mb-4; }
+  .nav-group-title { @apply px-4 pb-1 text-xs font-black text-ink-3 tracking-wide; }
+  .nav-item     { @apply flex items-center gap-2 px-4 py-2 text-sm font-bold text-ink-2 border-s-4 border-transparent; }
+  .nav-item:hover { @apply bg-surface-2; }
+  .nav-item.active { @apply border-brand bg-brand-soft text-brand; }
+  .topbar-user  { @apply ms-auto flex items-center gap-3 text-sm; }
+  .topbar-user form { @apply inline; }
+
+  .toolbar      { @apply flex flex-wrap items-center gap-2 mb-3; }
+  .toolbar .spacer { @apply flex-1; }
+  .fld          { @apply flex flex-col gap-1 mb-3; }
+  .fld label    { @apply text-xs font-bold text-ink-3; }
+  .fld input, .fld select, .fld textarea {
+                  @apply rounded-lg border border-line px-3 py-2 text-sm bg-white w-full; }
+  .fld .err     { @apply text-xs font-bold text-danger; }
+  .grid2        { @apply grid gap-x-4 sm:grid-cols-2; }
+  .num          { @apply tabular-nums; }
+  .muted        { @apply text-ink-3; }
+  .empty        { @apply p-6 text-center text-ink-3; }
+
 }

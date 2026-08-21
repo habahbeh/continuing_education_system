@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<form method="get" class="toolbar">
+  <input name="q" value="{{ query }}" placeholder="{% translate 'بحث بالرمز أو الاسم' %}">
+  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+</form>
+
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
+      <th>{% translate "الدفعة" %}</th><th>{% translate "المستحق" %}</th>
+      <th>{% translate "المدفوع" %}</th><th>{% translate "الخصم" %}</th>
+      <th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for e in enrollments %}
+        <tr>
+          <td dir="ltr">{{ e.code }}</td>
+          <td>{{ e.participant_name }}<br><small class="muted" dir="ltr">{{ e.participant_number }}</small></td>
+          <td dir="ltr">{{ e.cohort_code }}</td>
+          <td class="num">{{ e.total_due }}</td>
+          <td class="num">{{ e.total_paid }}</td>
+          <td class="num">{{ e.total_discount }}</td>
+          <td class="num">
+            {% if e.participant_owes %}<span class="chip danger">{{ e.balance }} {% translate "عليه" %}</span>
+            {% elif e.centre_owes %}<span class="chip warn">{{ e.balance }} {% translate "له" %}</span>
+            {% else %}<span class="chip ok">{% translate "مسوّى" %}</span>{% endif %}
+          </td>
+          <td><span class="chip">{{ e.status_display }}</span></td>
+          <td>
+            <a class="btn2" href="{% url 'operations:account' e.code %}">{% translate "كشف الحساب" %}</a>
+            {% if can_edit and not e.voucher_received %}
+              <form method="post" action="{% url 'operations:enrollment-action' e.code %}">
+                {% csrf_token %}<input type="hidden" name="action" value="voucher">
+                <button class="btn2" type="submit">{% translate "استلام الوصل" %}</button>
+              </form>
+            {% endif %}
+            {% if can_approve and not e.is_approved %}
+              <form method="post" action="{% url 'operations:enrollment-action' e.code %}">
+                {% csrf_token %}<input type="hidden" name="action" value="approve">
+                <button class="btn2" type="submit">{% translate "اعتماد" %}</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="empty">{% translate "لا توجد تسجيلات" %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "تسجيل جديد" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "تُعرض الدفعات المعتمدة وزارياً فقط، وتُحمَّل الرسوم من قائمة الأسعار السارية تلقائياً." %}
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "تسجيل" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

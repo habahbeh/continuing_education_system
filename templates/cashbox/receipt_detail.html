@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }} <span dir="ltr">{{ receipt.internal_receipt_number }}</span></h1>
+<div class="card2"><div class="card2-body">
+  <dl class="dl">
+    <dt>{% translate "المشارك" %}</dt><dd>{{ receipt.participant_name }} <span dir="ltr">({{ receipt.participant_number }})</span></dd>
+    <dt>{% translate "التاريخ" %}</dt><dd class="num">{{ receipt.received_on }}</dd>
+    <dt>{% translate "المبلغ" %}</dt><dd class="num">{{ receipt.amount }}</dd>
+    <dt>{% translate "الطريقة" %}</dt><dd>{{ receipt.payment_method }}</dd>
+    <dt>{% translate "الصندوق" %}</dt><dd>{{ receipt.cashier }}</dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ receipt.status_display }}</span></dd>
+    {% if receipt.external_receipt_ref %}
+      <dt>{% translate "سند الدائرة المالية" %}</dt><dd dir="ltr">{{ receipt.external_receipt_ref }}</dd>
+    {% endif %}
+  </dl>
+</div></div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "التخصيصات" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "مقابل" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+    <tbody>
+      {% for a in receipt.allocations %}
+        <tr><td dir="ltr">{{ a.enrollment_code }}</td><td>{{ a.against }}</td><td class="num">{{ a.amount }}</td></tr>
+      {% empty %}<tr><td colspan="3" class="empty">{% translate "لا تخصيصات" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if receipt.void_id %}
+  <div class="note warn">
+    {% translate "طلب إلغاء" %}: {{ receipt.void_reason_ar }}
+    {% if receipt.void_is_approved %} — <strong>{% translate "معتمَد" %}</strong>{% endif %}
+  </div>
+  {% if can_approve_void and not receipt.void_is_approved %}
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="approve">
+      <button class="btn2 primary" type="submit">{% translate "اعتماد الإلغاء" %}</button>
+    </form>
+  {% endif %}
+{% elif can_request_void %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "طلب إلغاء السند" %}</h2></div>
+    <div class="card2-body">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="request">
+        {% include "partials/_form.html" %}
+        <button class="btn2" type="submit">{% translate "تسجيل الطلب" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
