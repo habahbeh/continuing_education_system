@@ -24,6 +24,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.core.display import person_name, text_of
+from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
 from apps.core.services.settings_service import get_setting
 from apps.expenses.models import Expense, ExpenseStatus
@@ -37,8 +38,11 @@ ZERO = Decimal("0.000")
 CATEGORIES_KEY = "expense_categories"
 
 
-class ClosedPeriodError(ValidationError):
-    """An entry dated into a financial period that has been closed."""
+#: Sprint 8D-5 — the rule moved to ``core.period_service`` so the refund
+#: payout could share it instead of copying it. Re-exported under the name
+#: this module has always used, because callers and tests name it that way and
+#: renaming a public exception to celebrate a refactor helps nobody.
+ClosedPeriodError = period_service.ClosedPeriodError
 
 
 class ExpenseStateError(ValidationError):
@@ -60,22 +64,8 @@ def category_choices(*, as_of: date) -> list[tuple[str, str]]:
 
 
 def _period_for(incurred_on: date) -> Any:
-    """
-    The financial period covering the date, if one is defined.
-
-    A date with no period is allowed — periods are opened as the centre needs
-    them. A date inside a CLOSED one is not: that is what closing means.
-    """
-    from apps.core.models import FinancialPeriod, FinancialPeriodStatus
-
-    period = FinancialPeriod.objects.filter(
-        starts_on__lte=incurred_on, ends_on__gte=incurred_on
-    ).first()
-    if period is not None and period.status == FinancialPeriodStatus.CLOSED:
-        raise ClosedPeriodError(
-            f"الفترة المالية {period} مقفلة — لا يُقيَّد فيها مصروف بتاريخ {incurred_on}."
-        )
-    return period
+    """The period covering the date — refuses a closed one (D-23)."""
+    return period_service.period_for(incurred_on, what_ar="مصروف")
 
 
 def record(

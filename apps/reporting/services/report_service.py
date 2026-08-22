@@ -207,6 +207,13 @@ def net_income_report(
     refunds_paid = opening_balance_service.refunds_paid_between(
         date_from=date_from, date_to=date_to
     )
+    # Sprint 8D-5 — a reversed payout is not an active refund. ``refunds_paid``
+    # already excludes them, so the two figures are independent rather than
+    # one being netted out of the other: money handed back in this window, and
+    # money taken back in this window, which are often different months.
+    refunds_reversed = opening_balance_service.refunds_reversed_between(
+        date_from=date_from, date_to=date_to
+    )
 
     return {
         "number": 2,
@@ -218,6 +225,8 @@ def net_income_report(
         "prior_year_settlements": prior_year_settlements,
         "total_cash_in": collected + prior_year_settlements,
         "historical_refunds_paid": refunds_paid,
+        "historical_refunds_reversed": refunds_reversed,
+        "historical_refunds_net": refunds_paid - refunds_reversed,
         "partner_total": partner_total,
         "by_partner": sorted(by_partner.items()),
         "expenses_total": expenses_total,

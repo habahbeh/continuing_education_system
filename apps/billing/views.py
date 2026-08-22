@@ -318,6 +318,9 @@ OPENING_BALANCE_ACTIONS = {
     # Sprint 8D-4 — the officer executes what the manager declared, the same
     # split ``Refund`` uses. EDIT, not APPROVE: paying is not deciding.
     "pay-refund": Action.EDIT,
+    # Sprint 8D-5 — correcting a payout is the same hand that made it: the
+    # officer who handed the cash over is the one who knows it went wrong.
+    "reverse-refund": Action.EDIT,
 }
 
 #: Every business refusal this screen can meet, so a rule arrives as a message
@@ -328,6 +331,7 @@ OPENING_BALANCE_REFUSALS = (
     opening_balance_service.AlreadyResolvedError,
     opening_balance_service.MissingPayoutDetailsError,
     opening_balance_service.NotRefundDueError,
+    opening_balance_service.NotReversibleError,
     opening_balance_service.NotACreditError,
     opening_balance_service.NotALaterRegistrationError,
     opening_balance_service.CreditNotPostableError,
@@ -378,6 +382,7 @@ def opening_balances_view(request: HttpRequest) -> HttpResponse:
                 actor=request.user, request=request
             ),
             "payment_methods": payment_service.payment_method_choices(),
+            "today": date.today().isoformat(),
             "statuses": opening_balance_service.status_choices(),
             "directions": opening_balance_service.direction_choices(),
             "form": propose_form if can_propose else None,
@@ -413,6 +418,24 @@ def _handle_opening_balance(
     except OPENING_BALANCE_REFUSALS as exc:
         messages.error(request, str(exc))
         return None
+
+
+def _movement_date(request: HttpRequest, field: str) -> date:
+    """
+    A cash date from the form, defaulting to today when the field is blank.
+
+    Sprint 8D-4 hardcoded ``date.today()`` here, which meant a voucher paid
+    last Tuesday and entered on Thursday was filed in the wrong day — and, if
+    the week straddled a month end, the wrong period. The service validates
+    what comes back: not in the future, not inside a closed period.
+    """
+    raw = request.POST.get(field, "").strip()
+    if not raw:
+        return date.today()
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as exc:
+        raise DjangoValidationError(f"تاريخ غير صالح: {raw}") from exc
 
 
 def _propose_opening_balance(
@@ -504,7 +527,7 @@ def _advance_opening_balance(request: HttpRequest, action: str) -> HttpResponse 
             balance=balance,
             code=request.POST.get("payout_code", "").strip(),
             amount=balance.amount,
-            paid_on=date.today(),
+            paid_on=_movement_date(request, "paid_on"),
             payment_method=cashbox.method_by_code(request.POST.get("payment_method", "").strip()),
             external_reference=request.POST.get("external_reference", ""),
             payee_name_ar=request.POST.get("payee_name_ar", ""),
@@ -514,6 +537,20 @@ def _advance_opening_balance(request: HttpRequest, action: str) -> HttpResponse 
         messages.success(
             request,
             _("صُرف الرصيد بسند %(ref)s — بلا سند قبض") % {"ref": payout.external_reference},
+        )
+    elif action == "reverse-refund":
+        payout = opening_balance_service.reverse_refund_payout(
+            actor=request.user,
+            balance=balance,
+            reversed_on=_movement_date(request, "reversed_on"),
+            reason_ar=request.POST.get("reason_ar", ""),
+            reversal_reference=request.POST.get("reversal_reference", ""),
+            request=request,
+        )
+        messages.success(
+            request,
+            _("عُكس صرف السند %(ref)s — والرصيد عاد مستحقاً للردّ")
+            % {"ref": payout.external_reference},
         )
     else:
         line = opening_balance_service.post(actor=request.user, balance=balance, request=request)

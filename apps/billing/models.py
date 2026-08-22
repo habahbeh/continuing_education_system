@@ -925,9 +925,17 @@ class OpeningBalance(models.Model):
             # One balance per archived row. A second proposal from the same
             # source is a duplicate, and duplicates are how a debt gets
             # collected twice.
+            #
+            # ⚠️ Sprint 8D-5 — this was written in 8D-2 with
+            # ``condition=Q(source_enrollment__isnull=False)`` and MySQL has no
+            # partial indexes, so Django SKIPPED it silently: the constraint
+            # existed in the model and not in the database, and the protection
+            # was service-level only while appearing to be structural. The
+            # condition was never needed — MySQL does not collide NULLs, so a
+            # plain unique already permits unlimited hand-entered balances
+            # while refusing a second one from the same archive row.
             models.UniqueConstraint(
                 fields=["source_enrollment"],
-                condition=models.Q(source_enrollment__isnull=False),
                 name="billing_opening_balance_one_per_source_row",
             ),
         ]
@@ -1031,10 +1039,13 @@ class OpeningBalanceRefund(models.Model):
 
     code = ShortCode(unique=True, verbose_name=_("رمز الصرف"))
 
-    opening_balance = models.OneToOneField(
+    #: A ForeignKey since Sprint 8D-5, not a OneToOne — see ``active_key``.
+    #: A reversed payout stays on the record and a fresh one may follow it, so
+    #: "one payout per balance" became "one LIVE payout per balance".
+    opening_balance = models.ForeignKey(
         OpeningBalance,
         on_delete=models.PROTECT,
-        related_name="refund_payout",
+        related_name="refund_payouts",
         verbose_name=_("الرصيد الافتتاحي"),
     )
 
@@ -1061,6 +1072,34 @@ class OpeningBalanceRefund(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # --- Sprint 8D-5 · the correction, added beside the payout ---------------
+    #: A mistaken payout is CORRECTED, never deleted or edited. The original
+    #: amount, date, voucher and payee stay exactly as they were recorded —
+    #: what happened, happened — and the reversal is a second set of facts
+    #: written next to them. Anything else would leave the paper voucher in
+    #: the file with no row to match it.
+    reversed_on = models.DateField(null=True, blank=True, verbose_name=_("تاريخ عكس الصرف"))
+    reversed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balance_refunds_reversed",
+        verbose_name=_("عكسه"),
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    reversal_reason_ar = models.CharField(
+        max_length=255, blank=True, verbose_name=_("سبب عكس الصرف")
+    )
+    reversal_reference = DisplayRef(blank=True, verbose_name=_("مرجع التصحيح"))
+
+    #: Holds 1 while the payout stands, NULL once reversed. The same device
+    #: ``Clearance.active_key`` uses, and for the same reason: MySQL does not
+    #: collide NULLs, so a reversed payout never blocks a fresh one, but two
+    #: live payouts on one balance cannot exist. A conditional UniqueConstraint
+    #: would have read better and been silently skipped on this backend.
+    active_key = models.PositiveSmallIntegerField(null=True, blank=True, editable=False, default=1)
+
     class Meta:
         verbose_name = _("صرف رصيد افتتاحي دائن")
         verbose_name_plural = _("صرف الأرصدة الافتتاحية الدائنة")
@@ -1080,11 +1119,43 @@ class OpeningBalanceRefund(models.Model):
                 condition=~models.Q(payee_name_ar=""),
                 name="billing_ob_refund_has_payee",
             ),
+            # One LIVE payout per balance. Reversed ones carry NULL here and
+            # step out of the way of a corrected re-payment.
+            models.UniqueConstraint(
+                fields=["opening_balance", "active_key"],
+                name="billing_ob_refund_one_live_per_balance",
+            ),
+            # No silent reversal: a reversed payout names who, when, and why.
+            # Half a reversal — a date with no reason — is a correction nobody
+            # can evaluate later.
+            models.CheckConstraint(
+                condition=models.Q(reversed_at__isnull=True)
+                | (
+                    models.Q(reversed_by__isnull=False)
+                    & models.Q(reversed_on__isnull=False)
+                    & ~models.Q(reversal_reason_ar="")
+                ),
+                name="billing_ob_refund_reversal_is_explained",
+            ),
+            # The two halves of "reversed" move together. A row that is live
+            # by its key but reversed by its stamp would be counted twice.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(reversed_at__isnull=True, active_key=1)
+                    | models.Q(reversed_at__isnull=False, active_key__isnull=True)
+                ),
+                name="billing_ob_refund_active_key_matches_reversal",
+            ),
         ]
         indexes = [
             models.Index(fields=["paid_on"], name="bil_obref_paid_idx"),
             models.Index(fields=["payment_method"], name="bil_obref_method_idx"),
+            models.Index(fields=["reversed_on"], name="bil_obref_reversed_idx"),
         ]
 
     def __str__(self) -> str:
         return f"{self.code} — {self.amount}"
+
+    @property
+    def is_reversed(self) -> bool:
+        return self.reversed_at is not None

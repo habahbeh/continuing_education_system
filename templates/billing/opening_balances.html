@@ -3,6 +3,9 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <div class="note warn">
+  {% translate "الصرف يُصحَّح ولا يُمحى: عكس الصرف يضيف قيداً بجانب الأصلي ويعيد الرصيد مستحقاً للردّ، ولا يُقبل صرف ولا عكس بتاريخ في فترة مالية مقفلة ولا في المستقبل." %}
+</div>
+<div class="note warn">
   {% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً. والرصيد الدائن يُرحَّل لتسجيل لاحق إن وُجد، وإلا فهو مستحق الردّ نقداً — وفي الحالتين بلا سند قبض عن مالٍ لم يستلمه النظام. والذمة القديمة غير المسدَّدة تمنع براءة الذمة والشهادة." %}
 </div>
 
@@ -21,6 +24,8 @@
     <div class="muted">{% translate "التزام قائم لم يُصرف بعد" %}</div></div>
   <div class="kpi"><div class="label">{% translate "مصروف فعلاً" %}</div><div class="value num">{{ totals.refunded }}</div>
     <div class="muted">{% translate "خرج النقد بسند صرف — بلا سند قبض" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "صرف معكوس" %}</div><div class="value num">{{ totals.refunds_reversed }}</div>
+    <div class="muted">{% translate "السجل الأصلي محفوظ — والرصيد عاد مستحقاً" %}</div></div>
 </div>
 
 <form method="get" class="toolbar">
@@ -127,12 +132,31 @@
                 </select>
                 <input name="external_reference" placeholder="{% translate 'رقم سند الصرف' %}" required>
                 <input name="payee_name_ar" placeholder="{% translate 'اسم المستلم' %}" required>
+                <label>{% translate "تاريخ الصرف" %}
+                  <input type="date" name="paid_on" value="{{ today }}" required>
+                </label>
                 <button class="btn2 primary" type="submit">{% translate "صرف نقداً" %}</button>
               </form>
             {% endif %}
             {% if b.payout_reference %}
               <small class="muted">{% translate "سند الصرف" %} <span dir="ltr">{{ b.payout_reference }}</span>
                 · {{ b.payout_paid_on }} · {{ b.payout_paid_by }}</small>
+              {% if b.payout_is_reversed %}
+                <br><span class="chip danger">{% translate "معكوس" %}</span>
+                <small class="muted">{{ b.payout_reversed_on }} — {{ b.payout_reversal_reason }}</small>
+              {% endif %}
+            {% endif %}
+            {% if can_review and b.is_reversible %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="action" value="reverse-refund">
+                <input type="hidden" name="code" value="{{ b.code }}">
+                <input name="reason_ar" placeholder="{% translate 'سبب عكس الصرف' %}" required>
+                <input name="reversal_reference" placeholder="{% translate 'مرجع التصحيح' %}">
+                <label>{% translate "تاريخ العكس" %}
+                  <input type="date" name="reversed_on" value="{{ today }}" required>
+                </label>
+                <button class="btn2" type="submit">{% translate "عكس الصرف" %}</button>
+              </form>
             {% endif %}
             {% if can_decide and b.is_postable %}
               <form method="post">{% csrf_token %}

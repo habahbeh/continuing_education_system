@@ -49,6 +49,7 @@ from apps.billing.models import (
     OpeningBalanceStatus,
 )
 from apps.core.display import person_name, text_of
+from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -99,6 +100,10 @@ class AlreadyRefundedError(Exception):
 
 class MissingPayoutDetailsError(Exception):
     """Cash leaving the centre carries a voucher number and a named payee."""
+
+
+class NotReversibleError(Exception):
+    """There is no live payout on this balance to reverse."""
 
 
 # ---------------------------------------------------------------------------
@@ -718,8 +723,17 @@ def pay_refund_due(
     and the reason a payout belongs beside the other payouts rather than
     inside the till count.
 
-    **Once.** ``OpeningBalanceRefund.opening_balance`` is a OneToOne, so the
-    second attempt collides at the database even if these guards were removed.
+    **Once, while one stands.** ``(opening_balance, active_key)`` is unique and
+    ``active_key`` is NULL on a reversed payout, so a second LIVE payout
+    collides at the database even if these guards were removed — while a
+    corrected re-payment after a reversal is allowed, which is the whole point
+    of Sprint 8D-5.
+
+    **``paid_on`` is the caller's** (Sprint 8D-5). The cash may have left last
+    Tuesday and reached the clerk today; forcing today's date would file the
+    voucher in the wrong month. What is refused is a date inside a period
+    somebody has closed (D-23) — and nothing else, because no other movement
+    in this system bounds its own date either.
     """
     policy.require(actor, Screen.OPENING_BALANCES, Action.EDIT, request=request)
 
@@ -749,6 +763,8 @@ def pay_refund_due(
         )
     if OpeningBalanceRefund.objects.filter(code=code).exists():
         raise ValidationError(f"رمز الصرف {code} مستعمل سلفاً.")
+
+    _guard_movement_date(paid_on, what_ar="صرف رصيد افتتاحي")
 
     return _write_payout(
         actor=actor,
@@ -817,6 +833,138 @@ def _write_payout(
     return payout
 
 
+def reverse_refund_payout(
+    *,
+    actor: Any,
+    balance: OpeningBalance,
+    reversed_on: date,
+    reason_ar: str,
+    reversal_reference: str = "",
+    request: Any = None,
+) -> OpeningBalanceRefund:
+    """
+    Correct a mistaken payout. The obligation comes back.
+
+    **Reopening rather than a terminal state.** A payout goes wrong for
+    ordinary reasons — the wrong payee, a bounced cheque, the money never
+    actually handed over — and in every one of them the centre STILL owes the
+    participant. Marking the balance dead would leave a real obligation with
+    no row to act on, so the status returns to ``REFUND_DUE`` and it appears
+    in the queue again, payable afresh.
+
+    **Nothing is deleted or edited.** The original row keeps its amount, its
+    date, its voucher and its payee exactly as recorded — what happened,
+    happened, and the paper voucher in the file still has a row to match. The
+    reversal is a second set of facts written beside the first, which is also
+    why the original's ``paid_on`` may sit in a period that is now closed: the
+    guard applies to the REVERSAL's own date, not retroactively to a movement
+    already recorded.
+    """
+    policy.require(actor, Screen.OPENING_BALANCES, Action.EDIT, request=request)
+
+    payout = (
+        OpeningBalanceRefund.objects.filter(opening_balance=balance, reversed_at__isnull=True)
+        .order_by("-id")
+        .first()
+    )
+    if payout is None:
+        raise NotReversibleError(
+            f"لا صرف قائم على الرصيد {balance.code} — "
+            f"حالته {balance.get_status_display()}، ولا شيء يُعكس."
+        )
+    if not reason_ar.strip():
+        raise ValidationError(
+            "سبب عكس الصرف إلزامي — العكس الصامت يترك سند صرف في الملف بلا تفسير."
+        )
+
+    _guard_movement_date(reversed_on, what_ar="عكس صرف")
+
+    return _write_reversal(
+        actor=actor,
+        balance=balance,
+        payout=payout,
+        reversed_on=reversed_on,
+        reason_ar=reason_ar,
+        reversal_reference=reversal_reference,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _write_reversal(
+    *,
+    actor: Any,
+    balance: OpeningBalance,
+    payout: OpeningBalanceRefund,
+    reversed_on: date,
+    reason_ar: str,
+    reversal_reference: str,
+    request: Any,
+) -> OpeningBalanceRefund:
+    """The write half — permission and state already decided by the caller."""
+    payout.reversed_on = reversed_on
+    payout.reversed_by = actor
+    payout.reversed_at = timezone.now()
+    payout.reversal_reason_ar = reason_ar.strip()[:255]
+    payout.reversal_reference = reversal_reference.strip()[:64]
+    payout.active_key = None
+    payout.save(
+        update_fields=[
+            "reversed_on",
+            "reversed_by",
+            "reversed_at",
+            "reversal_reason_ar",
+            "reversal_reference",
+            "active_key",
+        ]
+    )
+
+    balance.status = OpeningBalanceStatus.REFUND_DUE
+    balance.save(update_fields=["status"])
+
+    write_audit(
+        action="UPDATE",
+        entity_type="billing.OpeningBalanceRefund",
+        entity_id=str(payout.pk),
+        reference=payout.code,
+        summary_ar=f"عكس صرف رصيد افتتاحي {payout.amount} — {reason_ar.strip()}",
+        actor=actor,
+        changes={
+            "opening_balance": balance.code,
+            "original_paid_on": payout.paid_on.isoformat(),
+            "original_voucher": payout.external_reference,
+            "original_amount": str(payout.amount),
+            "reversed_on": reversed_on.isoformat(),
+            "reason_ar": payout.reversal_reason_ar,
+            "reversal_reference": payout.reversal_reference,
+            "balance_status": OpeningBalanceStatus.REFUND_DUE,
+            "original_row": "محفوظ كما هو — التصحيح يُضاف ولا يمحو",
+            "receipt_created": "لا — لم يُنشأ سند قبض عن ردّ معكوس",
+        },
+        request=request,
+    )
+    return payout
+
+
+def _guard_movement_date(on_date: date, *, what_ar: str) -> None:
+    """
+    One check, and deliberately only one: the period must not be closed (D-23).
+
+    A future-date guard was written here first and then removed. No other
+    money movement in this system has one — ``take_payment`` accepts a
+    forward-dated ``received_on``, and so does an expense — so refusing one
+    here would make this screen reject a date the till accepts three clicks
+    away. If the centre wants cash dates bounded by today, that is a rule for
+    every movement at once, not a rule this sprint invents for the smallest
+    of them.
+
+    Backdating is the POINT: cash paid last Tuesday and entered on Thursday
+    belongs to Tuesday, and forcing today's date is what put Sprint 8D-4's
+    payouts in the wrong day.
+    """
+    period_service.period_for(on_date, what_ar=what_ar)
+
+
 def outstanding_refunds(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
     """
     What the centre still owes back and has not yet handed over.
@@ -853,7 +1001,21 @@ def refunds_paid_between(*, date_from: date, date_to: date) -> Decimal:
     who is entitled to the report the answer it is made of.
     """
     rows = OpeningBalanceRefund.objects.filter(
-        paid_on__gte=date_from, paid_on__lte=date_to
+        paid_on__gte=date_from, paid_on__lte=date_to, reversed_at__isnull=True
+    ).values_list("amount", flat=True)
+    return sum(rows, ZERO)
+
+
+def refunds_reversed_between(*, date_from: date, date_to: date) -> Decimal:
+    """
+    Payouts taken back in a window, by the date of the REVERSAL.
+
+    Reported on its own date rather than the original payout's, because that
+    is when the money came back — and a reversal often lands in a later month
+    than the payment it corrects.
+    """
+    rows = OpeningBalanceRefund.objects.filter(
+        reversed_on__gte=date_from, reversed_on__lte=date_to
     ).values_list("amount", flat=True)
     return sum(rows, ZERO)
 
@@ -904,7 +1066,6 @@ def list_balances(
         "approved_by",
         "posted_by",
         "resolved_by",
-        "refund_payout",
         "participant",
         "enrollment",
         "posted_charge_line",
@@ -913,10 +1074,19 @@ def list_balances(
         queryset = queryset.filter(status=status)
     if direction:
         queryset = queryset.filter(direction=direction)
+    # Newest payout first, so ``next(iter(...))`` picks the live one: a
+    # reversed payout is only ever followed by a newer live one.
+    queryset = queryset.prefetch_related("refund_payouts")
 
     rows = []
     for balance in queryset:
-        payout = getattr(balance, "refund_payout", None)
+        # The LIVE payout if there is one, otherwise the most recent reversed
+        # one so the screen can still show what was corrected. Chosen
+        # explicitly rather than by taking the first of an ordered set —
+        # relying on ordering for correctness is how a reversed payout ends up
+        # displayed as current.
+        payouts = list(balance.refund_payouts.all())
+        payout = next((p for p in payouts if not p.is_reversed), None) or next(iter(payouts), None)
         rows.append(
             {
                 "id": balance.pk,
@@ -945,6 +1115,10 @@ def list_balances(
                 "payout_code": text_of(payout, "code"),
                 "payout_paid_on": getattr(payout, "paid_on", None),
                 "payout_paid_by": person_name(getattr(payout, "paid_by", None)),
+                "payout_reversed_on": getattr(payout, "reversed_on", None),
+                "payout_reversal_reason": text_of(payout, "reversal_reason_ar"),
+                "payout_is_reversed": bool(payout is not None and payout.is_reversed),
+                "is_reversible": bool(payout is not None and not payout.is_reversed),
                 "resolved_by": person_name(balance.resolved_by),
                 "resolution_note_ar": balance.resolution_note_ar,
                 "participant_number": text_of(balance.participant, "participant_number"),
@@ -984,6 +1158,12 @@ def totals(*, actor: Any, request: Any = None) -> dict[str, Any]:
         "credit_applied": _sum(status=OpeningBalanceStatus.APPLIED),
         "refund_due": _sum(status=OpeningBalanceStatus.REFUND_DUE),
         "refunded": _sum(status=OpeningBalanceStatus.REFUNDED),
+        "refunds_reversed": sum(
+            OpeningBalanceRefund.objects.filter(reversed_at__isnull=False).values_list(
+                "amount", flat=True
+            ),
+            ZERO,
+        ),
         "credit_carried": _sum(direction=OpeningBalanceDirection.CREDIT),
     }
 
@@ -1012,6 +1192,7 @@ __all__ = [
     "NotACreditError",
     "NotALaterRegistrationError",
     "NotRefundDueError",
+    "NotReversibleError",
     "OpeningBalanceStateError",
     "SeparationOfDutiesError",
     "approve",
@@ -1026,7 +1207,9 @@ __all__ = [
     "propose_from_archive",
     "propose_manually",
     "refunds_paid_between",
+    "refunds_reversed_between",
     "reject",
+    "reverse_refund_payout",
     "review",
     "status_choices",
     "totals",

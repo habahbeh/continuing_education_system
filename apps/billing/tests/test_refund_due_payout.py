@@ -126,7 +126,12 @@ def test_a_refund_due_is_paid_out_once_and_closes(
 
     balance.refresh_from_db()
     assert balance.status == OpeningBalanceStatus.REFUNDED
-    assert balance.refund_payout.pk == payout.pk
+    # ``refund_payouts`` since Sprint 8D-5: the OneToOne became a FK so a
+    # reversed payout can stand beside the corrected one that replaced it.
+    # Uniqueness moved to (opening_balance, active_key), which still allows
+    # exactly one LIVE payout.
+    assert [p.pk for p in balance.refund_payouts.all()] == [payout.pk]
+    assert payout.active_key == 1
 
 
 def test_the_payout_creates_no_receipt_and_no_allocation(
