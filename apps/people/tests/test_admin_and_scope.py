@@ -185,6 +185,14 @@ def test_no_business_model_exists_yet() -> None:
             "Refund",
             # Sprint 7 — BR-071's "independent financial movement".
             "CreditReturn",
+            # Sprint 8D-2 — the ONE reviewed gateway from the historical
+            # archive to the ledger (BR-094). It is in BILLING and not in
+            # datamigration, and the location is the control: the archive is
+            # forbidden by A-04 from importing any financial app, so the door
+            # can only be opened from the money side. Had this model appeared
+            # under datamigration it would have handed the archive a way to
+            # create money and undone Sprint 8D-1 entirely.
+            "OpeningBalance",
         },
         "cashbox": {
             "PaymentMethod",
@@ -274,10 +282,11 @@ def test_later_sprint_models_do_not_exist() -> None:
     sprint owns — named individually, because a list of absences is only worth
     having if it is specific.
 
-    ``OpeningBalance`` is the one to watch. It is the ONLY gateway from the
-    historical archive to the production ledger (BR-094), it belongs to Sprint
-    8D-2, and its appearance here would mean 8D-1 had quietly crossed the line
-    it was built to hold.
+    ✅ Sprint 8D-2 delivered ``OpeningBalance`` — into ``billing``, which is
+    where the check above now expects it. The thing 8D-1 warned about was its
+    appearance in ``datamigration``; that would have meant the archive could
+    create money. ``billing.tests.test_opening_balance_boundary`` asserts the
+    archive app still has exactly its six tables and none of them is this one.
     """
     from django.apps import apps as django_apps
 
@@ -287,7 +296,6 @@ def test_later_sprint_models_do_not_exist() -> None:
         # CREATES the credit balance a cheaper transfer leaves behind; only
         # returning it (BR-071) waits for clearance.
         "TaxRule",
-        "OpeningBalance",
         "EnrollmentApplication",
     ):
         assert deferred not in names, f"{deferred} belongs to a later sprint"

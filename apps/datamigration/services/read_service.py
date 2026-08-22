@@ -220,9 +220,27 @@ __all__ = [
     "batch_detail",
     "candidate_participants",
     "finding_choices",
+    "historical_enrollment_for",
     "link_queue",
     "list_batches",
     "rows_of",
     "sheet_choices",
     "state_choices",
 ]
+
+
+def historical_enrollment_for(*, actor: Any, source_row_id: int, request: Any = None) -> Any:
+    """
+    One archived enrolment, for the opening-balance screen to propose from.
+
+    A read, and only a read. The archive still cannot import ``billing`` —
+    A-04 makes sure of it — so the gateway between the two is opened from the
+    ledger side by ``opening_balance_service`` calling in here, never by this
+    app reaching out. That direction is the whole of Sprint 8D-1's boundary.
+    """
+    from apps.datamigration.models import HistoricalEnrollment
+
+    policy.require(actor, Screen.MIGRATION, Action.VIEW, request=request)
+    return HistoricalEnrollment.objects.select_related(
+        "batch", "participant", "source_row", "cohort"
+    ).get(source_row_id=source_row_id)

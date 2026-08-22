@@ -24,11 +24,19 @@ from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
-from apps.billing.forms import CreditReturnForm, DiscountForm, ExtraFeeForm, RefundForm
+from apps.billing.forms import (
+    CreditReturnForm,
+    DiscountForm,
+    ExtraFeeForm,
+    OpeningBalanceProposeForm,
+    OpeningBalanceReviewForm,
+    RefundForm,
+)
 from apps.billing.services import (
     credit_service,
     discount_service,
     extra_fee_service,
+    opening_balance_service,
     refund_service,
 )
 from apps.operations.services import enrollment_service
@@ -285,3 +293,177 @@ def extra_fees_view(request: HttpRequest) -> HttpResponse:
             "can_create": can_create,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Opening balances (Screen.OPENING_BALANCES) — Sprint 8D-2
+# ---------------------------------------------------------------------------
+#: Which permission each step needs, checked before the service runs. Note
+#: that ``post`` needs APPROVE and not CREATE: writing the ledger row is the
+#: manager's act, and the officer who proposed the balance may not perform it.
+OPENING_BALANCE_ACTIONS = {
+    "propose": Action.CREATE,
+    "review": Action.EDIT,
+    "approve": Action.APPROVE,
+    "reject": Action.APPROVE,
+    "post": Action.APPROVE,
+}
+
+#: Every business refusal this screen can meet, so a rule arrives as a message
+#: carrying its own reference while a role violation stays a 403.
+OPENING_BALANCE_REFUSALS = (
+    opening_balance_service.AlreadyPostedError,
+    opening_balance_service.CreditNotPostableError,
+    opening_balance_service.NoEnrollmentError,
+    opening_balance_service.OpeningBalanceStateError,
+    opening_balance_service.SeparationOfDutiesError,
+)
+
+
+@require_http_methods(["GET", "POST"])
+def opening_balances_view(request: HttpRequest) -> HttpResponse:
+    """
+    The four-hand workflow on one page (BR-094).
+
+    Deliberately one screen rather than four: the whole point of D-24 is that
+    a reader can see who proposed, who reviewed and who approved a given
+    balance side by side. Splitting the steps across screens would hide the
+    separation the rule exists to create.
+    """
+    can_propose = policy.is_allowed(request.user, Screen.OPENING_BALANCES, Action.CREATE)
+    can_review = policy.is_allowed(request.user, Screen.OPENING_BALANCES, Action.EDIT)
+    can_decide = policy.is_allowed(request.user, Screen.OPENING_BALANCES, Action.APPROVE)
+
+    propose_form = OpeningBalanceProposeForm(
+        request.POST if request.POST.get("action") == "propose" else None,
+        direction_choices=opening_balance_service.direction_choices(),
+    )
+
+    if request.method == "POST":
+        response = _handle_opening_balance(request, propose_form)
+        if response is not None:
+            return response
+
+    return render(
+        request,
+        "billing/opening_balances.html",
+        {
+            "title": _("الأرصدة الافتتاحية"),
+            "active_screen": Screen.OPENING_BALANCES,
+            "balances": opening_balance_service.list_balances(
+                actor=request.user,
+                status=request.GET.get("status", "").strip(),
+                direction=request.GET.get("direction", "").strip(),
+                request=request,
+            ),
+            "totals": opening_balance_service.totals(actor=request.user, request=request),
+            "statuses": opening_balance_service.status_choices(),
+            "directions": opening_balance_service.direction_choices(),
+            "form": propose_form if can_propose else None,
+            "review_form": OpeningBalanceReviewForm() if can_review else None,
+            "can_propose": can_propose,
+            "can_review": can_review,
+            "can_decide": can_decide,
+            "current_user_id": request.user.pk,
+        },
+    )
+
+
+def _handle_opening_balance(
+    request: HttpRequest, propose_form: OpeningBalanceProposeForm
+) -> HttpResponse | None:
+    action = request.POST.get("action", "")
+    if action not in OPENING_BALANCE_ACTIONS:
+        return None
+    policy.require(
+        request.user, Screen.OPENING_BALANCES, OPENING_BALANCE_ACTIONS[action], request=request
+    )
+
+    try:
+        if action == "propose":
+            return _propose_opening_balance(request, propose_form)
+        return _advance_opening_balance(request, action)
+    except (DjangoValidationError, PermissionDenied) as exc:
+        messages.error(request, _message_of(exc))
+        return None
+    except ObjectDoesNotExist:
+        messages.error(request, _("سجل غير موجود"))
+        return None
+    except OPENING_BALANCE_REFUSALS as exc:
+        messages.error(request, str(exc))
+        return None
+
+
+def _propose_opening_balance(
+    request: HttpRequest, form: OpeningBalanceProposeForm
+) -> HttpResponse | None:
+    if not form.is_valid():
+        return None
+    data = form.cleaned_data
+    row_id = data["source_row_id"]
+
+    if row_id:
+        from apps.datamigration.services import read_service
+
+        historical = read_service.historical_enrollment_for(
+            actor=request.user, source_row_id=row_id, request=request
+        )
+        opening_balance_service.propose_from_archive(
+            actor=request.user,
+            historical_enrollment=historical,
+            code=data["code"],
+            direction=data["direction"],
+            amount=data["amount"],
+            as_of=data["as_of"],
+            description_ar=data["description_ar"],
+            request=request,
+        )
+    else:
+        opening_balance_service.propose_manually(
+            actor=request.user,
+            code=data["code"],
+            direction=data["direction"],
+            amount=data["amount"],
+            as_of=data["as_of"],
+            description_ar=data["description_ar"],
+            legacy_number=data["legacy_number"],
+            request=request,
+        )
+
+    messages.success(request, _("سُجّل الاقتراح — لا أثر في الدفتر حتى الترحيل"))
+    return redirect("billing:opening-balances")
+
+
+def _advance_opening_balance(request: HttpRequest, action: str) -> HttpResponse | None:
+    balance = opening_balance_service.balance_instance(
+        actor=request.user, code=request.POST.get("code", ""), request=request
+    )
+    note = request.POST.get("note_ar", "")
+
+    if action == "review":
+        enrollment_code = request.POST.get("enrollment_code", "").strip()
+        opening_balance_service.review(
+            actor=request.user,
+            balance=balance,
+            enrollment=_enrollment(request, enrollment_code) if enrollment_code else None,
+            note_ar=note,
+            request=request,
+        )
+        messages.success(request, _("رُوجع الرصيد — ولم يتحرك شيء في الدفتر"))
+    elif action == "approve":
+        opening_balance_service.approve(
+            actor=request.user, balance=balance, note_ar=note, request=request
+        )
+        messages.success(request, _("اعتُمد الرصيد — الاعتماد إذن بالترحيل لا ترحيل"))
+    elif action == "reject":
+        opening_balance_service.reject(
+            actor=request.user, balance=balance, note_ar=note, request=request
+        )
+        messages.success(request, _("رُفض الرصيد"))
+    else:
+        line = opening_balance_service.post(actor=request.user, balance=balance, request=request)
+        messages.success(
+            request,
+            _("رُحّل الرصيد إلى الدفتر — بند رسم %(amount)s") % {"amount": line.gross_amount},
+        )
+    return redirect("billing:opening-balances")

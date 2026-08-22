@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note warn">
+  {% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً." %}
+</div>
+
+<div class="grid2">
+  <div class="kpi"><div class="label">{% translate "مسودات" %}</div><div class="value num">{{ totals.draft }}</div>
+    <div class="muted">{% translate "لا أثر مالي" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "مُراجَعة" %}</div><div class="value num">{{ totals.reviewed }}</div>
+    <div class="muted">{% translate "لا أثر مالي" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "معتمَدة بانتظار الترحيل" %}</div><div class="value num">{{ totals.approved_not_posted }}</div>
+    <div class="muted">{% translate "إذن بالترحيل لا ترحيل" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "مُرحَّلة إلى الدفتر" %}</div><div class="value num">{{ totals.posted }}</div>
+    <div class="muted">{% translate "هذه وحدها موجودة في الحسابات" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "أرصدة دائنة محمولة" %}</div><div class="value num">{{ totals.credit_carried }}</div>
+    <div class="muted">{% translate "مسجَّلة ولا تُرحَّل في هذه المرحلة" %}</div></div>
+</div>
+
+<form method="get" class="toolbar">
+  <select name="status">
+    <option value="">{% translate "كل الحالات" %}</option>
+    {% for code, label in statuses %}<option value="{{ code }}"{% if code == request.GET.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="direction">
+    <option value="">{% translate "كل الاتجاهات" %}</option>
+    {% for code, label in directions %}<option value="{{ code }}"{% if code == request.GET.direction %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
+</form>
+
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "الاتجاه" %}</th><th>{% translate "المبلغ" %}</th>
+      <th>{% translate "كما في" %}</th><th>{% translate "البيان" %}</th><th>{% translate "المصدر" %}</th>
+      <th>{% translate "التسجيل" %}</th><th>{% translate "الأيدي" %}</th><th>{% translate "الحالة" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for b in balances %}
+        <tr>
+          <td dir="ltr">{{ b.code }}</td>
+          <td>{{ b.direction_display }}</td>
+          <td class="num">{{ b.amount }}</td>
+          <td class="num">{{ b.as_of }}</td>
+          <td>{{ b.description_ar }}</td>
+          <td>
+            {% if b.source %}<small class="muted" dir="ltr">{{ b.source }}</small>{% else %}<small class="muted">{% translate "ملف ورقي" %}</small>{% endif %}
+            {% if b.legacy_number %}<br><small class="muted" dir="ltr">{{ b.legacy_number }}</small>{% endif %}
+          </td>
+          <td dir="ltr">{{ b.enrollment_code|default:"—" }}</td>
+          <td>
+            <small class="muted">
+              {% translate "اقترح" %}: {{ b.created_by }}<br>
+              {% translate "راجع" %}: {{ b.reviewed_by|default:"—" }}<br>
+              {% translate "اعتمد" %}: {{ b.approved_by|default:"—" }}<br>
+              {% translate "رحّل" %}: {{ b.posted_by|default:"—" }}
+            </small>
+          </td>
+          <td>
+            <span class="chip">{{ b.status_display }}</span>
+            {% if b.credit_blocked %}<br><span class="chip warn">{% translate "دائن — لا يُرحَّل" %}</span>{% endif %}
+            {% if b.decision_note_ar %}<br><small class="muted">{{ b.decision_note_ar }}</small>{% endif %}
+          </td>
+          <td>
+            {% if can_review and b.status == "DRAFT" %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="action" value="review">
+                <input type="hidden" name="code" value="{{ b.code }}">
+                <input name="enrollment_code" placeholder="{% translate 'رمز التسجيل' %}">
+                <input name="note_ar" placeholder="{% translate 'ملاحظة المراجعة' %}" required>
+                <button class="btn2" type="submit">{% translate "مراجعة" %}</button>
+              </form>
+            {% endif %}
+            {% if can_decide and b.status == "REVIEWED" %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="code" value="{{ b.code }}">
+                <input name="note_ar" placeholder="{% translate 'ملاحظة القرار' %}">
+                <button class="btn2 primary" type="submit" name="action" value="approve">{% translate "اعتماد" %}</button>
+                <button class="btn2" type="submit" name="action" value="reject">{% translate "رفض" %}</button>
+              </form>
+            {% endif %}
+            {% if can_decide and b.is_postable %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="action" value="post">
+                <input type="hidden" name="code" value="{{ b.code }}">
+                <button class="btn2 primary" type="submit">{% translate "ترحيل إلى الدفتر" %}</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}<tr><td colspan="10" class="empty">{% translate "لا أرصدة افتتاحية" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_propose %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "اقتراح رصيد افتتاحي" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "واحد في كل مرة (D-25). والمبلغ يُكتب ولا يُشتق: مجموع أعمدة المواد لا يطابق رسوم الدورة في معظم صفوف الأرشيف، واشتقاق ذمة منها يحوّل خطأ جدول إلى مطالبة بمال. اقرأ الصف، وقرّر، واكتب رقماً تستطيع الدفاع عنه." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="propose">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "اقتراح" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

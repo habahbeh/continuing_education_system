@@ -127,3 +127,25 @@ def make_enrollment(priced_catalog, participant, active_semester):
         return enrollment, quote
 
     return _make
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8D-2 — a real partner cohort and a real archived batch
+# ---------------------------------------------------------------------------
+# Borrowed rather than rebuilt. The opening-balance tests assert how a posted
+# balance interacts with a partner's base and with an archive row, so the
+# fixtures that already build those two things honestly are the ones to test
+# against; a local imitation could be wrong in exactly the way that hides a
+# failure. Selective imports, not a star: the settlement conftest also defines
+# `priced_catalog`, `cashier` and `finance`, and those must stay billing's own.
+from apps.datamigration.tests.conftest import (  # noqa: E402, F401
+    committed_batch,
+    sample_workbook,
+)
+from apps.datamigration.tests.conftest import manager as manager  # noqa: E402
+from apps.settlements.tests.conftest import (  # noqa: E402, F401
+    cohort_with_agreement,
+    make_paid_enrollment,
+    partner,
+    percent_agreement,
+)

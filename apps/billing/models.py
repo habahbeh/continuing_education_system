@@ -43,9 +43,21 @@ class ChargeType(models.TextChoices):
     EXTRA_FEE = "EXTRA_FEE", _("رسم إضافي")
     TRANSFER_DIFFERENCE = "TRANSFER_DIFFERENCE", _("فرق نقل")
 
+    #: Sprint 8D-2 — a debt carried in from before the system existed, posted
+    #: by an APPROVED ``OpeningBalance`` and by nothing else. It is a real
+    #: obligation, so it is a real charge line; it is not current business, so
+    #: it never enters a partner's base.
+    OPENING_BALANCE = "OPENING_BALANCE", _("رصيد افتتاحي")
+
 
 #: BR-022 — the order a payment is consumed in. Deposit sits between
 #: consumables and tuition and appears only when the programme has a policy.
+#:
+#: The opening balance sits LAST, and the position is a decision rather than
+#: an append. A participant handing over money for this term is paying for
+#: this term; clearing a 2022 arrear first would take their tuition payment
+#: and apply it to a debt they may not even accept yet. The centre chases
+#: arrears deliberately, through report 4, not as a side effect of the till.
 ALLOCATION_ORDER: tuple[str, ...] = (
     ChargeType.REGISTRATION,
     ChargeType.CONSUMABLES,
@@ -53,6 +65,7 @@ ALLOCATION_ORDER: tuple[str, ...] = (
     ChargeType.TUITION,
     ChargeType.EXTRA_FEE,
     ChargeType.TRANSFER_DIFFERENCE,
+    ChargeType.OPENING_BALANCE,
 )
 
 
@@ -595,3 +608,256 @@ class CreditReturn(models.Model):
 
     def __str__(self) -> str:
         return f"{self.code} — {self.amount}"
+
+
+class OpeningBalanceStatus(models.TextChoices):
+    DRAFT = "DRAFT", _("مسودة")
+    REVIEWED = "REVIEWED", _("مُراجَع")
+    APPROVED = "APPROVED", _("معتمَد")
+    POSTED = "POSTED", _("مُرحَّل إلى الدفتر")
+    REJECTED = "REJECTED", _("مرفوض")
+
+
+class OpeningBalanceDirection(models.TextChoices):
+    #: The participant owes the centre. Posts a charge line.
+    RECEIVABLE = "RECEIVABLE", _("ذمة على المشارك")
+    #: The centre owes the participant. Recorded and reviewed; NOT postable in
+    #: Sprint 8D-2 — see ``OpeningBalance`` below for why.
+    CREDIT = "CREDIT", _("رصيد دائن للمشارك")
+
+
+class OpeningBalance(models.Model):
+    """
+    The one gateway from the historical archive to the ledger (BR-094).
+
+    **Why this lives in ``billing`` and not in ``datamigration``.** The archive
+    is forbidden by A-04 from importing any financial app, and Sprint 8D-1 was
+    built so that a workbook can be read, validated and committed without a
+    single ledger row moving. Putting ``OpeningBalance`` in ``datamigration``
+    would have handed that app a way to create money and undone the boundary.
+
+    So the arrow points the other way. This model sits on the LEDGER side and
+    reaches INTO the archive through ``source_enrollment``. The archive cannot
+    reach back — it does not know this model exists — and the gate can only be
+    opened from the money side, by people, one row at a time.
+
+    **Four hands, and the database counts them** (D-24 · BR-094). One person
+    proposes, a second reviews the figure against the source, a third
+    approves, and only then may it be posted. The constraints below make each
+    of those distinct, because a review the same person performed on their own
+    entry is not a review.
+
+    **One row at a time** (D-25). There is no bulk proposal service, and the
+    absence is the control: ``propose_from_archive`` takes a single archived
+    enrolment. A list of two hundred balances nobody read individually is
+    exactly what BR-094 exists to prevent.
+
+    **Provenance survives supersession.** ``source_enrollment`` is nullable and
+    PROTECTed, but the workbook, sheet and row are ALSO copied here as text.
+    An archive batch can be superseded by a better reading of the same file;
+    the balance somebody approved must still be able to say where it came
+    from even then.
+
+    **CREDIT is recorded but not postable, and that is deliberate.** A
+    participant the centre owes money to is a real fact and belongs on the
+    record. Posting it, though, would mean creating a ``Receipt`` for money
+    this system never received — inventing the very document Sprint 8D-1
+    refused to invent. ``post()`` refuses it by name. Returning historical
+    credit is a decision the centre has to make on paper first.
+    """
+
+    code = ShortCode(unique=True, verbose_name=_("رمز الرصيد الافتتاحي"))
+
+    #: Nullable: a balance may be entered by hand from a paper file the
+    #: workbooks never contained. When it IS derived, this is the row.
+    source_enrollment = models.ForeignKey(
+        "datamigration.HistoricalEnrollment",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances",
+        verbose_name=_("الصف التاريخي المصدر"),
+    )
+    source_workbook = models.CharField(max_length=255, blank=True, verbose_name=_("الملف المصدر"))
+    source_sheet = models.CharField(max_length=120, blank=True, verbose_name=_("الورقة المصدر"))
+    source_row = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("الصف المصدر"))
+    source_legacy_number = models.CharField(
+        max_length=32, blank=True, verbose_name=_("الرقم الجامعي القديم")
+    )
+
+    direction = ShortCode(choices=OpeningBalanceDirection.choices, verbose_name=_("اتجاه الرصيد"))
+    amount = Money(verbose_name=_("المبلغ"))
+    as_of = models.DateField(verbose_name=_("الرصيد كما في تاريخ"))
+    description_ar = models.CharField(max_length=255, verbose_name=_("البيان"))
+
+    #: Where the money will land. Required before APPROVAL, not before a
+    #: draft: the reviewer is often the person who works out which live
+    #: enrolment an old debt belongs to. A balance with nowhere to go is a
+    #: balance nobody can collect, so it may be proposed and never approved.
+    enrollment = models.ForeignKey(
+        "operations.Enrollment",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances",
+        verbose_name=_("التسجيل"),
+    )
+
+    status = ShortCode(
+        choices=OpeningBalanceStatus.choices,
+        default=OpeningBalanceStatus.DRAFT,
+        verbose_name=_("الحالة"),
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="opening_balances_created",
+        verbose_name=_("اقترحه"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances_reviewed",
+        verbose_name=_("راجعه"),
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note_ar = models.CharField(max_length=255, blank=True, verbose_name=_("ملاحظة المراجعة"))
+
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances_approved",
+        verbose_name=_("اعتمده"),
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    decision_note_ar = models.CharField(max_length=255, blank=True, verbose_name=_("ملاحظة القرار"))
+
+    #: Set once, by ``post()``. A OneToOne rather than a flag: idempotency is
+    #: then a database fact rather than a check somebody has to remember to
+    #: write. A second post collides here even if every guard above it fails.
+    posted_charge_line = models.OneToOneField(
+        ChargeLine,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balance",
+        verbose_name=_("بند الرسم الناتج"),
+    )
+    posted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances_posted",
+        verbose_name=_("رحّله"),
+    )
+    posted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("رصيد افتتاحي")
+        verbose_name_plural = _("الأرصدة الافتتاحية")
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=OpeningBalanceStatus.values),
+                name="billing_opening_balance_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(direction__in=OpeningBalanceDirection.values),
+                name="billing_opening_balance_direction_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="billing_opening_balance_amount_positive",
+            ),
+            # D-24 · BR-094 — the reviewer is not the person who proposed it.
+            models.CheckConstraint(
+                condition=models.Q(reviewed_by__isnull=True)
+                | ~models.Q(reviewed_by=models.F("created_by")),
+                name="billing_opening_balance_reviewer_differs",
+            ),
+            # D-24 · BR-094 — nor is the approver either of them.
+            models.CheckConstraint(
+                condition=models.Q(approved_by__isnull=True)
+                | (
+                    ~models.Q(approved_by=models.F("created_by"))
+                    & ~models.Q(approved_by=models.F("reviewed_by"))
+                ),
+                name="billing_opening_balance_approver_differs",
+            ),
+            # A status is a claim; these make it a signed one.
+            models.CheckConstraint(
+                condition=~models.Q(status=OpeningBalanceStatus.REVIEWED)
+                | (models.Q(reviewed_by__isnull=False) & models.Q(reviewed_at__isnull=False)),
+                name="billing_opening_balance_reviewed_is_stamped",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status=OpeningBalanceStatus.APPROVED)
+                | (
+                    models.Q(approved_by__isnull=False)
+                    & models.Q(approved_at__isnull=False)
+                    & models.Q(reviewed_by__isnull=False)
+                    & models.Q(enrollment__isnull=False)
+                ),
+                name="billing_opening_balance_approved_is_stamped",
+            ),
+            # POSTED means the ledger row exists. Not "was requested".
+            models.CheckConstraint(
+                condition=~models.Q(status=OpeningBalanceStatus.POSTED)
+                | (
+                    models.Q(posted_charge_line__isnull=False)
+                    & models.Q(posted_by__isnull=False)
+                    & models.Q(posted_at__isnull=False)
+                ),
+                name="billing_opening_balance_posted_has_line",
+            ),
+            # And the converse: a charge line exists only for a POSTED row, so
+            # a rolled-back post cannot leave a line orphaned to a draft.
+            models.CheckConstraint(
+                condition=models.Q(posted_charge_line__isnull=True)
+                | models.Q(status=OpeningBalanceStatus.POSTED),
+                name="billing_opening_balance_line_implies_posted",
+            ),
+            # Sprint 8D-2 scope, in the database as well as the service: a
+            # credit cannot reach the ledger, because posting one would mean
+            # inventing a receipt for money never received.
+            models.CheckConstraint(
+                condition=~models.Q(direction=OpeningBalanceDirection.CREDIT)
+                | models.Q(posted_charge_line__isnull=True),
+                name="billing_opening_balance_credit_is_not_posted",
+            ),
+            # One balance per archived row. A second proposal from the same
+            # source is a duplicate, and duplicates are how a debt gets
+            # collected twice.
+            models.UniqueConstraint(
+                fields=["source_enrollment"],
+                condition=models.Q(source_enrollment__isnull=False),
+                name="billing_opening_balance_one_per_source_row",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status"], name="bil_ob_status_idx"),
+            models.Index(fields=["direction", "status"], name="bil_ob_dir_status_idx"),
+            models.Index(fields=["enrollment"], name="bil_ob_enrollment_idx"),
+            models.Index(fields=["source_legacy_number"], name="bil_ob_legacy_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} — {self.get_direction_display()} {self.amount}"
+
+    @property
+    def is_postable(self) -> bool:
+        """Approved, receivable, attached to an enrolment, and not yet posted."""
+        return (
+            self.status == OpeningBalanceStatus.APPROVED
+            and self.direction == OpeningBalanceDirection.RECEIVABLE
+            and self.enrollment_id is not None
+            and self.posted_charge_line_id is None
+        )

@@ -145,4 +145,51 @@ class ExtraFeeForm(forms.Form):
         cast(forms.ChoiceField, self.fields["enrollment_code"]).choices = enrollment_choices or []
 
 
-__all__ = ["CreditReturnForm", "DiscountForm", "ExtraFeeForm", "RefundForm"]
+class OpeningBalanceProposeForm(forms.Form):
+    """
+    One proposed opening balance (BR-094).
+
+    The amount is typed, not derived. 146 of 163 checked archive rows do not
+    reconcile with their own subject columns, so computing a debt from them
+    would launder a spreadsheet error into a demand for money.
+    """
+
+    code = forms.CharField(label=_("رمز الرصيد"), max_length=32)
+    source_row_id = forms.IntegerField(
+        label=_("رقم الصف التاريخي"),
+        required=False,
+        help_text=_("اتركه فارغاً للرصيد المُقيَّد من ملف ورقي"),
+    )
+    legacy_number = forms.CharField(label=_("الرقم الجامعي القديم"), max_length=32, required=False)
+    direction = forms.ChoiceField(label=_("اتجاه الرصيد"), choices=[])
+    amount = forms.DecimalField(label=_("المبلغ"), max_digits=12, decimal_places=3, min_value=0)
+    as_of = forms.DateField(label=_("كما في تاريخ"), widget=forms.DateInput({"type": "date"}))
+    description_ar = forms.CharField(label=_("البيان"), max_length=255)
+
+    def __init__(
+        self, *args: Any, direction_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["direction"]).choices = direction_choices or []
+
+
+class OpeningBalanceReviewForm(forms.Form):
+    """The second pair of hands (D-24) — and where the enrolment is attached."""
+
+    code = forms.CharField(widget=forms.HiddenInput)
+    enrollment_code = forms.CharField(label=_("رمز التسجيل"), max_length=32, required=False)
+    note_ar = forms.CharField(
+        label=_("ملاحظة المراجعة"),
+        max_length=255,
+        help_text=_("بماذا قابلتَ الرقم — الصف التاريخي، ملف ورقي، إقرار المشارك؟"),
+    )
+
+
+__all__ = [
+    "CreditReturnForm",
+    "DiscountForm",
+    "ExtraFeeForm",
+    "OpeningBalanceProposeForm",
+    "OpeningBalanceReviewForm",
+    "RefundForm",
+]

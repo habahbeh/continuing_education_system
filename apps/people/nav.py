@@ -79,6 +79,7 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.REFUNDS, "billing:refunds", _("الاستردادات وردّ الأرصدة")),
             NavItem(Screen.EXTRA_FEES, "billing:extra-fees", _("الرسوم الإضافية")),
             NavItem(Screen.EXPENSES, "expenses:expenses", _("المصروفات")),
+            NavItem(Screen.OPENING_BALANCES, "billing:opening-balances", _("الأرصدة الافتتاحية")),
         ),
     ),
     NavGroup(
