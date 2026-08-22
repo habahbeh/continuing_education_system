@@ -534,3 +534,195 @@ def test_charge_creation_is_deliberately_not_guarded(finance, manager, paid_enro
     source = inspect.getsource(charge_service)
     assert "require_open" not in source
     assert "period_service" not in source
+
+
+def test_discounts_are_deliberately_not_guarded(finance) -> None:
+    """
+    The other deliberate omission, recorded for the same reason.
+
+    A ``Discount`` reduces ``total_due`` and carries no posting date. Its only
+    date is ``president_approval_date``, which records when the president
+    signed BR-030's approval — not when the reduction hits the account.
+    Guarding that would refuse a discount because a signature happened to fall
+    in a closed month, which is the wrong field answering the wrong question.
+
+    Giving ``Discount`` a real posting date is a schema change and an
+    accounting decision about which month a waiver belongs to. Neither is
+    something a period-guard sprint should settle on its own.
+    """
+    import inspect
+
+    from apps.billing.models import Discount
+    from apps.billing.services import discount_service
+
+    source = inspect.getsource(discount_service)
+    assert "require_open" not in source
+    assert "period_service" not in source
+
+    # The absence of a posting date is the actual reason, so it is asserted
+    # rather than described: if somebody adds one, this test fails and the
+    # decision gets revisited on purpose.
+    #
+    # Each of the three that DO exist answers a different question, and none
+    # of them is "which month does this reduction belong to":
+    #   president_approval_date — when BR-030's signature happened
+    #   approved_at             — when this system recorded that signature
+    #   created_at              — when the row was typed
+    date_fields = {
+        field.name
+        for field in Discount._meta.get_fields()
+        if field.get_internal_type() in {"DateField", "DateTimeField"}
+    }
+    assert date_fields == {"president_approval_date", "approved_at", "created_at"}
+
+
+def test_reversing_a_payout_into_a_closed_period_is_refused_and_recorded(
+    finance, manager, cash_method, paid_enrollment
+) -> None:
+    """
+    The reversal path's own DENIED_ATTEMPT — Sprint 8D-6 left this indirect.
+
+    8D-6 covered it through the shared helper and said so; a shared helper is
+    not evidence that a particular caller passes it the right arguments. This
+    asserts the reversal's own audit row, and that a refused reversal leaves
+    absolutely everything as it was: the payout still live, the balance still
+    REFUNDED, and no second row anywhere.
+    """
+    from apps.billing.models import (
+        OpeningBalanceDirection,
+        OpeningBalanceRefund,
+        OpeningBalanceStatus,
+    )
+    from apps.billing.services import opening_balance_service as obs
+    from apps.cashbox.models import PaymentAllocation, Receipt
+    from apps.core.models import AuditEvent, FinancialPeriod, FinancialPeriodStatus
+    from apps.people.models import Role, User
+
+    second_officer = User.objects.create_user(
+        username="fin.8d6a.two", password=PASSWORD, role=Role.FINANCE_OFFICER
+    )
+    balance = obs.propose_manually(
+        actor=finance,
+        code="OB-8D6A",
+        direction=OpeningBalanceDirection.CREDIT,
+        amount=Decimal("225.000"),
+        as_of=TERM_START,
+        description_ar="رصيد دائن",
+    )
+    obs.review(actor=second_officer, balance=balance, enrollment=paid_enrollment, note_ar="قوبل")
+    obs.approve(actor=manager, balance=balance, note_ar="معتمد")
+    obs.mark_refund_due(actor=manager, balance=balance, note_ar="لا تسجيل لاحق")
+    balance.refresh_from_db()
+
+    # Paid in an OPEN month, so only the reversal's own date is at issue.
+    payout = obs.pay_refund_due(
+        actor=finance,
+        balance=balance,
+        code="PAY-8D6A",
+        amount=balance.amount,
+        paid_on=IN_OPEN,
+        payment_method=cash_method,
+        external_reference="SND-8D6A",
+        payee_name_ar="مستلم",
+    )
+    balance.refresh_from_db()
+
+    # October closes; the correction is attempted into it.
+    FinancialPeriod.objects.create(
+        starts_on=date(2026, 10, 1),
+        ends_on=date(2026, 10, 31),
+        status=FinancialPeriodStatus.CLOSED,
+        closed_by=manager,
+        closed_at=timezone.now(),
+    )
+
+    receipts, allocations = Receipt.objects.count(), PaymentAllocation.objects.count()
+    payouts = OpeningBalanceRefund.objects.count()
+    before = _denials()
+
+    with pytest.raises(ClosedPeriodError, match="مقفلة"):
+        obs.reverse_refund_payout(
+            actor=finance,
+            balance=balance,
+            reversed_on=IN_CLOSED,
+            reason_ar="شيك مرتجع",
+        )
+
+    # 1 · the refusal is on the record, under D-23, naming this movement.
+    _assert_denial_recorded(before, movement="عكس صرف")
+    event = (
+        AuditEvent.objects.filter(action="DENIED_ATTEMPT", denial_rule="D-23")
+        .order_by("-id")
+        .first()
+    )
+    assert event is not None
+    # The pair pins the path: the payout guard uses the same entity_type but
+    # the movement «صرف رصيد افتتاحي», so this row can only be the reversal.
+    assert event.entity_type == "billing.OpeningBalanceRefund"
+    assert event.reference == "PAY-8D6A"
+    assert (event.changes or {})["movement_date"] == IN_CLOSED.isoformat()
+    assert event.actor_id == finance.pk
+
+    # 2 · the original payout is untouched and still live.
+    payout.refresh_from_db()
+    assert payout.reversed_at is None
+    assert payout.reversed_on is None
+    assert payout.reversal_reason_ar == ""
+    assert payout.active_key == 1
+    assert payout.paid_on == IN_OPEN
+    assert payout.external_reference == "SND-8D6A"
+
+    # 3 · the balance did not reopen.
+    balance.refresh_from_db()
+    assert balance.status == OpeningBalanceStatus.REFUNDED
+    assert obs.outstanding_refunds(actor=finance) == []
+
+    # 4 · nothing was created anywhere.
+    assert Receipt.objects.count() == receipts
+    assert PaymentAllocation.objects.count() == allocations
+    assert OpeningBalanceRefund.objects.count() == payouts
+
+
+def test_a_reversal_into_an_open_period_still_works_after_all_this(
+    finance, manager, cash_method, paid_enrollment, closed_october
+) -> None:
+    """The guard refuses a closed month, not reversals in general."""
+    from apps.billing.models import OpeningBalanceDirection, OpeningBalanceStatus
+    from apps.billing.services import opening_balance_service as obs
+    from apps.people.models import Role, User
+
+    second_officer = User.objects.create_user(
+        username="fin.8d6a.ok", password=PASSWORD, role=Role.FINANCE_OFFICER
+    )
+    balance = obs.propose_manually(
+        actor=finance,
+        code="OB-8D6A-OK",
+        direction=OpeningBalanceDirection.CREDIT,
+        amount=Decimal("225.000"),
+        as_of=TERM_START,
+        description_ar="رصيد دائن",
+    )
+    obs.review(actor=second_officer, balance=balance, enrollment=paid_enrollment, note_ar="قوبل")
+    obs.approve(actor=manager, balance=balance, note_ar="معتمد")
+    obs.mark_refund_due(actor=manager, balance=balance, note_ar="لا تسجيل لاحق")
+    balance.refresh_from_db()
+
+    obs.pay_refund_due(
+        actor=finance,
+        balance=balance,
+        code="PAY-8D6A-OK",
+        amount=balance.amount,
+        paid_on=IN_OPEN,
+        payment_method=cash_method,
+        external_reference="SND-OK",
+        payee_name_ar="مستلم",
+    )
+    balance.refresh_from_db()
+
+    obs.reverse_refund_payout(
+        actor=finance, balance=balance, reversed_on=IN_OPEN, reason_ar="شيك مرتجع"
+    )
+
+    balance.refresh_from_db()
+    assert balance.status == OpeningBalanceStatus.REFUND_DUE
+    assert [row["code"] for row in obs.outstanding_refunds(actor=finance)] == ["OB-8D6A-OK"]
