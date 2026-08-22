@@ -39,12 +39,18 @@ from apps.operations.forms import (
     DepositSettlementForm,
     EnrollmentForm,
     HandoverForm,
+    MoheAttachmentForm,
+    MoheDecisionForm,
+    MoheResubmissionForm,
+    MoheSendForm,
+    MoheSubmissionForm,
 )
 from apps.operations.services import (
     certificate_service,
     clearance_service,
     cohort_service,
     enrollment_service,
+    mohe_service,
 )
 from apps.partners.services import partner_service
 from apps.people.constants import Action, Screen
@@ -694,3 +700,242 @@ def certificate_print_view(request: HttpRequest, number: str) -> HttpResponse:
         raise Http404 from exc
 
     return render(request, "print/certificate.html", {"certificate": document})
+
+
+# ---------------------------------------------------------------------------
+# The ministry file (Sprint 8G)
+# ---------------------------------------------------------------------------
+#: Which permission each POST on the MOHE screens needs, checked before the
+#: service so a role violation is a 403 and a rule refusal is a message. The
+#: split is §3.3's own: the registration officer drafts and attaches, the
+#: centre manager sends and records the decision (footnote ⁹).
+MOHE_ACTIONS: dict[str, tuple[str, str]] = {
+    "attach": (Screen.MOHE_SUBMIT, Action.EDIT),
+    "send": (Screen.MOHE_SUBMIT, Action.APPROVE),
+    "approve": (Screen.MOHE, Action.APPROVE),
+    "reject": (Screen.MOHE, Action.APPROVE),
+    "resubmit": (Screen.MOHE_SUBMIT, Action.CREATE),
+}
+
+
+@require_http_methods(["GET"])
+def mohe_view(request: HttpRequest) -> HttpResponse:
+    """§3.3/14 — every ministry file, whatever its status."""
+    return render(
+        request,
+        "operations/mohe.html",
+        {
+            "title": _("اعتماد الوزارة"),
+            "active_screen": Screen.MOHE,
+            "submissions": mohe_service.list_submissions(
+                actor=request.user,
+                status=request.GET.get("status", "").strip(),
+                query=request.GET.get("q", "").strip(),
+                request=request,
+            ),
+            "query": request.GET.get("q", ""),
+            "status": request.GET.get("status", ""),
+            "can_open_file": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def mohe_submit_view(request: HttpRequest) -> HttpResponse:
+    """
+    §3.3/15 — open a ministry file for a cohort.
+
+    Opens on VIEW and submits on CREATE. The row gives the audit account ``V``
+    and withholds ``C``, so the editor is readable by the role that reads
+    everything and fillable only by the two that draft.
+    """
+    policy.require(request.user, Screen.MOHE_SUBMIT, Action.VIEW, request=request)
+
+    form = MoheSubmissionForm(
+        request.POST or None,
+        cohort_choices=mohe_service.submittable_cohort_choices(actor=request.user, request=request),
+    )
+
+    if request.method == "POST":
+        policy.require(request.user, Screen.MOHE_SUBMIT, Action.CREATE, request=request)
+        if form.is_valid():
+            try:
+                cohort = cohort_service.get_cohort_instance(
+                    actor=request.user, code=form.cleaned_data["cohort_code"], request=request
+                )
+                submission = mohe_service.create_submission(
+                    actor=request.user, cohort=cohort, data=form.content(), request=request
+                )
+            except (DjangoValidationError, ObjectDoesNotExist) as exc:
+                messages.error(request, _message_of(exc))
+            else:
+                messages.success(
+                    request,
+                    _("فُتح ملف وزاري للدفعة %(code)s — أرفق المستندين ثم أرسله")
+                    % {"code": cohort.code},
+                )
+                return redirect("operations:mohe-detail", submission_id=submission.pk)
+
+    return render(
+        request,
+        "operations/mohe_submit.html",
+        {
+            "title": _("نموذج الإرسال للوزارة"),
+            "active_screen": Screen.MOHE_SUBMIT,
+            "form": form,
+            "can_create": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def mohe_detail_view(request: HttpRequest, submission_id: int) -> HttpResponse:
+    """
+    One file: its contents, its documents, and whichever act comes next.
+
+    Part of §3.3/14 rather than a screen of its own — the same permission row
+    as the listing it opens from, the way the clearance detail sits under the
+    clearance screen.
+    """
+    if request.method == "POST":
+        response = _handle_mohe_action(request, submission_id)
+        if response is not None:
+            return response
+
+    try:
+        submission = mohe_service.get_submission(
+            actor=request.user, submission_id=submission_id, request=request
+        )
+    except ObjectDoesNotExist as exc:
+        raise Http404(_("لا يوجد طلب وزاري بهذا الرقم")) from exc
+
+    may_draft = policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.EDIT)
+    may_send = policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.APPROVE)
+    may_decide = policy.is_allowed(request.user, Screen.MOHE, Action.APPROVE)
+
+    return render(
+        request,
+        "operations/mohe_detail.html",
+        {
+            "title": _("الطلب الوزاري"),
+            "active_screen": Screen.MOHE,
+            "submission": submission,
+            "attachment_form": MoheAttachmentForm(
+                purpose_choices=[
+                    (p["purpose"], p["label"]) for p in submission["required_purposes"]
+                ]
+            ),
+            "send_form": MoheSendForm(initial={"submitted_on": timezone.localdate()}),
+            "decision_form": MoheDecisionForm(initial={"decided_on": timezone.localdate()}),
+            "resubmission_form": MoheResubmissionForm(initial=submission["content"]),
+            # BR-016 — the send button appears only when both documents are in.
+            "can_attach": may_draft and submission["status"] == "DRAFT",
+            "can_send": may_send and submission["is_sendable"],
+            "send_blocked_by_documents": may_send
+            and submission["status"] == "DRAFT"
+            and bool(submission["missing_attachments"]),
+            "can_decide": may_decide and submission["is_decidable"],
+            "can_resubmit": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE)
+            and submission["is_resubmittable"],
+        },
+    )
+
+
+def _handle_mohe_action(request: HttpRequest, submission_id: int) -> HttpResponse | None:
+    action = request.POST.get("action", "")
+    if action not in MOHE_ACTIONS:
+        return None
+
+    screen, permission = MOHE_ACTIONS[action]
+    policy.require(request.user, screen, permission, request=request)
+
+    try:
+        submission = mohe_service.submission_instance(
+            actor=request.user, submission_id=submission_id, request=request
+        )
+    except ObjectDoesNotExist as exc:
+        raise Http404(_("لا يوجد طلب وزاري بهذا الرقم")) from exc
+
+    try:
+        created = _run_mohe_action(request, action, submission)
+    except (DjangoValidationError, PermissionDenied) as exc:
+        if isinstance(exc, PermissionDenied):
+            raise
+        messages.error(request, _message_of(exc))
+        return redirect("operations:mohe-detail", submission_id=submission_id)
+
+    if created is not None:
+        return redirect("operations:mohe-detail", submission_id=created)
+    return redirect("operations:mohe-detail", submission_id=submission_id)
+
+
+def _run_mohe_action(request: HttpRequest, action: str, submission: Any) -> int | None:
+    """Perform one act and report the id to land on — a new one for a resubmission."""
+    if action == "attach":
+        attachment_form = MoheAttachmentForm(
+            request.POST,
+            request.FILES,
+            purpose_choices=[(p, str(p)) for p in mohe_service.REQUIRED_ATTACHMENTS],
+        )
+        if not attachment_form.is_valid():
+            messages.error(request, _("اختر نوع المستند وملفاً صالحاً."))
+            return None
+        mohe_service.attach_document(
+            actor=request.user,
+            submission=submission,
+            purpose=attachment_form.cleaned_data["purpose"],
+            upload=attachment_form.cleaned_data["upload"],
+            request=request,
+        )
+        messages.success(request, _("أُرفق المستند."))
+        return None
+
+    if action == "send":
+        send_form = MoheSendForm(request.POST)
+        if not send_form.is_valid():
+            messages.error(request, _("تاريخ الإرسال مطلوب."))
+            return None
+        mohe_service.submit_to_mohe(
+            actor=request.user,
+            submission=submission,
+            submitted_on=send_form.cleaned_data["submitted_on"],
+            request=request,
+        )
+        messages.success(request, _("أُرسل الطلب إلى الوزارة."))
+        return None
+
+    if action in {"approve", "reject"}:
+        decision_form = MoheDecisionForm(request.POST)
+        if not decision_form.is_valid():
+            messages.error(request, _("تاريخ القرار مطلوب."))
+            return None
+        data = decision_form.cleaned_data
+        mohe_service.record_decision(
+            actor=request.user,
+            submission=submission,
+            approved=action == "approve",
+            decided_on=data["decided_on"],
+            mohe_course_number=data["mohe_course_number"],
+            registration_deadline=data["registration_deadline"],
+            rejection_reason_ar=data["rejection_reason_ar"],
+            request=request,
+        )
+        messages.success(
+            request,
+            _("سُجّل الاعتماد الوزاري.") if action == "approve" else _("سُجّل الرفض الوزاري."),
+        )
+        return None
+
+    # resubmit — a NEW file answering the rejection, which stays readable.
+    resubmission_form = MoheResubmissionForm(request.POST)
+    if not resubmission_form.is_valid():
+        messages.error(request, _("راجع حقول النموذج."))
+        return None
+    fresh = mohe_service.resubmit(
+        actor=request.user,
+        rejected=submission,
+        data=resubmission_form.content(),
+        request=request,
+    )
+    messages.success(request, _("فُتح ملف جديد يردّ على الرفض — أرفق المستندين ثم أرسله."))
+    return int(fresh.pk)

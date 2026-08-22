@@ -78,6 +78,11 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.STUDENTS, "people:participants", _("المشاركون")),
             NavItem(Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق جديد")),
             NavItem(Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+            # Sprint 8G — §3.3/14 and §3.3/15. Both filtered on VIEW: the
+            # audit account holds it on each and may read the file and the
+            # editor without being able to draft, send or decide.
+            NavItem(Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
+            NavItem(Screen.MOHE_SUBMIT, "operations:mohe-submit", _("نموذج الإرسال للوزارة")),
             NavItem(Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
         ),
     ),

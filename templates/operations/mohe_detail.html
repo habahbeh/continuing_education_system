@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }} — <span dir="ltr">{{ submission.cohort_code }}</span></h1>
+
+<div class="card2"><div class="card2-body">
+  <dl class="dl">
+    <dt>{% translate "الدفعة" %}</dt>
+    <dd dir="ltr">{{ submission.cohort_code }} — <span dir="rtl">{{ submission.cohort_name_ar }}</span></dd>
+    <dt>{% translate "البرنامج" %}</dt><dd>{{ submission.program_name_ar }}</dd>
+    <dt>{% translate "بداية الدفعة" %}</dt><dd class="num">{{ submission.starts_on }}</dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ submission.status_display }}</span></dd>
+    <dt>{% translate "فتح الملف" %}</dt><dd>{{ submission.created_by }}</dd>
+    {% if submission.submitted_on %}
+      <dt>{% translate "أُرسل في" %}</dt><dd class="num">{{ submission.submitted_on }}</dd>
+    {% endif %}
+    {% if submission.decided_on %}
+      <dt>{% translate "تاريخ القرار" %}</dt><dd class="num">{{ submission.decided_on }}</dd>
+    {% endif %}
+    {% if submission.mohe_course_number %}
+      <dt>{% translate "الرقم الوزاري" %}</dt><dd dir="ltr" class="num">{{ submission.mohe_course_number }}</dd>
+    {% endif %}
+    {% if submission.registration_deadline %}
+      <dt>{% translate "مهلة التسجيل" %}</dt><dd class="num">{{ submission.registration_deadline }}</dd>
+    {% endif %}
+    {% if submission.resubmission_of %}
+      <dt>{% translate "ردّاً على الطلب" %}</dt>
+      <dd><a href="{% url 'operations:mohe-detail' submission.resubmission_of %}" dir="ltr">#{{ submission.resubmission_of }}</a></dd>
+    {% endif %}
+    {% if submission.resubmissions %}
+      <dt>{% translate "أُعيد إرساله في" %}</dt>
+      <dd>{% for rid in submission.resubmissions %}
+        <a href="{% url 'operations:mohe-detail' rid %}" dir="ltr">#{{ rid }}</a>{% if not forloop.last %} · {% endif %}
+      {% endfor %}</dd>
+    {% endif %}
+  </dl>
+</div></div>
+
+{% if submission.rejection_reason_ar %}
+  <div class="note danger">
+    <strong>{% translate "سبب الرفض كما ورد من الوزارة" %} (BR-014):</strong>
+    <p>{{ submission.rejection_reason_ar }}</p>
+  </div>
+{% endif %}
+
+{% if submission.status == "APPROVED" %}
+  <div class="note ok">
+    {% translate "معتمد — يجوز التسجيل على هذه الدفعة (BR-013)." %}
+    {% if submission.registration_deadline %}
+      {% translate "ولا تُرفع أسماء جديدة بعد" %} {{ submission.registration_deadline }} (BR-019).
+    {% endif %}
+  </div>
+{% endif %}
+
+{# ---- محتوى النموذج (BR-014) ---- #}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "محتوى النموذج" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "محاور التدريب" %}</dt><dd>{{ submission.content.training_axes_ar|default:"—" }}</dd>
+      <dt>{% translate "الجوانب العملية" %}</dt><dd>{{ submission.content.practical_aspects_ar|default:"—" }}</dd>
+      <dt>{% translate "الفئة المستهدفة" %}</dt><dd>{{ submission.content.target_audience_ar|default:"—" }}</dd>
+      <dt>{% translate "المدرب" %}</dt><dd>{{ submission.content.trainer_name|default:"—" }}</dd>
+      <dt>{% translate "مؤهلات المدرب" %}</dt><dd>{{ submission.content.trainer_qualifications|default:"—" }}</dd>
+      <dt>{% translate "مكان التدريب" %}</dt><dd>{{ submission.content.training_location|default:"—" }}</dd>
+      <dt>{% translate "الجهة المسؤولة" %}</dt><dd>{{ submission.content.responsible_entity|default:"—" }}</dd>
+    </dl>
+  </div>
+</div>
+
+{# ---- المرفقان الإلزاميان (BR-016) ---- #}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "المرفقات الإلزامية" %}</h2></div>
+  <div class="card2-body">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "المستند" %}</th><th>{% translate "الملف" %}</th>
+        <th>{% translate "الحجم" %}</th><th>{% translate "البصمة" %}</th><th>{% translate "رُفع" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for a in submission.attachments %}
+          <tr>
+            <td>{{ a.purpose_display }}</td>
+            <td dir="ltr">{{ a.original_filename }}</td>
+            <td class="num">{{ a.size_bytes }}</td>
+            <td dir="ltr"><small class="muted">{{ a.sha256|slice:":12" }}…</small></td>
+            <td class="num">{{ a.uploaded_at|date:"Y-m-d" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">{% translate "لا مرفقات بعد" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if submission.missing_attachments %}
+      <div class="note warn">
+        {% translate "الناقص" %}:
+        {% for m in submission.missing_attachments %}{{ m.label }}{% if not forloop.last %} · {% endif %}{% endfor %}
+        — {% translate "لا يُرسَل الطلب قبل استكمالهما (BR-016)." %}
+      </div>
+    {% endif %}
+
+    {% if can_attach %}
+      <form method="post" enctype="multipart/form-data">{% csrf_token %}
+        <input type="hidden" name="action" value="attach">
+        {% include "partials/_form.html" with form=attachment_form %}
+        <button class="btn2" type="submit">{% translate "رفع المستند" %}</button>
+      </form>
+    {% elif submission.status == "DRAFT" %}
+      <div class="muted">{% translate "رفع المستندات لموظف التسجيل أو مدير المركز (§3.3/15)." %}</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ---- الإرسال (§3.3/15 · صلاحية الاعتماد) ---- #}
+{% if can_send %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "إرسال الملف إلى الوزارة" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "الملف يغادر المركز باسمه — الإرسال لمدير المركز وحده، والمسودة لموظف التسجيل." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="send">
+        {% include "partials/_form.html" with form=send_form %}
+        <button class="btn2 primary" type="submit">{% translate "إرسال للوزارة" %}</button>
+      </form>
+    </div>
+  </div>
+{% elif send_blocked_by_documents %}
+  <div class="note warn">
+    {% translate "زر الإرسال يظهر بعد استكمال المرفقين الإلزاميين (BR-016)." %}
+  </div>
+{% endif %}
+
+{# ---- قرار الوزارة (§3.3/14) ---- #}
+{% if can_decide %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "تسجيل قرار الوزارة" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "الاعتماد يتطلب الرقم الوزاري (C-16)، والرفض يتطلب سببه نصاً كما ورد (BR-014)." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        {% include "partials/_form.html" with form=decision_form %}
+        <button class="btn2 primary" type="submit" name="action" value="approve">{% translate "تسجيل الاعتماد" %}</button>
+        <button class="btn2" type="submit" name="action" value="reject">{% translate "تسجيل الرفض" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+{# ---- إعادة الإرسال ردّاً على رفض ---- #}
+{% if can_resubmit %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "إعادة الإرسال" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "يُفتح ملف جديد يحمل ما عُدِّل، ويبقى الرفض وسببه مقروءين — فهما سجلّ ما اعترضت عليه الوزارة." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="resubmit">
+        {% include "partials/_form.html" with form=resubmission_form %}
+        <button class="btn2 primary" type="submit">{% translate "فتح ملف يردّ على الرفض" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+<div class="toolbar"><a href="{% url 'operations:mohe' %}">{% translate "عودة إلى الطلبات الوزارية" %}</a></div>
+{% endblock %}

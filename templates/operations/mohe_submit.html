@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "يُحفظ الملف مسودةً ولو نقصت حقوله — فهو يُجمَّع على أيام من مصادر مختلفة. المرفقان الإلزاميان والإرسال يأتيان من صفحة الملف بعد الحفظ." %}
+</div>
+
+{% if not can_create %}
+  <div class="note">
+    {% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — فتح الملفات الوزارية لمدير المركز وموظف التسجيل (§3.3/15)." %}
+  </div>
+{% endif %}
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "بيانات النموذج الوزاري" %}</h2></div>
+  <div class="card2-body">
+    <form method="post">{% csrf_token %}
+      {% include "partials/_form.html" %}
+      {% if can_create %}
+        <button class="btn2 primary" type="submit">{% translate "حفظ كمسودة" %}</button>
+      {% endif %}
+      <a href="{% url 'operations:mohe' %}">{% translate "إلغاء" %}</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

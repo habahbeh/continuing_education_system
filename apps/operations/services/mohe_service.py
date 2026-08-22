@@ -260,6 +260,174 @@ def resubmit(
     return submission
 
 
+# ---------------------------------------------------------------------------
+# The read layer the screens need (Sprint 8G)
+# ---------------------------------------------------------------------------
+#: The seven fields the ministry's own form asks for (BR-014). Named once so
+#: the editor, the detail page and the resubmission all copy the same set.
+CONTENT_FIELDS: tuple[str, ...] = (
+    "training_axes_ar",
+    "practical_aspects_ar",
+    "target_audience_ar",
+    "trainer_name",
+    "trainer_qualifications",
+    "training_location",
+    "responsible_entity",
+)
+
+
+def _row(submission: MoheSubmission) -> dict[str, Any]:
+    cohort = submission.cohort
+    return {
+        "id": submission.pk,
+        "cohort_code": cohort.code,
+        "cohort_name_ar": cohort.name_ar,
+        "program_code": cohort.program.code,
+        "program_name_ar": cohort.program.name_ar,
+        "starts_on": cohort.starts_on,
+        "status": submission.status,
+        "status_display": submission.get_status_display(),
+        "mohe_course_number": submission.mohe_course_number,
+        "submitted_on": submission.submitted_on,
+        "decided_on": submission.decided_on,
+        "registration_deadline": submission.registration_deadline,
+        "rejection_reason_ar": submission.rejection_reason_ar,
+        "resubmission_of": submission.resubmission_of_id,
+        "created_at": submission.created_at,
+    }
+
+
+def list_submissions(
+    *, actor: Any, status: str = "", query: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """
+    The ministry files as rows (§3.3/14).
+
+    Every status, including the rejected ones. A rejection is the record of
+    what the ministry objected to and the only guide to what a resubmission
+    must change (BR-014) — filtering it out of the default view would hide the
+    thing the screen exists to act on.
+    """
+    policy.require(actor, Screen.MOHE, Action.VIEW, request=request)
+
+    queryset = MoheSubmission.objects.select_related("cohort__program", "resubmission_of")
+    if status:
+        queryset = queryset.filter(status=status)
+    if query:
+        queryset = queryset.filter(cohort__code__icontains=query) | queryset.filter(
+            cohort__name_ar__icontains=query
+        )
+
+    return [_row(s) for s in queryset.order_by("-created_at")]
+
+
+def get_submission(*, actor: Any, submission_id: int, request: Any = None) -> dict[str, Any]:
+    """
+    One file, with its documents and what is still missing.
+
+    ``missing`` is the BR-016 answer the send button turns on, computed here
+    rather than in the template: a screen that decided for itself which
+    documents were required would be a second copy of the rule.
+    """
+    from apps.core.services import attachment_service
+
+    policy.require(actor, Screen.MOHE, Action.VIEW, request=request)
+
+    submission = MoheSubmission.objects.select_related(
+        "cohort__program", "resubmission_of", "created_by"
+    ).get(pk=submission_id)
+
+    missing = missing_attachments(submission)
+    detail = _row(submission)
+    detail.update(
+        {
+            "content": {field: getattr(submission, field) for field in CONTENT_FIELDS},
+            "attachments": attachment_service.attachments_for(submission),
+            "missing_attachments": [
+                {"purpose": p, "label": str(AttachmentPurpose(p).label)} for p in missing
+            ],
+            "is_sendable": submission.status == MoheStatus.DRAFT and not missing,
+            "is_decidable": submission.status == MoheStatus.SUBMITTED,
+            "is_resubmittable": submission.status == MoheStatus.REJECTED,
+            "required_purposes": [
+                {"purpose": p, "label": str(AttachmentPurpose(p).label)}
+                for p in REQUIRED_ATTACHMENTS
+            ],
+            "created_by": getattr(submission.created_by, "full_name_ar", "")
+            or submission.created_by.get_username(),
+            "resubmissions": [r.pk for r in submission.resubmissions.order_by("pk")],
+        }
+    )
+    return detail
+
+
+def submission_instance(*, actor: Any, submission_id: int, request: Any = None) -> MoheSubmission:
+    """The model object, for handing back into this module (A-05)."""
+    policy.require(actor, Screen.MOHE, Action.VIEW, request=request)
+    return MoheSubmission.objects.select_related("cohort").get(pk=submission_id)
+
+
+def submittable_cohort_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    (code, label) pairs of cohorts that still need a ministry file.
+
+    Excluded: a cohort already approved — the unique key allows one approval
+    and a second file could only ever be refused — and one whose file is
+    already sitting with the ministry, because two open files for the same
+    cohort is not a state anybody wants to explain.
+
+    A cohort whose file was REJECTED comes back onto this list. ``resubmit``
+    is the better route for it, because the new file then carries a link back
+    to the rejection it answers — but a rejection is not a dead end, and
+    refusing to let anyone start again from here would make it one.
+    """
+    policy.require(actor, Screen.MOHE_SUBMIT, Action.VIEW, request=request)
+
+    busy = set(
+        MoheSubmission.objects.filter(
+            status__in=(MoheStatus.DRAFT, MoheStatus.SUBMITTED, MoheStatus.APPROVED)
+        ).values_list("cohort_id", flat=True)
+    )
+    return [
+        (c.code, f"{c.code} — {c.name_ar}")
+        for c in Cohort.objects.select_related("program").order_by("-starts_on")
+        if c.pk not in busy
+    ]
+
+
+def attach_document(
+    *,
+    actor: Any,
+    submission: MoheSubmission,
+    purpose: str,
+    upload: Any,
+    request: Any = None,
+) -> Any:
+    """
+    Attach one of the ministry's required documents (BR-016).
+
+    ``EDIT`` on §3.3/15, which is the cell the registration officer holds:
+    footnote ⁹ gives them the draft and its contents and reserves SENDING for
+    the centre manager. Assembling the file is the drafting work.
+
+    Refused once the file has left the building. The ministry decided on the
+    documents it received, and a system that let the set change afterwards
+    could not answer what was actually sent.
+    """
+    from apps.core.services import attachment_service
+
+    policy.require(actor, Screen.MOHE_SUBMIT, Action.EDIT, request=request)
+
+    if submission.status != MoheStatus.DRAFT:
+        raise ValidationError(
+            f"الطلب بحالة {submission.get_status_display()} — لا تُعدَّل مرفقات ملف غادر المركز."
+        )
+
+    return attachment_service.attach(
+        actor=actor, target=submission, purpose=purpose, upload=upload, request=request
+    )
+
+
 def deadline_alerts(*, as_of: date) -> list[dict[str, Any]]:
     """
     BR-015 — approved cohorts whose registration window is closing or closed.
@@ -301,16 +469,22 @@ def deadline_alerts(*, as_of: date) -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "CONTENT_FIELDS",
     "DEADLINE_ALERT_KEY",
     "REQUIRED_ATTACHMENTS",
     "CohortNotApprovedError",
     "MoheAttachmentsMissingError",
     "approved_submission_for",
+    "attach_document",
     "cohort_is_approved",
     "create_submission",
     "deadline_alerts",
+    "get_submission",
+    "list_submissions",
     "missing_attachments",
     "record_decision",
     "resubmit",
+    "submission_instance",
     "submit_to_mohe",
+    "submittable_cohort_choices",
 ]

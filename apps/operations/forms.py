@@ -202,6 +202,120 @@ class CertificateDateForm(forms.Form):
     on_date = forms.DateField(label=_("التاريخ"), widget=forms.DateInput({"type": "date"}))
 
 
+# ---------------------------------------------------------------------------
+# The ministry file (Sprint 8G — §3.3/14, §3.3/15)
+# ---------------------------------------------------------------------------
+class MoheSubmissionForm(forms.Form):
+    """
+    The ministry's own form, transcribed (BR-014).
+
+    Every content field is optional here and that is deliberate rather than
+    lax: ``create_submission`` says a draft may be saved incomplete, because
+    the file is assembled over days from what different people supply. What is
+    gated is SENDING — BR-016 refuses a file missing either required document,
+    and the send button on the detail page is where that is answered.
+    """
+
+    cohort_code = forms.ChoiceField(label=_("الدفعة"), choices=[])
+    training_axes_ar = forms.CharField(
+        label=_("محاور التدريب"), required=False, widget=forms.Textarea({"rows": 3})
+    )
+    practical_aspects_ar = forms.CharField(
+        label=_("الجوانب العملية"), required=False, widget=forms.Textarea({"rows": 3})
+    )
+    target_audience_ar = forms.CharField(
+        label=_("الفئة المستهدفة"), required=False, widget=forms.Textarea({"rows": 2})
+    )
+    trainer_name = forms.CharField(label=_("المدرب"), max_length=150, required=False)
+    trainer_qualifications = forms.CharField(
+        label=_("مؤهلات المدرب"), required=False, widget=forms.Textarea({"rows": 2})
+    )
+    training_location = forms.CharField(label=_("مكان التدريب"), max_length=150, required=False)
+    responsible_entity = forms.CharField(label=_("الجهة المسؤولة"), max_length=150, required=False)
+
+    def __init__(
+        self, *args: Any, cohort_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["cohort_code"]).choices = cohort_choices or []
+
+    def content(self) -> dict[str, Any]:
+        """The submission's own fields — the cohort is resolved by the view."""
+        data = dict(self.cleaned_data)
+        data.pop("cohort_code", None)
+        return data
+
+
+class MoheResubmissionForm(MoheSubmissionForm):
+    """
+    The same seven fields, answering a rejection.
+
+    The cohort is not chosen: ``resubmit`` takes it from the file being
+    answered, because a resubmission that could name a different cohort would
+    not be a resubmission.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs.pop("cohort_choices", None)
+        super().__init__(*args, **kwargs)
+        del self.fields["cohort_code"]
+
+    def content(self) -> dict[str, Any]:
+        return dict(self.cleaned_data)
+
+
+class MoheAttachmentForm(forms.Form):
+    """One of the two documents BR-016 will not let the file leave without."""
+
+    purpose = forms.ChoiceField(label=_("نوع المستند"), choices=[])
+    upload = forms.FileField(label=_("الملف"))
+
+    def __init__(
+        self, *args: Any, purpose_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["purpose"]).choices = purpose_choices or []
+
+
+class MoheSendForm(forms.Form):
+    """The date the file actually went to the ministry."""
+
+    submitted_on = forms.DateField(
+        label=_("تاريخ الإرسال"), widget=forms.DateInput({"type": "date"})
+    )
+
+
+class MoheDecisionForm(forms.Form):
+    """
+    What the ministry said (BR-014, C-16).
+
+    Both outcomes share one form because both come off one letter, and which
+    fields are required depends on which button was pressed — a question only
+    the service can answer, so it answers it: an approval without a ministry
+    number and a rejection without its reason are both refused there, by name.
+    """
+
+    decided_on = forms.DateField(label=_("تاريخ القرار"), widget=forms.DateInput({"type": "date"}))
+    mohe_course_number = forms.CharField(
+        label=_("الرقم الوزاري"),
+        max_length=64,
+        required=False,
+        help_text=_("إلزامي عند الاعتماد — لا اعتماد بلا رقم (C-16)"),
+    )
+    registration_deadline = forms.DateField(
+        label=_("مهلة التسجيل"),
+        required=False,
+        widget=forms.DateInput({"type": "date"}),
+        help_text=_("BR-015 · BR-019 — بعدها يُمنع رفع أسماء جديدة"),
+    )
+    rejection_reason_ar = forms.CharField(
+        label=_("سبب الرفض كما ورد"),
+        required=False,
+        widget=forms.Textarea({"rows": 3}),
+        help_text=_("إلزامي عند الرفض · يُحفظ نصاً كما ورد من الوزارة (BR-014)"),
+    )
+
+
 __all__ = [
     "CertificateDateForm",
     "CertificateIssueForm",
@@ -213,4 +327,9 @@ __all__ = [
     "DepositSettlementForm",
     "EnrollmentForm",
     "HandoverForm",
+    "MoheAttachmentForm",
+    "MoheDecisionForm",
+    "MoheResubmissionForm",
+    "MoheSendForm",
+    "MoheSubmissionForm",
 ]

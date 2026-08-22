@@ -1,4 +1,4 @@
-"""Operational URLs — dashboard, cohorts, enrolments, account (Sprint 8B)."""
+"""Operational URLs — dashboard, cohorts, enrolments, account, ministry file."""
 
 from __future__ import annotations
 
@@ -18,6 +18,11 @@ urlpatterns = [
         name="enrollment-action",
     ),
     path("operations/enrollments/<str:code>/account/", views.account_view, name="account"),
+    # The ministry file (Sprint 8G). ``mohe-submit`` sits above the detail
+    # route because both live under the same prefix and "submit" is not an id.
+    path("operations/mohe/", views.mohe_view, name="mohe"),
+    path("operations/mohe/submit/", views.mohe_submit_view, name="mohe-submit"),
+    path("operations/mohe/<int:submission_id>/", views.mohe_detail_view, name="mohe-detail"),
     path("operations/clearance/", views.clearances_view, name="clearances"),
     path("operations/clearance/<str:code>/", views.clearance_detail_view, name="clearance-detail"),
     path("operations/certificates/", views.certificates_view, name="certificates"),

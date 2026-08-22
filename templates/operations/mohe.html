@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "لا يُسجَّل مشارك على دفعة لم تعتمدها الوزارة (BR-013). يُفتح الملف مسودةً، ولا يُرسَل إلا بالمرفقين الإلزاميين (BR-016)، ويُسجَّل قرار الوزارة كما ورد." %}
+</div>
+
+<form method="get" class="toolbar">
+  <input name="q" value="{{ query }}" placeholder="{% translate 'رمز الدفعة أو اسمها' %}">
+  <select name="status">
+    <option value="">{% translate "كل الحالات" %}</option>
+    <option value="DRAFT" {% if status == "DRAFT" %}selected{% endif %}>{% translate "مسودة" %}</option>
+    <option value="SUBMITTED" {% if status == "SUBMITTED" %}selected{% endif %}>{% translate "مُرسَل للوزارة" %}</option>
+    <option value="APPROVED" {% if status == "APPROVED" %}selected{% endif %}>{% translate "معتمد" %}</option>
+    <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
+  </select>
+  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+  {% if can_open_file %}
+    <a class="btn2" href="{% url 'operations:mohe-submit' %}">{% translate "فتح ملف وزاري" %}</a>
+  {% endif %}
+</form>
+
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الدفعة" %}</th><th>{% translate "البرنامج" %}</th>
+      <th>{% translate "الحالة" %}</th><th>{% translate "الرقم الوزاري" %}</th>
+      <th>{% translate "أُرسل" %}</th><th>{% translate "القرار" %}</th>
+      <th>{% translate "مهلة التسجيل" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for s in submissions %}
+        <tr>
+          <td dir="ltr">{{ s.cohort_code }}<br><small class="muted">{{ s.cohort_name_ar }}</small></td>
+          <td>{{ s.program_name_ar }}</td>
+          <td>
+            <span class="chip">{{ s.status_display }}</span>
+            {% if s.resubmission_of %}<span class="chip">{% translate "إعادة إرسال" %}</span>{% endif %}
+          </td>
+          <td dir="ltr" class="num">{{ s.mohe_course_number|default:"—" }}</td>
+          <td class="num">{{ s.submitted_on|default:"—" }}</td>
+          <td class="num">{{ s.decided_on|default:"—" }}</td>
+          <td class="num">{{ s.registration_deadline|default:"—" }}</td>
+          <td><a class="btn2" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض" %}</a></td>
+        </tr>
+        {% if s.rejection_reason_ar %}
+          <tr><td colspan="8" class="note warn">
+            {% translate "سبب الرفض" %}: {{ s.rejection_reason_ar }}
+          </td></tr>
+        {% endif %}
+      {% empty %}
+        <tr><td colspan="8" class="empty">{% translate "لا طلبات وزارية" %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
