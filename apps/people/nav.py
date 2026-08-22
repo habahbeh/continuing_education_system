@@ -52,6 +52,15 @@ class NavGroup:
 #: would be a promise the system cannot keep.
 NAV: tuple[NavGroup, ...] = (
     NavGroup(
+        _("الرئيسية"),
+        (
+            # Sprint 8E — found during the readiness run. The dashboard had a
+            # route, a view and a matrix row, and no way in except typing the
+            # URL. It is the first screen a demo opens, so it goes first.
+            NavItem(Screen.DASHBOARD, "operations:dashboard", _("لوحة المؤشرات")),
+        ),
+    ),
+    NavGroup(
         _("المشاركون والتسجيل"),
         (
             NavItem(Screen.STUDENTS, "people:participants", _("المشاركون")),
