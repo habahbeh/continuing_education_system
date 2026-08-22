@@ -1,16 +1,36 @@
 """
-Core views.
+Core views — the health check, and the front door.
 
-Sprint 1 exposes exactly one page: a health check. No business screens.
 Views contain no business logic — they call services and render (ADR-008).
+
+**Neither view names a business app.** ``home`` sends the visitor to
+``LOGIN_REDIRECT_URL`` or ``LOGIN_URL`` rather than to ``operations:dashboard``
+and ``people:login``, so core stays ignorant of what those apps are called
+(A-03) and the destination is a setting rather than an import.
 """
 
 from __future__ import annotations
 
 import django
+from django.conf import settings
 from django.db import connection
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+
+
+def home(request: HttpRequest) -> HttpResponse:
+    """
+    The front door (Sprint 8I-1).
+
+    Until now ``/`` was the health check, so the first thing a client saw —
+    and the page every successful login landed on — was a panel reporting the
+    Django version, the MySQL version and whether STRICT_ALL_TABLES was set.
+    That is a page for whoever deploys the system, not for whoever uses it,
+    and it is still served at ``/health/`` for exactly that reader.
+    """
+    if request.user.is_authenticated:
+        return redirect(settings.LOGIN_REDIRECT_URL)
+    return redirect(settings.LOGIN_URL)
 
 
 def health(request: HttpRequest) -> HttpResponse:

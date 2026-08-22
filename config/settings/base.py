@@ -169,7 +169,9 @@ DATABASES = {
 AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
 
 LOGIN_URL = "/auth/login/"
-LOGIN_REDIRECT_URL = "/"
+# Sprint 8I-1 — the dashboard, not the health check. `core.views.home`
+# and the login view both read this rather than naming a route.
+LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/auth/login/"
 
 AUTH_PASSWORD_VALIDATORS = [

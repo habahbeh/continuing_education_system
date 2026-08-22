@@ -187,6 +187,20 @@ def test_form_controls_laid_out_with_calc_row_are_styled() -> None:
     assert ".calc-row textarea" in source
 
 
+def test_action_buttons_in_a_table_row_sit_side_by_side() -> None:
+    """
+    A button that POSTs needs its own form and its own CSRF token, and a form
+    is a block element — so every action cell in the system stacked its
+    buttons vertically down the row. Twenty-one templates share the pattern,
+    which is why the fix is one rule in the stylesheet rather than twenty-one
+    wrappers. Found in the Sprint 8I browser pass, fixed in 8I-1.
+    """
+    source = CSS_SOURCE.read_text(encoding="utf-8")
+    assert ".tbl td > form" in source
+    rule = next(line for line in source.splitlines() if line.strip().startswith(".tbl td > form{"))
+    assert "inline" in rule
+
+
 @pytest.mark.parametrize("tag", ["success", "warning", "error"])
 def test_every_django_message_tag_has_a_colour(tag: str) -> None:
     """

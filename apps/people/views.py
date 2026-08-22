@@ -9,6 +9,7 @@ import models directly.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -38,7 +39,7 @@ from apps.people.services.participant_numbering import NoActiveSemesterError
 @require_http_methods(["GET", "POST"])
 def login_view(request: HttpRequest) -> HttpResponse:
     if request.user.is_authenticated:
-        return redirect("health")
+        return redirect(settings.LOGIN_REDIRECT_URL)
 
     form = LoginForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -52,7 +53,7 @@ def login_view(request: HttpRequest) -> HttpResponse:
             return redirect("people:locked")
 
         if user is not None:
-            return redirect("health")
+            return redirect(settings.LOGIN_REDIRECT_URL)
 
         # One message for every failure mode. Telling the visitor which half
         # was wrong tells them which usernames exist.

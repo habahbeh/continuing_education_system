@@ -26,6 +26,15 @@
   .tbl          { @apply w-full border-collapse text-sm; }
   .tbl th       { @apply text-start font-bold bg-surface-2 px-3 py-2 border-b border-line; }
   .tbl td       { @apply px-3 py-2 border-b border-line-2; }
+  /* An action cell holds a link plus ONE <form> per button — a button that
+     POSTs needs its own form and its own CSRF token — and a form is a block
+     element, so the buttons stacked vertically down the row instead of
+     sitting side by side. Twenty-one templates share the pattern, so this is
+     one rule rather than twenty-one wrappers. Sprint 8I-1. */
+  .tbl td > form{ @apply inline-block align-middle; }
+  .tbl td > form + form,
+  .tbl td > a + form
+                { @apply ms-1; }
 
   .chip         { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-surface-2 text-ink-2; }
   .chip.ok      { @apply bg-ok-soft text-ok; }

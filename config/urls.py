@@ -5,10 +5,13 @@ from __future__ import annotations
 from django.contrib import admin
 from django.urls import include, path
 
-from apps.core.views import health
+from apps.core.views import health, home
 
 urlpatterns = [
-    path("", health, name="health"),
+    path("", home, name="home"),
+    # The health check keeps its own address. It is for whoever deploys the
+    # system; `/` is for whoever uses it (Sprint 8I-1).
+    path("health/", health, name="health"),
     # people owns authentication (Q-12), users, participants and the audit
     # screen. Mounted at the root because the app now serves several distinct
     # sections; the auth paths keep their /auth/ prefix inside the app so they
