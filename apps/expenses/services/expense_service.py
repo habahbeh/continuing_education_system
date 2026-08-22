@@ -63,9 +63,21 @@ def category_choices(*, as_of: date) -> list[tuple[str, str]]:
     return [(str(code), str(label)) for code, label in pairs]
 
 
-def _period_for(incurred_on: date) -> Any:
-    """The period covering the date — refuses a closed one (D-23)."""
-    return period_service.period_for(incurred_on, what_ar="مصروف")
+def _period_for(incurred_on: date, *, actor: Any = None, request: Any = None) -> Any:
+    """
+    The period covering the date — refuses a closed one (D-23).
+
+    Audits the refusal since Sprint 8D-6, like every other money movement:
+    "who tried to post into a month we had signed off?" is a question the
+    trail has to be able to answer.
+    """
+    return period_service.require_open(
+        incurred_on,
+        actor=actor,
+        what_ar="مصروف",
+        entity_type="expenses.Expense",
+        request=request,
+    )
 
 
 def record(
@@ -96,7 +108,7 @@ def record(
     if Expense.objects.filter(code=code).exists():
         raise ValidationError(f"رمز القيد {code} مستعمل سلفاً.")
 
-    period = _period_for(incurred_on)
+    period = _period_for(incurred_on, actor=actor, request=request)
 
     return _record(
         actor=actor,

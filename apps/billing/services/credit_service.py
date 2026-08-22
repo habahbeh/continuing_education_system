@@ -36,6 +36,7 @@ from django.db import transaction
 from apps.billing.models import CreditReturn
 from apps.billing.services.account_service import ZERO, get_account_state
 from apps.core.display import person_name
+from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -78,6 +79,18 @@ def return_credit(
     # The finance officer executes; §3.4 row 19 gives CREATE on refunds to FIN
     # and MGR, and this is the nearest existing authority for money going out.
     policy.require(actor, Screen.REFUNDS, Action.CREATE, request=request)
+
+    # D-23 (Sprint 8D-6) — cash leaving on a date in a closed month would
+    # restate a period already signed off. Among the guards, before any
+    # transaction, so the refusal's audit row survives the raise (BR-085).
+    period_service.require_open(
+        returned_on,
+        actor=actor,
+        what_ar="ردّ رصيد دائن",
+        entity_type="billing.CreditReturn",
+        reference=code,
+        request=request,
+    )
 
     if not reason_ar.strip():
         raise ValidationError("سبب الرصيد الدائن إلزامي — المال الخارج يقول لماذا خرج.")

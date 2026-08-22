@@ -764,7 +764,13 @@ def pay_refund_due(
     if OpeningBalanceRefund.objects.filter(code=code).exists():
         raise ValidationError(f"رمز الصرف {code} مستعمل سلفاً.")
 
-    _guard_movement_date(paid_on, what_ar="صرف رصيد افتتاحي")
+    _guard_movement_date(
+        paid_on,
+        what_ar="صرف رصيد افتتاحي",
+        actor=actor,
+        reference=code,
+        request=request,
+    )
 
     return _write_payout(
         actor=actor,
@@ -877,7 +883,13 @@ def reverse_refund_payout(
             "سبب عكس الصرف إلزامي — العكس الصامت يترك سند صرف في الملف بلا تفسير."
         )
 
-    _guard_movement_date(reversed_on, what_ar="عكس صرف")
+    _guard_movement_date(
+        reversed_on,
+        what_ar="عكس صرف",
+        actor=actor,
+        reference=payout.code,
+        request=request,
+    )
 
     return _write_reversal(
         actor=actor,
@@ -946,7 +958,14 @@ def _write_reversal(
     return payout
 
 
-def _guard_movement_date(on_date: date, *, what_ar: str) -> None:
+def _guard_movement_date(
+    on_date: date,
+    *,
+    what_ar: str,
+    actor: Any = None,
+    reference: str = "",
+    request: Any = None,
+) -> None:
     """
     One check, and deliberately only one: the period must not be closed (D-23).
 
@@ -962,7 +981,14 @@ def _guard_movement_date(on_date: date, *, what_ar: str) -> None:
     belongs to Tuesday, and forcing today's date is what put Sprint 8D-4's
     payouts in the wrong day.
     """
-    period_service.period_for(on_date, what_ar=what_ar)
+    period_service.require_open(
+        on_date,
+        actor=actor,
+        what_ar=what_ar,
+        entity_type="billing.OpeningBalanceRefund",
+        reference=reference,
+        request=request,
+    )
 
 
 def outstanding_refunds(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:

@@ -29,6 +29,7 @@ from django.utils import timezone
 from apps.billing.models import ALLOCATION_ORDER, ChargeLine
 from apps.billing.services.account_service import ZERO, outstanding_for_line
 from apps.core.display import person_name, text_of
+from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
 from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.core.services.settings_service import get_setting
@@ -219,6 +220,19 @@ def take_payment(
     """
     policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
 
+    # D-23 (Sprint 8D-6) — a receipt dated into a closed month would change a
+    # day's takings and a revenue report that have both been signed off.
+    # Checked here among the guards, before any transaction, so the refusal's
+    # own audit row survives the raise (BR-085).
+    period_service.require_open(
+        received_on,
+        actor=actor,
+        what_ar="قبض",
+        entity_type="cashbox.Receipt",
+        reference=getattr(enrollment, "code", ""),
+        request=request,
+    )
+
     if amount <= ZERO:
         raise ValidationError("مبلغ السند يجب أن يكون أكبر من صفر.")
 
@@ -293,6 +307,22 @@ def approve_void(*, actor: Any, void_record: Any, request: Any = None) -> Any:
 
     # `X` on payments — held by the finance officer alone (§3.4 row 16).
     policy.require(actor, Screen.PAYMENTS, Action.VOID, request=request)
+
+    # D-23 (Sprint 8D-6), on the ORIGINAL receipt's date rather than today's.
+    # A void has no date of its own — the reversing allocations hang off the
+    # receipt being cancelled — so voiding a September receipt in November
+    # removes September's money from September's report. The period this
+    # movement changes is the one that has to be open, and 8D-5's rule of
+    # "check the correction's own date" gives the wrong answer here for the
+    # reason that rule exists: it is the touched month that matters.
+    period_service.require_open(
+        void_record.receipt.received_on,
+        actor=actor,
+        what_ar="إلغاء سند",
+        entity_type="cashbox.ReceiptVoid",
+        reference=void_record.receipt.internal_receipt_number,
+        request=request,
+    )
 
     if void_record.approved_by_id is not None:
         raise ValidationError("هذا الطلب معتمد سلفاً.")

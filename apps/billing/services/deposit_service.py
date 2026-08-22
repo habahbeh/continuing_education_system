@@ -27,6 +27,7 @@ from django.db import transaction
 
 from apps.billing.models import ChargeLine, ChargeType, DepositForfeiture, DepositReturn
 from apps.billing.services.account_service import ZERO
+from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy as perm
@@ -97,6 +98,17 @@ def return_deposit(
     for in full, so money cannot quietly go missing between the two figures.
     """
     perm.require(actor, Screen.REFUNDS, Action.CREATE, request=request)
+
+    # D-23 (Sprint 8D-6) — before any transaction, so a refusal keeps its own
+    # audit row (BR-085).
+    period_service.require_open(
+        returned_on,
+        actor=actor,
+        what_ar="إعادة تأمين",
+        entity_type="billing.DepositReturn",
+        reference=getattr(enrollment, "code", ""),
+        request=request,
+    )
 
     line = deposit_line_for(enrollment)
     if line is None:
@@ -190,6 +202,18 @@ def forfeit_deposit(
     # Sprint 7, so until then the refunds permission is the closest documented
     # home rather than a new matrix row invented to fit.
     perm.require(actor, Screen.REFUNDS, Action.CREATE, request=request)
+
+    # D-23 (Sprint 8D-6). A forfeiture turns a liability into REVENUE through
+    # a new charge line, so it moves the income of whatever month it is dated
+    # in — which is precisely what a closed month may not have moved.
+    period_service.require_open(
+        forfeited_on,
+        actor=actor,
+        what_ar="مصادرة تأمين",
+        entity_type="billing.DepositForfeiture",
+        reference=getattr(enrollment, "code", ""),
+        request=request,
+    )
 
     if approved_by is not None and getattr(approved_by, "pk", None) == getattr(actor, "pk", None):
         raise PermissionDenied("لا يجوز اعتماد مصادرة نفّذتها بنفسك (D-18).")

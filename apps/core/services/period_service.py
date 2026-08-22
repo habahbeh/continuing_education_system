@@ -21,6 +21,12 @@ to.
 them, and refusing every date outside one would make the system unusable
 before the first period is defined. What is refused is a date inside a period
 somebody has deliberately closed.
+
+**Two entry points, and money uses the second.** ``period_for`` answers the
+question; ``require_open`` answers it and records the refusal. Every dated
+money movement calls ``require_open`` (Sprint 8D-6), because "who tried to
+post into a month we had already signed off?" is a question the audit trail
+has to be able to answer.
 """
 
 from __future__ import annotations
@@ -53,6 +59,52 @@ def period_for(on_date: date, *, what_ar: str = "حركة مالية") -> Any:
     return period
 
 
+def require_open(
+    on_date: date,
+    *,
+    actor: Any = None,
+    what_ar: str = "حركة مالية",
+    entity_type: str = "core.FinancialPeriod",
+    reference: str = "",
+    request: Any = None,
+) -> Any:
+    """
+    The guard every dated money movement calls (Sprint 8D-6).
+
+    Same refusal as ``period_for``, plus the audit row. A closed period turns
+    an ordinary act away, and a turned-away attempt on a closed month is
+    exactly the kind of thing somebody asks about six months later — "who
+    tried to post into September after we signed it off?" ``period_for``
+    alone could not answer that.
+
+    **Called BEFORE any transaction opens.** The audit row is written and then
+    the exception is raised; inside an atomic block the rollback would take
+    the evidence with it, which is the defect BR-085 exists to prevent. Every
+    caller in this codebase runs it among its guards, never among its writes.
+
+    ``actor`` is optional so a read-only caller can ask the question without
+    inventing a user, but a movement always passes one.
+    """
+    from apps.core.services.audit_service import write_audit
+
+    try:
+        return period_for(on_date, what_ar=what_ar)
+    except ClosedPeriodError as closed:
+        if actor is not None:
+            write_audit(
+                action="DENIED_ATTEMPT",
+                entity_type=entity_type,
+                entity_id="",
+                reference=reference,
+                summary_ar=f"محاولة {what_ar} بتاريخ {on_date} في فترة مالية مقفلة",
+                actor=actor,
+                denial_rule="D-23",
+                changes={"movement_date": on_date.isoformat(), "movement": what_ar},
+                request=request,
+            )
+        raise closed
+
+
 def is_open(on_date: date) -> bool:
     """The same question without the exception, for a screen deciding a button."""
     try:
@@ -62,4 +114,4 @@ def is_open(on_date: date) -> bool:
     return True
 
 
-__all__ = ["ClosedPeriodError", "is_open", "period_for"]
+__all__ = ["ClosedPeriodError", "is_open", "period_for", "require_open"]
