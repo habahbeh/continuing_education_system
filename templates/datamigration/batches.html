@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note warn">
+  {% translate "الأرشيف التاريخي معزول عن الدفتر المالي. لا يُنشئ سنداً ولا دفعة ولا مطالبة شريك، ولا يمسّ رقماً واحداً في التقارير. المعبر الوحيد إلى المال رصيد افتتاحي يُراجَع فرداً فرداً — وهو خارج نطاق هذه المرحلة." %}
+</div>
+<div class="card2">
+  <table class="tbl">
+    <thead><tr>
+      <th>{% translate "الرمز" %}</th><th>{% translate "الملف" %}</th><th>{% translate "البصمة" %}</th>
+      <th>{% translate "أوراق" %}</th><th>{% translate "صفوف" %}</th><th>{% translate "مؤرشف" %}</th>
+      <th>{% translate "مربوط" %}</th><th>{% translate "الحالة" %}</th><th>{% translate "استوردها" %}</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for b in batches %}
+        <tr>
+          <td dir="ltr">{{ b.code }}</td>
+          <td>{{ b.source_filename }}</td>
+          <td dir="ltr"><small class="muted">{{ b.sha_short }}</small></td>
+          <td class="num">{{ b.sheet_count }}</td>
+          <td class="num">{{ b.row_count }}</td>
+          <td class="num">{{ b.archived_rows }}</td>
+          <td class="num">{{ b.linked_rows }}</td>
+          <td>
+            <span class="chip">{{ b.status_display }}</span>
+            {% if not b.is_live %}<br><small class="muted" dir="ltr">→ {{ b.superseded_by }}</small>{% endif %}
+          </td>
+          <td>{{ b.created_by }}<br><small class="muted">{{ b.created_at|date:"Y-m-d" }}</small></td>
+          <td><a class="btn2" href="{% url 'datamigration:batch-detail' b.code %}">{% translate "فتح" %}</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="10" class="empty">{% translate "لا دفعات بعد" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_link %}
+  <div class="toolbar">
+    <a class="btn2" href="{% url 'datamigration:links' %}">{% translate "طابور ربط الهوية" %}</a>
+  </div>
+{% endif %}
+
+{% if can_import %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "قراءة ملف" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "القراءة لا تؤرشف. تُحفظ الخلايا كما وردت، ثم يُشغَّل التدقيق التجريبي فيُظهر ما في الملف، ثم تُقرَّر الأرشفة. الملف نفسه لا يُقرأ مرتين — البصمة تمنع مضاعفة الأرشيف." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="import">
+        {% include "partials/_form.html" %}
+        <button class="btn2 primary" type="submit">{% translate "قراءة" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

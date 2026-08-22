@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<div class="toolbar no-print">
+  <a class="btn2" href="{% url 'datamigration:batches' %}">{% translate "كل الدفعات" %}</a>
+  <span class="spacer"></span>
+  {% if can_validate and batch.can_validate %}
+    <form method="post" style="display:inline">{% csrf_token %}
+      <input type="hidden" name="action" value="validate">
+      <button class="btn2" type="submit">{% translate "تشغيل تجريبي" %}</button>
+    </form>
+  {% endif %}
+  {% if can_commit and batch.can_commit %}
+    <form method="post" style="display:inline">{% csrf_token %}
+      <input type="hidden" name="action" value="commit">
+      <button class="btn2 primary" type="submit">{% translate "أرشفة" %}</button>
+    </form>
+  {% endif %}
+</div>
+
+<h1>{{ batch.source_filename }} <span class="chip">{{ batch.status_display }}</span></h1>
+
+<div class="grid2">
+  {% for s in batch.states %}
+    <div class="kpi"><div class="label">{{ s.label }}</div><div class="value num">{{ s.count }}</div></div>
+  {% endfor %}
+</div>
+
+{% if batch.reconciles %}
+  <div class="note ok">
+    {% blocktranslate with n=batch.row_count %}المطابقة سليمة: مجموع حالات الصفوف يساوي {{ n }} صفاً مقروءاً — لم يضع صف بين القراءة والأرشفة.{% endblocktranslate %}
+  </div>
+{% else %}
+  <div class="note danger">{% translate "عدم مطابقة — الأرشفة موقوفة حتى يُفسَّر الفارق." %}</div>
+{% endif %}
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "ما وجده التدقيق" %}</h2></div>
+  <div class="card2-body">
+    <div class="note info">
+      {% translate "كل ملاحظة تصف ما يفعله الملف، لا تصحيحاً أُجري عليه. مجموع أعمدة المواد لا يساوي رسوم الدورة في معظم الصفوف — وهذا يُقال ولا يُصلَح." %}
+    </div>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الملاحظة" %}</th><th>{% translate "الرمز" %}</th><th>{% translate "عدد الصفوف" %}</th></tr></thead>
+    <tbody>
+      {% for f in report.findings %}
+        <tr><td>{{ f.label }}</td><td dir="ltr"><small class="muted">{{ f.code }}</small></td><td class="num">{{ f.count }}</td></tr>
+      {% empty %}<tr><td colspan="3" class="empty">{% translate "لم يُشغَّل التدقيق بعد" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الأوراق" %}</h2></div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الورقة" %}</th><th>{% translate "البرنامج" %}</th><th>{% translate "الفصل" %}</th>
+      <th>{% translate "الشريك" %}</th><th>{% translate "التقديم" %}</th><th>{% translate "مواد" %}</th><th>{% translate "تسجيلات" %}</th></tr></thead>
+    <tbody>
+      {% for c in batch.cohorts %}
+        <tr><td>{{ c.sheet_name }}</td><td>{{ c.program_label_ar|default:"—" }}</td>
+            <td>{{ c.term_label|default:"—" }}</td><td>{{ c.partner_label_ar|default:"—" }}</td>
+            <td>{{ c.delivery_label|default:"—" }}</td><td class="num">{{ c.subject_count }}</td>
+            <td class="num">{{ c.enrollment_count }}</td></tr>
+      {% empty %}<tr><td colspan="7" class="empty">{% translate "لم تُؤرشف بعد" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الصفوف كما وردت" %}</h2></div>
+  <div class="card2-body">
+    <form method="get" class="toolbar">
+      {% include "partials/_form.html" with form=filters %}
+      <button class="btn2" type="submit">{% translate "تصفية" %}</button>
+    </form>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>{% translate "الورقة" %}</th><th>{% translate "الصف" %}</th>
+      <th>{% translate "العمود C كما ورد" %}</th><th>{% translate "الاسم" %}</th>
+      <th>{% translate "الحالة" %}</th><th>{% translate "الملاحظات" %}</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.sheet_name }}</td>
+          <td class="num">{{ r.source_row }}</td>
+          <td dir="ltr">{{ r.legacy_number_raw|default:"—" }}</td>
+          <td>{{ r.name_raw|default:"—" }}</td>
+          <td>
+            <span class="chip">{{ r.state_display }}</span>
+            {% if r.reason_ar %}<br><small class="muted">{{ r.reason_ar }}</small>{% endif %}
+          </td>
+          <td>{% for f in r.findings %}<span class="chip warn">{{ f.label }}</span> {% endfor %}</td>
+        </tr>
+      {% empty %}<tr><td colspan="6" class="empty">{% translate "لا صفوف مطابقة" %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <div class="card2-body">
+    <small class="muted">{% blocktranslate with n=page_size %}تُعرض {{ n }} صفاً كحدّ أقصى — استعمل التصفية للوصول إلى الباقي.{% endblocktranslate %}</small>
+  </div>
+</div>
+{% endblock %}

@@ -122,7 +122,13 @@ _ROWS: tuple[tuple[str, str, tuple[str, str, str, str, str, str]], ...] = (
     (Screen.USERS, "§3.7/33", ("V P", "", "", "", "", "V P")),
     (Screen.AUDIT, "§3.7/34", ("V P", "", "V P", "V P", "", "V P")),
     (Screen.SETTINGS, "§3.7/35", ("V E P", "", "V", "", "", "V P")),
-    (Screen.MIGRATION, "§3.7/36", ("V C E P", "", "V", "", "", "V P")),
+    # ³² Sprint 8D-1 — the migration screen holds two different kinds of act.
+    # Reading a workbook and archiving it are the manager's (C then A). Linking
+    # an archived name to a living participant is an IDENTITY judgement, so E
+    # moves to the registrar, who knows the participants; eight legacy numbers
+    # carry two different names and no matcher may resolve them. FIN stays
+    # VIEW-only here on purpose: this decision is not a financial one.
+    (Screen.MIGRATION, "§3.7/36", ("V C A P", "V E", "V", "", "", "V P")),
     (Screen.OPENING_BALANCES, "§3.7/36أ", ("V A P", "", "V C E P", "", "", "V P")),
 )
 

@@ -235,10 +235,24 @@ def test_no_business_model_exists_yet() -> None:
         # Sprint 8C-2 — what the centre SPENT, a different ledger from what a
         # partner owes it. Its own app so the two cannot be confused.
         "expenses": {"Expense"},
+        # Sprint 8D-1 — the historical archive. Six tables, structurally
+        # isolated from the ledger by A-04. OpeningBalance is NOT among them:
+        # the one gateway from archive to money belongs to Sprint 8D-2 and is
+        # still listed as deferred below.
+        "datamigration": {
+            "MigrationBatch",
+            "MigrationRow",
+            "HistoricalCohort",
+            "HistoricalParticipant",
+            "HistoricalEnrollment",
+            "HistoricalPayment",
+        },
     }
     business_apps = {
+        # Still model-free, and the reports must stay that way: they read what
+        # the other apps wrote, and a model here would mean a report had begun
+        # keeping figures of its own.
         "reporting",
-        "datamigration",
     }
 
     offenders = []
@@ -254,10 +268,16 @@ def test_later_sprint_models_do_not_exist() -> None:
     """
     The guard that keeps a PREREQUISITE from becoming a land grab.
 
-    ✅ Sprint 7 delivered clearance and certificates and Sprint 8C-2 delivered
-    ``Expense``, so both have moved into the allowed set above. What remains is
-    everything a later sprint owns — named individually, because a list of
-    absences is only worth having if it is specific.
+    ✅ Sprint 7 delivered clearance and certificates, Sprint 8C-2 delivered
+    ``Expense``, and Sprint 8D-1 delivered the archive's six tables — all have
+    moved into the allowed set above. What remains is everything a later
+    sprint owns — named individually, because a list of absences is only worth
+    having if it is specific.
+
+    ``OpeningBalance`` is the one to watch. It is the ONLY gateway from the
+    historical archive to the production ledger (BR-094), it belongs to Sprint
+    8D-2, and its appearance here would mean 8D-1 had quietly crossed the line
+    it was built to hold.
     """
     from django.apps import apps as django_apps
 
@@ -269,8 +289,6 @@ def test_later_sprint_models_do_not_exist() -> None:
         "TaxRule",
         "OpeningBalance",
         "EnrollmentApplication",
-        "MigrationBatch",
-        "MigrationRow",
     ):
         assert deferred not in names, f"{deferred} belongs to a later sprint"
 

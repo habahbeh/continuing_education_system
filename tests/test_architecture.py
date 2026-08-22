@@ -122,9 +122,22 @@ def test_a03_core_imports_no_other_local_app() -> None:
 # A-04 — datamigration is isolated from the ledger (Q-02, ADR-013, D-26, T-179)
 # ---------------------------------------------------------------------------
 def test_a04_datamigration_never_imports_financial_apps() -> None:
+    """
+    The archive's production code may not reach the ledger.
+
+    Its TESTS must, and the exclusion is the point rather than a concession:
+    ``test_committing_a_workbook_writes_nothing_to_the_ledger`` counts every
+    row in ``Receipt``, ``PartnerClaim`` and eleven other tables before and
+    after an import. A test forbidden from naming ``Receipt`` could not assert
+    that no receipt was created — it could only assert that this module does
+    not import cashbox, which is what the rule already says. The same
+    exclusion A-01b makes, for the same reason.
+    """
     forbidden = {"billing", "cashbox", "settlements"}
     offenders: list[str] = []
     for path in (APPS_DIR / "datamigration").rglob("*.py"):
+        if "/tests/" in str(path) or path.name.startswith("test_"):
+            continue
         for module in _imported_modules(path):
             for app in forbidden:
                 if module == f"apps.{app}" or module.startswith(f"apps.{app}."):
@@ -132,6 +145,34 @@ def test_a04_datamigration_never_imports_financial_apps() -> None:
     assert not offenders, (
         "The historical archive must stay structurally isolated from the production "
         "ledger (Q-02 / ADR-013 / D-26). Offenders: " + ", ".join(offenders)
+    )
+
+
+# ---------------------------------------------------------------------------
+# A-09 — the spreadsheet library is confined to one module (Sprint 8D-1)
+# ---------------------------------------------------------------------------
+def test_a09_openpyxl_is_confined_to_the_archive_reader() -> None:
+    """
+    ``openpyxl`` is the project's only Excel dependency and it earns its place
+    in exactly one file: ``datamigration/readers/xlsx_reader.py``.
+
+    Two reasons for the fence. A spreadsheet library reaching a request path
+    would mean a user upload parsed inside a web worker, and these workbooks
+    run to thousands of cells. And a second import site is how "read a
+    spreadsheet" quietly becomes a capability of the whole system rather than
+    of the one boundary that has been thought about.
+    """
+    allowed = APPS_DIR / "datamigration" / "readers" / "xlsx_reader.py"
+    offenders: list[str] = []
+    for path in APPS_DIR.rglob("*.py"):
+        if path == allowed or "/tests/" in str(path) or path.name.startswith("test_"):
+            continue
+        for module in _imported_modules(path):
+            if module == "openpyxl" or module.startswith("openpyxl."):
+                offenders.append(str(path.relative_to(BASE_DIR)))
+    assert not offenders, (
+        "openpyxl belongs to datamigration/readers/xlsx_reader.py alone. "
+        "Offenders: " + ", ".join(offenders)
     )
 
 

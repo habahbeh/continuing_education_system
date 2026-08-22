@@ -103,6 +103,8 @@ NAV: tuple[NavGroup, ...] = (
         _("النظام"),
         (
             NavItem(Screen.REPORTS, "reporting:reports", _("التقارير")),
+            NavItem(Screen.MIGRATION, "datamigration:batches", _("الأرشيف التاريخي")),
+            NavItem(Screen.MIGRATION, "datamigration:links", _("ربط السجلات التاريخية")),
             NavItem(Screen.USERS, "people:users", _("المستخدمون والصلاحيات")),
             NavItem(Screen.AUDIT, "people:audit", _("سجل التدقيق")),
         ),

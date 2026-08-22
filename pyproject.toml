@@ -4,6 +4,20 @@ version = "0.1.0"
 description = "University of Petra — Continuing Education Center Management System"
 requires-python = ">=3.12"
 
+# Runtime dependencies. Recorded here from Sprint 8D-1 onward because the
+# list stopped being obvious: openpyxl is needed by exactly one module
+# (datamigration/readers/xlsx_reader.py, fenced by the architecture test
+# A-09) and someone reading the imports would not otherwise know the system
+# has an Excel dependency at all. Deliberately absent: any PDF library —
+# Sprint 8C-1 prints through the browser — and any Excel WRITER, since report
+# export is CSV from the standard library.
+dependencies = [
+    "Django>=5.2,<5.3",
+    "mysqlclient>=2.2,<3",
+    "python-dotenv>=1.2,<2",
+    "openpyxl>=3.1,<4",
+]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

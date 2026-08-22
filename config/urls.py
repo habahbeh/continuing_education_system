@@ -25,5 +25,8 @@ urlpatterns = [
     path("", include("apps.settlements.urls")),
     path("", include("apps.expenses.urls")),
     path("", include("apps.reporting.urls")),
+    # Sprint 8D-1 — the historical archive. Mounted like the rest, and isolated
+    # from the ledger by A-04 rather than by where its URLs happen to live.
+    path("", include("apps.datamigration.urls")),
     path("admin/", admin.site.urls),
 ]

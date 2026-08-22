@@ -76,7 +76,14 @@ class AuditEvent(models.Model):
     actor_role = ShortCode(blank=True, verbose_name=_("الدور وقت الحدث"))
 
     action = ShortCode(choices=AuditAction.choices, verbose_name=_("الإجراء"))
-    entity_type = ShortCode(verbose_name=_("الكيان"))
+    # 64 rather than ShortCode's 32 (Sprint 8D-1). The value is the Django
+    # label — ``app_label.ModelName`` — and the archive's own
+    # ``datamigration.HistoricalParticipant`` is 35 characters. The alternative
+    # was to audit that model under a shortened alias, which would mean the
+    # audit trail naming an entity that does not exist. Widening a column is
+    # additive; it weakens no constraint and the append-only grants are
+    # untouched.
+    entity_type = models.CharField(max_length=64, verbose_name=_("الكيان"))
     entity_id = models.CharField(max_length=64, blank=True, verbose_name=_("مُعرِّف الكيان"))
     reference = DisplayRef(blank=True, verbose_name=_("المرجع المعروض"))
 
