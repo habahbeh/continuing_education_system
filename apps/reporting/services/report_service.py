@@ -156,6 +156,7 @@ def net_income_report(
     policy.require_report(actor, 2, request=request)
 
     from apps.billing.models import ChargeType
+    from apps.billing.services import opening_balance_service
     from apps.expenses.services import expense_service
     from apps.settlements.models import ClaimStatus, PartnerClaim
 
@@ -196,6 +197,17 @@ def net_income_report(
         actor=actor, date_from=date_from, date_to=date_to, request=request
     )
 
+    # Sprint 8D-4 — cash handed back on historical credits, DISCLOSED and not
+    # subtracted. The distinction is real accounting rather than presentation:
+    # the centre is holding money that was never its own, inherited from
+    # before the system existed. Paying it out reduces cash AND reduces the
+    # liability, so it costs the year nothing and must not depress net income.
+    # Leaving it off the report entirely would be the other error — a reader
+    # comparing the bank against these figures needs to see where it went.
+    refunds_paid = opening_balance_service.refunds_paid_between(
+        date_from=date_from, date_to=date_to
+    )
+
     return {
         "number": 2,
         "title": REPORT_TITLES[2],
@@ -205,6 +217,7 @@ def net_income_report(
         "deposits_excluded": revenue["deposit_total"],
         "prior_year_settlements": prior_year_settlements,
         "total_cash_in": collected + prior_year_settlements,
+        "historical_refunds_paid": refunds_paid,
         "partner_total": partner_total,
         "by_partner": sorted(by_partner.items()),
         "expenses_total": expenses_total,

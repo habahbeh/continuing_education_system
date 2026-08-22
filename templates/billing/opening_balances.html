@@ -18,7 +18,9 @@
   <div class="kpi"><div class="label">{% translate "أرصدة دائنة مُرحَّلة لتسجيل لاحق" %}</div><div class="value num">{{ totals.credit_applied }}</div>
     <div class="muted">{% translate "تخفض ما على التسجيل — بلا سند قبض" %}</div></div>
   <div class="kpi"><div class="label">{% translate "مستحق الردّ نقداً" %}</div><div class="value num">{{ totals.refund_due }}</div>
-    <div class="muted">{% translate "التزام قائم حتى يُصرف بسند حقيقي" %}</div></div>
+    <div class="muted">{% translate "التزام قائم لم يُصرف بعد" %}</div></div>
+  <div class="kpi"><div class="label">{% translate "مصروف فعلاً" %}</div><div class="value num">{{ totals.refunded }}</div>
+    <div class="muted">{% translate "خرج النقد بسند صرف — بلا سند قبض" %}</div></div>
 </div>
 
 <form method="get" class="toolbar">
@@ -32,6 +34,28 @@
   </select>
   <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
 </form>
+
+{% if outstanding_refunds %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "أرصدة تنتظر الصرف" %}</h2></div>
+    <div class="card2-body">
+      <div class="note warn">
+        {% translate "أعلن المدير استحقاقها، ولم يخرج النقد بعد. من أعلن الاستحقاق لا يصرفه بنفسه — الصرف على الموظف المالي بسند صرف واسم مستلم." %}
+      </div>
+    </div>
+    <table class="tbl">
+      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "المبلغ" %}</th>
+        <th>{% translate "المشارك" %}</th><th>{% translate "أعلنه" %}</th><th>{% translate "المسوّغ" %}</th></tr></thead>
+      <tbody>
+        {% for r in outstanding_refunds %}
+          <tr><td dir="ltr">{{ r.code }}</td><td class="num">{{ r.amount }}</td>
+              <td>{{ r.participant_name|default:r.legacy_number }}</td>
+              <td>{{ r.declared_by }}</td><td><small class="muted">{{ r.note_ar }}</small></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
 
 <div class="card2">
   <table class="tbl">
@@ -92,6 +116,23 @@
                 <button class="btn2 primary" type="submit" name="action" value="carry-forward">{% translate "ترحيل لتسجيل لاحق" %}</button>
                 <button class="btn2" type="submit" name="action" value="refund-due">{% translate "مستحق ردّ نقداً" %}</button>
               </form>
+            {% endif %}
+            {% if can_review and b.is_refund_payable %}
+              <form method="post">{% csrf_token %}
+                <input type="hidden" name="action" value="pay-refund">
+                <input type="hidden" name="code" value="{{ b.code }}">
+                <input name="payout_code" placeholder="{% translate 'رمز الصرف' %}" required>
+                <select name="payment_method" required>
+                  {% for code, label in payment_methods %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+                </select>
+                <input name="external_reference" placeholder="{% translate 'رقم سند الصرف' %}" required>
+                <input name="payee_name_ar" placeholder="{% translate 'اسم المستلم' %}" required>
+                <button class="btn2 primary" type="submit">{% translate "صرف نقداً" %}</button>
+              </form>
+            {% endif %}
+            {% if b.payout_reference %}
+              <small class="muted">{% translate "سند الصرف" %} <span dir="ltr">{{ b.payout_reference }}</span>
+                · {{ b.payout_paid_on }} · {{ b.payout_paid_by }}</small>
             {% endif %}
             {% if can_decide and b.is_postable %}
               <form method="post">{% csrf_token %}

@@ -193,6 +193,11 @@ def test_no_business_model_exists_yet() -> None:
             # under datamigration it would have handed the archive a way to
             # create money and undone Sprint 8D-1 entirely.
             "OpeningBalance",
+            # Sprint 8D-4 — the cash actually handed back on one of those
+            # credits. Beside the other payouts in billing, and NOT in the
+            # cashbox: every cashbox model is money coming IN, and
+            # ``system_total_for`` reconciles issued receipts only.
+            "OpeningBalanceRefund",
         },
         "cashbox": {
             "PaymentMethod",

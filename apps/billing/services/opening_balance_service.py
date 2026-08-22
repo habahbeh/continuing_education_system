@@ -45,8 +45,10 @@ from apps.billing.models import (
     ChargeType,
     OpeningBalance,
     OpeningBalanceDirection,
+    OpeningBalanceRefund,
     OpeningBalanceStatus,
 )
+from apps.core.display import person_name, text_of
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -85,6 +87,18 @@ class AlreadyResolvedError(Exception):
 
 class NotALaterRegistrationError(Exception):
     """Client decision 1 — a credit is carried forward, never backward."""
+
+
+class NotRefundDueError(Exception):
+    """Only a balance declared refundable can be paid out."""
+
+
+class AlreadyRefundedError(Exception):
+    """The cash already left. A second payout would pay it twice."""
+
+
+class MissingPayoutDetailsError(Exception):
+    """Cash leaving the centre carries a voucher number and a named payee."""
 
 
 # ---------------------------------------------------------------------------
@@ -668,7 +682,184 @@ def _resolve_credit(
 
 
 # ---------------------------------------------------------------------------
-# 6 · The clearance guard — client decision 2 (Sprint 8D-3)
+# 6 · Paying a REFUND_DUE out — Sprint 8D-4
+# ---------------------------------------------------------------------------
+def pay_refund_due(
+    *,
+    actor: Any,
+    balance: OpeningBalance,
+    code: str,
+    amount: Decimal,
+    paid_on: date,
+    payment_method: Any,
+    external_reference: str,
+    payee_name_ar: str,
+    note_ar: str = "",
+    request: Any = None,
+) -> OpeningBalanceRefund:
+    """
+    Hand the money back, against a real voucher, once.
+
+    Sprint 8D-3 could declare that the centre owed a historical credit but had
+    no way to record the cash leaving, so the obligation stood open forever.
+    This closes it.
+
+    **The finance officer executes; the manager declared.** ``Action.EDIT``
+    rather than ``APPROVE``, and the split is the one ``Refund`` already uses:
+    the manager decides a refund is owed, the officer pays it. No role on this
+    screen holds both, so the two hands are structural rather than merely
+    checked — and the service checks the PEOPLE too, because a role split is
+    not a person split when somebody holds two accounts.
+
+    **No ``Receipt``.** A receipt asserts that cash arrived; this is cash
+    leaving. Issuing one would state the opposite of what happened and inflate
+    the day's takings by the amount handed back. ``system_total_for``
+    reconciles issued receipts only, which is the established cashbox design
+    and the reason a payout belongs beside the other payouts rather than
+    inside the till count.
+
+    **Once.** ``OpeningBalanceRefund.opening_balance`` is a OneToOne, so the
+    second attempt collides at the database even if these guards were removed.
+    """
+    policy.require(actor, Screen.OPENING_BALANCES, Action.EDIT, request=request)
+
+    if balance.direction != OpeningBalanceDirection.CREDIT:
+        raise NotACreditError(f"الرصيد {balance.code} ذمة على المشارك لا رصيد دائن — لا يُصرف.")
+    if balance.status == OpeningBalanceStatus.REFUNDED:
+        raise AlreadyRefundedError(
+            f"الرصيد {balance.code} مصروف سلفاً — الصرف مرة واحدة، وإلا قُبض المبلغ مرتين."
+        )
+    if balance.status != OpeningBalanceStatus.REFUND_DUE:
+        raise NotRefundDueError(
+            f"لا يُصرف إلا ما أُعلن مستحقاً للردّ — حالة {balance.code} الآن "
+            f"{balance.get_status_display()}."
+        )
+    if balance.resolved_by_id is not None and balance.resolved_by_id == actor.pk:
+        raise SeparationOfDutiesError(
+            "الصرف لغير من أعلن الاستحقاق — من قرّر أن المبلغ مستحق لا يصرفه بنفسه (D-18 · BR-094)."
+        )
+    if not external_reference.strip() or not payee_name_ar.strip():
+        raise MissingPayoutDetailsError(
+            "رقم سند الصرف واسم المستلم إلزامان — النقد الخارج يحمل مستنده ومن استلمه."
+        )
+    if amount != balance.amount:
+        raise ValidationError(
+            f"المبلغ المصروف {amount} لا يساوي الرصيد المستحق {balance.amount} — "
+            "الصرف الجزئي غير مدعوم في هذه المرحلة."
+        )
+    if OpeningBalanceRefund.objects.filter(code=code).exists():
+        raise ValidationError(f"رمز الصرف {code} مستعمل سلفاً.")
+
+    return _write_payout(
+        actor=actor,
+        balance=balance,
+        code=code,
+        amount=amount,
+        paid_on=paid_on,
+        payment_method=payment_method,
+        external_reference=external_reference.strip(),
+        payee_name_ar=payee_name_ar.strip(),
+        note_ar=note_ar,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _write_payout(
+    *,
+    actor: Any,
+    balance: OpeningBalance,
+    code: str,
+    amount: Decimal,
+    paid_on: date,
+    payment_method: Any,
+    external_reference: str,
+    payee_name_ar: str,
+    note_ar: str,
+    request: Any,
+) -> OpeningBalanceRefund:
+    """The write half — permission and state already decided by the caller."""
+    payout = OpeningBalanceRefund.objects.create(
+        code=code,
+        opening_balance=balance,
+        amount=amount,
+        paid_on=paid_on,
+        payment_method=payment_method,
+        external_reference=external_reference[:64],
+        payee_name_ar=payee_name_ar[:150],
+        note_ar=note_ar.strip()[:255],
+        paid_by=actor,
+    )
+
+    balance.status = OpeningBalanceStatus.REFUNDED
+    balance.save(update_fields=["status"])
+
+    write_audit(
+        action="CREATE",
+        entity_type="billing.OpeningBalanceRefund",
+        entity_id=str(payout.pk),
+        reference=code,
+        summary_ar=f"صرف رصيد افتتاحي دائن {amount} إلى {payee_name_ar}",
+        actor=actor,
+        changes={
+            "opening_balance": balance.code,
+            "amount": str(amount),
+            "paid_on": paid_on.isoformat(),
+            "payment_method": getattr(payment_method, "code", ""),
+            "external_reference": external_reference,
+            "payee_name_ar": payee_name_ar,
+            "declared_by": text_of(balance.resolved_by, "username"),
+            "receipt_created": "لا — النقد خارج، والسند يؤكد دخولاً لم يحدث",
+            "daily_closing_effect": "لا شيء — الإقفال يطابق السندات الصادرة وحدها",
+        },
+        request=request,
+    )
+    return payout
+
+
+def outstanding_refunds(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """
+    What the centre still owes back and has not yet handed over.
+
+    Kept separate from ``totals`` because this is the operational list — the
+    queue somebody works through — rather than a figure on a dashboard.
+    """
+    policy.require(actor, Screen.OPENING_BALANCES, Action.VIEW, request=request)
+    return [
+        {
+            "code": balance.code,
+            "amount": balance.amount,
+            "as_of": balance.as_of,
+            "participant_number": text_of(balance.participant, "participant_number"),
+            "participant_name": text_of(balance.participant, "name_ar"),
+            "legacy_number": balance.source_legacy_number,
+            "declared_by": person_name(balance.resolved_by),
+            "declared_at": balance.resolved_at,
+            "note_ar": balance.resolution_note_ar,
+        }
+        for balance in OpeningBalance.objects.filter(
+            status=OpeningBalanceStatus.REFUND_DUE,
+            direction=OpeningBalanceDirection.CREDIT,
+        ).select_related("participant", "resolved_by")
+    ]
+
+
+def refunds_paid_between(*, date_from: date, date_to: date) -> Decimal:
+    """
+    Cash handed back in a window, for report 2 to DISCLOSE.
+
+    Not permission-gated: the report that calls it runs its own
+    ``require_report`` (BR-099), and a second gate here would refuse a reader
+    who is entitled to the report the answer it is made of.
+    """
+    rows = OpeningBalanceRefund.objects.filter(
+        paid_on__gte=date_from, paid_on__lte=date_to
+    ).values_list("amount", flat=True)
+    return sum(rows, ZERO)
+
+
+# ---------------------------------------------------------------------------
+# 7 · The clearance guard — client decision 2 (Sprint 8D-3)
 # ---------------------------------------------------------------------------
 def unsettled_debt_for(participant: Any) -> list[OpeningBalance]:
     """
@@ -706,8 +897,6 @@ def unsettled_debt_total(participant: Any) -> Decimal:
 def list_balances(
     *, actor: Any, status: str = "", direction: str = "", request: Any = None
 ) -> list[dict[str, Any]]:
-    from apps.core.display import person_name, text_of
-
     policy.require(actor, Screen.OPENING_BALANCES, Action.VIEW, request=request)
     queryset = OpeningBalance.objects.select_related(
         "created_by",
@@ -715,6 +904,7 @@ def list_balances(
         "approved_by",
         "posted_by",
         "resolved_by",
+        "refund_payout",
         "participant",
         "enrollment",
         "posted_charge_line",
@@ -724,36 +914,44 @@ def list_balances(
     if direction:
         queryset = queryset.filter(direction=direction)
 
-    return [
-        {
-            "id": balance.pk,
-            "code": balance.code,
-            "direction": balance.direction,
-            "direction_display": balance.get_direction_display(),
-            "amount": balance.amount,
-            "as_of": balance.as_of,
-            "description_ar": balance.description_ar,
-            "status": balance.status,
-            "status_display": balance.get_status_display(),
-            "enrollment_code": text_of(balance.enrollment, "code"),
-            "legacy_number": balance.source_legacy_number,
-            "source": _source_label(balance),
-            "created_by": person_name(balance.created_by),
-            "reviewed_by": person_name(balance.reviewed_by),
-            "approved_by": person_name(balance.approved_by),
-            "posted_by": person_name(balance.posted_by),
-            "posted_at": balance.posted_at,
-            "review_note_ar": balance.review_note_ar,
-            "decision_note_ar": balance.decision_note_ar,
-            "is_postable": balance.is_postable,
-            "is_resolvable_credit": balance.is_resolvable_credit,
-            "resolved_by": person_name(balance.resolved_by),
-            "resolution_note_ar": balance.resolution_note_ar,
-            "participant_number": text_of(balance.participant, "participant_number"),
-            "credit_blocked": balance.direction == OpeningBalanceDirection.CREDIT,
-        }
-        for balance in queryset
-    ]
+    rows = []
+    for balance in queryset:
+        payout = getattr(balance, "refund_payout", None)
+        rows.append(
+            {
+                "id": balance.pk,
+                "code": balance.code,
+                "direction": balance.direction,
+                "direction_display": balance.get_direction_display(),
+                "amount": balance.amount,
+                "as_of": balance.as_of,
+                "description_ar": balance.description_ar,
+                "status": balance.status,
+                "status_display": balance.get_status_display(),
+                "enrollment_code": text_of(balance.enrollment, "code"),
+                "legacy_number": balance.source_legacy_number,
+                "source": _source_label(balance),
+                "created_by": person_name(balance.created_by),
+                "reviewed_by": person_name(balance.reviewed_by),
+                "approved_by": person_name(balance.approved_by),
+                "posted_by": person_name(balance.posted_by),
+                "posted_at": balance.posted_at,
+                "review_note_ar": balance.review_note_ar,
+                "decision_note_ar": balance.decision_note_ar,
+                "is_postable": balance.is_postable,
+                "is_resolvable_credit": balance.is_resolvable_credit,
+                "is_refund_payable": balance.is_refund_payable,
+                "payout_reference": text_of(payout, "external_reference"),
+                "payout_code": text_of(payout, "code"),
+                "payout_paid_on": getattr(payout, "paid_on", None),
+                "payout_paid_by": person_name(getattr(payout, "paid_by", None)),
+                "resolved_by": person_name(balance.resolved_by),
+                "resolution_note_ar": balance.resolution_note_ar,
+                "participant_number": text_of(balance.participant, "participant_number"),
+                "credit_blocked": balance.direction == OpeningBalanceDirection.CREDIT,
+            }
+        )
+    return rows
 
 
 def _source_label(balance: OpeningBalance) -> str:
@@ -785,6 +983,7 @@ def totals(*, actor: Any, request: Any = None) -> dict[str, Any]:
         # reduces a later bill; the other is cash the centre still owes.
         "credit_applied": _sum(status=OpeningBalanceStatus.APPLIED),
         "refund_due": _sum(status=OpeningBalanceStatus.REFUND_DUE),
+        "refunded": _sum(status=OpeningBalanceStatus.REFUNDED),
         "credit_carried": _sum(direction=OpeningBalanceDirection.CREDIT),
     }
 
@@ -805,11 +1004,14 @@ def direction_choices() -> list[tuple[str, str]]:
 
 __all__ = [
     "AlreadyPostedError",
+    "AlreadyRefundedError",
     "AlreadyResolvedError",
     "CreditNotPostableError",
+    "MissingPayoutDetailsError",
     "NoEnrollmentError",
     "NotACreditError",
     "NotALaterRegistrationError",
+    "NotRefundDueError",
     "OpeningBalanceStateError",
     "SeparationOfDutiesError",
     "approve",
@@ -818,9 +1020,12 @@ __all__ = [
     "direction_choices",
     "list_balances",
     "mark_refund_due",
+    "outstanding_refunds",
+    "pay_refund_due",
     "post",
     "propose_from_archive",
     "propose_manually",
+    "refunds_paid_between",
     "reject",
     "review",
     "status_choices",

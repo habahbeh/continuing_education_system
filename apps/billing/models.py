@@ -32,7 +32,7 @@ from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from apps.core.fields import DisplayRef, Money, Rate, ShortCode
+from apps.core.fields import DisplayRef, Money, NameAr, Rate, ShortCode
 
 
 class ChargeType(models.TextChoices):
@@ -628,6 +628,9 @@ class OpeningBalanceStatus(models.TextChoices):
     #: The centre owes cash back; the obligation stands until it is paid, and
     #: paying it is a cash movement the cashbox records when it happens.
     REFUND_DUE = "REFUND_DUE", _("مستحق الردّ نقداً")
+    #: Sprint 8D-4 — the cash actually left, against a real voucher. Terminal:
+    #: the obligation is closed and no second payout is possible.
+    REFUNDED = "REFUNDED", _("رُدّ نقداً")
     REJECTED = "REJECTED", _("مرفوض")
 
 
@@ -893,6 +896,7 @@ class OpeningBalance(models.Model):
                     status__in=[
                         OpeningBalanceStatus.APPLIED,
                         OpeningBalanceStatus.REFUND_DUE,
+                        OpeningBalanceStatus.REFUNDED,
                     ]
                 )
                 | models.Q(direction=OpeningBalanceDirection.CREDIT),
@@ -905,6 +909,7 @@ class OpeningBalance(models.Model):
                     status__in=[
                         OpeningBalanceStatus.APPLIED,
                         OpeningBalanceStatus.REFUND_DUE,
+                        OpeningBalanceStatus.REFUNDED,
                     ]
                 )
                 | (models.Q(resolved_by__isnull=False) & models.Q(resolved_at__isnull=False)),
@@ -948,6 +953,14 @@ class OpeningBalance(models.Model):
         )
 
     @property
+    def is_refund_payable(self) -> bool:
+        """Declared refundable, and the cash has not gone out yet."""
+        return (
+            self.status == OpeningBalanceStatus.REFUND_DUE
+            and self.direction == OpeningBalanceDirection.CREDIT
+        )
+
+    @property
     def is_resolvable_credit(self) -> bool:
         """An approved credit still waiting to be carried forward or refunded."""
         return (
@@ -972,3 +985,106 @@ class OpeningBalance(models.Model):
             OpeningBalanceStatus.REVIEWED,
             OpeningBalanceStatus.APPROVED,
         }
+
+
+class OpeningBalanceRefund(models.Model):
+    """
+    The cash actually handed back on a historical credit (Sprint 8D-4).
+
+    **Why this is a new model and not one of the four that already return
+    money.** Each existing one is defined by something this case does not
+    have:
+
+    * ``Refund`` (§5.3) reverses REVENUE and demands the president's approval
+      plus two external documents (BR-034). A credit inherited from before the
+      system existed was never this system's revenue, so there is nothing to
+      reverse — and ``CreditReturn``'s own docstring already warns that
+      demanding a presidential decree to hand back a participant's own money
+      is not what BR-034 is for.
+    * ``CreditReturn`` (BR-071) is the right shape and the wrong mechanism. It
+      is defined by ``reversal_allocation`` — "the reversing allocation that
+      actually moved the money out", which is what makes it traceable from
+      both ends. Here there is no incoming allocation to reverse, because no
+      money ever came in through this system. Reusing it would leave its one
+      distinguishing field empty.
+    * ``DepositReturn`` returns a deposit; ``PartnerSettlement`` pays a
+      partner. Neither is a participant's historical credit.
+    * The cashbox has no outgoing model at all. Every model there —
+      ``Receipt``, ``PaymentAllocation``, ``DailyClosing`` — is money coming
+      IN, and ``system_total_for`` reconciles issued receipts only. That is
+      the established design, so a payout belongs beside the other payouts in
+      billing rather than inside the till count.
+
+    **No receipt, ever.** A ``Receipt`` asserts that cash arrived. This is cash
+    leaving, on an obligation the centre inherited; issuing one would state
+    the opposite of what happened and would inflate the day's takings by the
+    amount handed back.
+
+    **One payout, guaranteed by shape.** ``opening_balance`` is a OneToOne, so
+    a second payout collides at the database even if every service guard were
+    removed.
+
+    **The voucher is required.** Cash leaving the centre carries a document
+    number — ``external_reference`` is what an auditor follows from this row
+    to the paper, and a payout without one cannot be verified by anybody.
+    """
+
+    code = ShortCode(unique=True, verbose_name=_("رمز الصرف"))
+
+    opening_balance = models.OneToOneField(
+        OpeningBalance,
+        on_delete=models.PROTECT,
+        related_name="refund_payout",
+        verbose_name=_("الرصيد الافتتاحي"),
+    )
+
+    amount = Money(verbose_name=_("المبلغ المصروف"))
+    paid_on = models.DateField(verbose_name=_("تاريخ الصرف"))
+
+    #: How it left — the same reference table the till uses for money coming
+    #: in, because "cash" and "cheque" mean the same thing in both directions.
+    payment_method = models.ForeignKey(
+        "cashbox.PaymentMethod",
+        on_delete=models.PROTECT,
+        related_name="opening_balance_refunds",
+        verbose_name=_("طريقة الصرف"),
+    )
+    external_reference = DisplayRef(verbose_name=_("رقم سند الصرف"))
+    payee_name_ar = NameAr(verbose_name=_("اسم المستلم"))
+    note_ar = models.CharField(max_length=255, blank=True, verbose_name=_("ملاحظة"))
+
+    paid_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="opening_balance_refunds_paid",
+        verbose_name=_("صرفه"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("صرف رصيد افتتاحي دائن")
+        verbose_name_plural = _("صرف الأرصدة الافتتاحية الدائنة")
+        ordering = ["-paid_on", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="billing_ob_refund_amount_positive",
+            ),
+            # Money leaving the centre always carries the document it left on.
+            models.CheckConstraint(
+                condition=~models.Q(external_reference=""),
+                name="billing_ob_refund_has_voucher",
+            ),
+            # And names who took it. "Paid out" with no payee is unverifiable.
+            models.CheckConstraint(
+                condition=~models.Q(payee_name_ar=""),
+                name="billing_ob_refund_has_payee",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["paid_on"], name="bil_obref_paid_idx"),
+            models.Index(fields=["payment_method"], name="bil_obref_method_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} — {self.amount}"

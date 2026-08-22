@@ -16,6 +16,8 @@ reverse. They sit side by side so the difference is visible.
 
 from __future__ import annotations
 
+from datetime import date
+
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -39,6 +41,7 @@ from apps.billing.services import (
     opening_balance_service,
     refund_service,
 )
+from apps.cashbox.services import payment_service
 from apps.operations.services import enrollment_service
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -312,13 +315,19 @@ OPENING_BALANCE_ACTIONS = {
     # weight of decision.
     "carry-forward": Action.APPROVE,
     "refund-due": Action.APPROVE,
+    # Sprint 8D-4 — the officer executes what the manager declared, the same
+    # split ``Refund`` uses. EDIT, not APPROVE: paying is not deciding.
+    "pay-refund": Action.EDIT,
 }
 
 #: Every business refusal this screen can meet, so a rule arrives as a message
 #: carrying its own reference while a role violation stays a 403.
 OPENING_BALANCE_REFUSALS = (
     opening_balance_service.AlreadyPostedError,
+    opening_balance_service.AlreadyRefundedError,
     opening_balance_service.AlreadyResolvedError,
+    opening_balance_service.MissingPayoutDetailsError,
+    opening_balance_service.NotRefundDueError,
     opening_balance_service.NotACreditError,
     opening_balance_service.NotALaterRegistrationError,
     opening_balance_service.CreditNotPostableError,
@@ -365,6 +374,10 @@ def opening_balances_view(request: HttpRequest) -> HttpResponse:
                 request=request,
             ),
             "totals": opening_balance_service.totals(actor=request.user, request=request),
+            "outstanding_refunds": opening_balance_service.outstanding_refunds(
+                actor=request.user, request=request
+            ),
+            "payment_methods": payment_service.payment_method_choices(),
             "statuses": opening_balance_service.status_choices(),
             "directions": opening_balance_service.direction_choices(),
             "form": propose_form if can_propose else None,
@@ -483,6 +496,25 @@ def _advance_opening_balance(request: HttpRequest, action: str) -> HttpResponse 
             actor=request.user, balance=balance, note_ar=note, request=request
         )
         messages.success(request, _("سُجّل الرصيد مستحقاً للردّ نقداً — الصرف بسند حقيقي لاحقاً"))
+    elif action == "pay-refund":
+        from apps.cashbox.services import payment_service as cashbox
+
+        payout = opening_balance_service.pay_refund_due(
+            actor=request.user,
+            balance=balance,
+            code=request.POST.get("payout_code", "").strip(),
+            amount=balance.amount,
+            paid_on=date.today(),
+            payment_method=cashbox.method_by_code(request.POST.get("payment_method", "").strip()),
+            external_reference=request.POST.get("external_reference", ""),
+            payee_name_ar=request.POST.get("payee_name_ar", ""),
+            note_ar=note,
+            request=request,
+        )
+        messages.success(
+            request,
+            _("صُرف الرصيد بسند %(ref)s — بلا سند قبض") % {"ref": payout.external_reference},
+        )
     else:
         line = opening_balance_service.post(actor=request.user, balance=balance, request=request)
         messages.success(
