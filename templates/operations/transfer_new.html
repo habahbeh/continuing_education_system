@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="note info">
+  {% translate "عدد المحاضرات لا يُدخَل هنا — يُقرأ من التسجيل موثّقاً بمصدره ومُتحقِّقه (BR-095)، ويُجمَّد على الطلب لحظة تقديمه. «فحص الشروط» يعرض القرار وفرق الرسوم قبل أن يلتزم أحد بشيء." %}
+</div>
+
+{% if not can_create %}
+  <div class="note">
+    {% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — طلب النقل لموظف التسجيل ومدير المركز (§3.2/7)." %}
+  </div>
+{% endif %}
+
+{% if preview %}
+  {% if preview.allowed %}
+    <div class="card2">
+      <div class="card2-head"><h2>{% translate "نتيجة الفحص — مستوفٍ للشروط" %}</h2></div>
+      <div class="card2-body">
+        <dl class="dl">
+          <dt>{% translate "المجال" %}</dt>
+          <dd>{% if preview.evidence.same_category %}{% translate "نفس المجال" %}
+              {% else %}{% translate "مجال مختلف — باستثناء مسجَّل (BR-065)" %}{% endif %}</dd>
+          <dt>{% translate "المحاضرات وقت الطلب" %}</dt>
+          <dd class="num">{{ preview.evidence.lectures_attended_at_request }}</dd>
+          <dt>{% translate "مرجع العدّاد" %}</dt>
+          <dd>{{ preview.evidence.attendance_record_ref_at_request|default:"—" }}</dd>
+          <dt>{% translate "رسوم الدورة الحالية" %}</dt><dd class="num">{{ preview.money.old_tuition }}</dd>
+          <dt>{% translate "رسوم الدورة الهدف" %}</dt><dd class="num">{{ preview.money.new_tuition }}</dd>
+          <dt>{% translate "رسم التسجيل المُرحَّل" %}</dt>
+          <dd class="num">{{ preview.money.registration_carried }}</dd>
+        </dl>
+        {% if preview.money.difference > 0 %}
+          <div class="note warn">
+            {% translate "فرق الرسوم" %}: {{ preview.money.difference }} —
+            {% translate "يدفعه المشارك، ويُقيَّد بنداً مستقلاً عند التنفيذ (BR-064)." %}
+          </div>
+        {% elif preview.money.difference < 0 %}
+          <div class="note ok">
+            {% translate "فرق الرسوم" %}: {{ preview.money.difference }} —
+            {% translate "الدورة الهدف أرخص، ويظهر الفائض رصيداً دائناً للمشارك (BR-064)." %}
+          </div>
+        {% else %}
+          <div class="note ok">{% translate "لا فرق في الرسوم." %}</div>
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <div class="note danger">
+      <strong>{% translate "النقل مرفوض بالقواعد" %}:</strong> {{ preview.refusal }}
+    </div>
+  {% endif %}
+{% endif %}
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "بيانات الطلب" %}</h2></div>
+  <div class="card2-body">
+    <form method="post">{% csrf_token %}
+      {% include "partials/_form.html" %}
+      <button class="btn2" type="submit" name="action" value="preview">{% translate "فحص الشروط" %}</button>
+      {% if can_create %}
+        <button class="btn2 primary" type="submit" name="action" value="submit">{% translate "تقديم الطلب" %}</button>
+      {% endif %}
+      <a href="{% url 'operations:transfers' %}">{% translate "إلغاء" %}</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

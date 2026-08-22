@@ -84,6 +84,11 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
             NavItem(Screen.MOHE_SUBMIT, "operations:mohe-submit", _("نموذج الإرسال للوزارة")),
             NavItem(Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+            # Sprint 8H — §3.2/6 and §3.2/7, both on VIEW. Finance reads the
+            # transfers list because it settles them; it is absent from the
+            # request form, which is the registrar's and the manager's.
+            NavItem(Screen.TRANSFERS, "operations:transfers", _("النقل بين الدورات")),
+            NavItem(Screen.TRANSFER_NEW, "operations:transfer-new", _("طلب نقل جديد")),
         ),
     ),
     NavGroup(

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<h1>{{ title }} <span dir="ltr">{{ transfer.code }}</span></h1>
+
+<div class="card2"><div class="card2-body">
+  <dl class="dl">
+    <dt>{% translate "المشارك" %}</dt>
+    <dd>{{ transfer.participant_name }} <span dir="ltr">({{ transfer.participant_number }})</span></dd>
+    <dt>{% translate "من" %}</dt>
+    <dd dir="ltr">{{ transfer.from_enrollment_code }} · {{ transfer.from_cohort_code }}
+      — <span dir="rtl">{{ transfer.from_program_name }}</span></dd>
+    <dt>{% translate "إلى" %}</dt>
+    <dd dir="ltr">{{ transfer.to_cohort_code }} — <span dir="rtl">{{ transfer.to_program_name }}</span></dd>
+    {% if transfer.to_enrollment_code %}
+      <dt>{% translate "التسجيل الجديد" %}</dt><dd dir="ltr">{{ transfer.to_enrollment_code }}</dd>
+    {% endif %}
+    <dt>{% translate "السبب" %}</dt><dd>{{ transfer.reason_display }}</dd>
+    <dt>{% translate "تاريخ الطلب" %}</dt><dd class="num">{{ transfer.requested_on }} — {{ transfer.requested_by }}</dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ transfer.status_display }}</span></dd>
+  </dl>
+</div></div>
+
+{# ---- الدليل المُجمَّد لحظة الطلب (WORKFLOWS §5.3) ---- #}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الدليل المُجمَّد لحظة الطلب" %}</h2></div>
+  <div class="card2-body">
+    <div class="note info">
+      {% translate "هذه القيم نُسخت وقت الطلب ولا تُقرأ حيّة: تغيير تصنيف الدورة لاحقاً يجب ألّا يبرّر — أو يُبطل — قراراً اتُّخذ من قبل." %}
+    </div>
+    <dl class="dl">
+      <dt>{% translate "المجال" %}</dt>
+      <dd>{% if transfer.same_category %}<span class="chip ok">{% translate "نفس المجال" %}</span>
+          {% else %}<span class="chip warn">{% translate "مجال مختلف" %}</span>{% endif %}</dd>
+      <dt>{% translate "المحاضرات وقت الطلب" %}</dt><dd class="num">{{ transfer.lectures_attended_at_request }}</dd>
+      <dt>{% translate "مرجع العدّاد" %}</dt><dd>{{ transfer.attendance_record_ref_at_request|default:"—" }}</dd>
+    </dl>
+    {% if transfer.category_waiver_granted %}
+      <div class="note warn">
+        <strong>{% translate "استثناء قيد المجال" %} (BR-065 · C-12)</strong> —
+        {% translate "أجازه" %}: {{ transfer.category_waiver_by }}.
+        <p>{{ transfer.category_waiver_reason_ar }}</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{# ---- المال ---- #}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الأثر المالي" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "فرق الرسوم" %}</dt><dd class="num">{{ transfer.fee_difference }}</dd>
+      <dt>{% translate "رسم التسجيل المُرحَّل" %}</dt><dd class="num">{{ transfer.registration_fee_transferred }}</dd>
+      <dt>{% translate "المبلغ المُرحَّل فعلياً" %}</dt><dd class="num">{{ transfer.transferred_amount }}</dd>
+    </dl>
+    <div class="note info">
+      {% translate "«فرق الرسوم» ما يُقيَّد على المشارك أو له، و«المبلغ المُرحَّل فعلياً» ما انتقل من دفعاته إلى التسجيل الجديد — سؤالان مختلفان، ويُقرأ الثاني من السجل المحاسبي لا من رقم محفوظ." %}
+    </div>
+  </div>
+</div>
+
+{# ---- الاعتمادات ---- #}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "المسار" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "تنسيب مدير المركز" %}</dt>
+      <dd>{% if transfer.manager_approved_by %}{{ transfer.manager_approved_by }} · {{ transfer.manager_approved_at }}
+          {% else %}—{% endif %}</dd>
+      <dt>{% translate "تسوية المالية" %}</dt>
+      <dd>{% if transfer.finance_settled_by %}{{ transfer.finance_settled_by }} · {{ transfer.finance_settled_at }}
+          {% else %}—{% endif %}</dd>
+    </dl>
+  </div>
+</div>
+
+{% if transfer.rejection_reason_ar %}
+  <div class="note danger">
+    <strong>{% translate "سبب الرفض" %}:</strong>
+    <p>{{ transfer.rejection_reason_ar }}</p>
+  </div>
+{% endif %}
+
+{% if can_recommend %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "تنسيب مدير المركز" %} (BR-066)</h2></div>
+    <div class="card2-body">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="recommend">
+        <button class="btn2 primary" type="submit">{% translate "تنسيب بالموافقة" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+{% if can_execute %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "التسوية والتنفيذ" %}</h2></div>
+    <div class="card2-body">
+      <div class="note info">
+        {% translate "التنفيذ يلغي بنود التسجيل القديم ويعيد قيدها على الجديد، وينقل التخصيصات بزوج عاكس — لا يُعدَّل قيد مالي ولا يُحذف. يقع كاملاً أو لا يقع." %}
+      </div>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="execute">
+        {% include "partials/_form.html" with form=execute_form %}
+        <button class="btn2 primary" type="submit">{% translate "تنفيذ النقل" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+{% if can_reject %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "رفض الطلب" %}</h2></div>
+    <div class="card2-body">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="reject">
+        {% include "partials/_form.html" with form=reject_form %}
+        <button class="btn2" type="submit">{% translate "رفض" %}</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+<div class="toolbar"><a href="{% url 'operations:transfers' %}">{% translate "عودة إلى عمليات النقل" %}</a></div>
+{% endblock %}

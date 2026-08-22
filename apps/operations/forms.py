@@ -316,6 +316,92 @@ class MoheDecisionForm(forms.Form):
     )
 
 
+# ---------------------------------------------------------------------------
+# Transfers (Sprint 8H — §3.2/6, §3.2/7)
+# ---------------------------------------------------------------------------
+class TransferRequestForm(forms.Form):
+    """
+    WORKFLOWS §5.2 X1 — the request, and the evidence it freezes.
+
+    ``lectures_attended`` is NOT collected here. It lives on the enrolment,
+    is documented under BR-095 with a source and a verifier, and
+    ``validate_transfer`` copies it at the moment of the request. Offering it
+    as an input would let the person asking for the transfer supply the number
+    the rule is about to judge them on.
+    """
+
+    from_enrollment_code = forms.ChoiceField(label=_("التسجيل المنقول منه"), choices=[])
+    to_cohort_code = forms.ChoiceField(label=_("الدفعة الهدف"), choices=[])
+    reason = forms.ChoiceField(label=_("السبب"), choices=[])
+    requested_on = forms.DateField(label=_("تاريخ الطلب"), widget=forms.DateInput({"type": "date"}))
+    code = forms.CharField(label=_("رمز النقل"), max_length=32)
+    grant_category_waiver = forms.BooleanField(
+        label=_("منح استثناء قيد المجال"),
+        required=False,
+        help_text=_("BR-065 · C-12 — لا يكون إلا بإلغاء المركز للدورة، وبموافقة مدير المركز"),
+    )
+    category_waiver_reason_ar = forms.CharField(
+        label=_("سبب الاستثناء"), required=False, widget=forms.Textarea({"rows": 2})
+    )
+
+    def __init__(
+        self,
+        *args: Any,
+        enrollment_choices: list[tuple[str, str]] | None = None,
+        cohort_choices: list[tuple[str, str]] | None = None,
+        reason_choices: list[tuple[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        cast(forms.ChoiceField, self.fields["from_enrollment_code"]).choices = (
+            enrollment_choices or []
+        )
+        cast(forms.ChoiceField, self.fields["to_cohort_code"]).choices = cohort_choices or []
+        cast(forms.ChoiceField, self.fields["reason"]).choices = reason_choices or []
+
+    def clean(self) -> dict[str, Any]:
+        """
+        The one thing the form can answer without the database.
+
+        Every other rule — the category, the lecture deadline, the ministry
+        approval on the target — is ``validate_transfer``'s, and asking it
+        twice would mean maintaining two answers.
+        """
+        cleaned = super().clean() or {}
+        if (
+            cleaned.get("grant_category_waiver")
+            and not (cleaned.get("category_waiver_reason_ar") or "").strip()
+        ):
+            self.add_error(
+                "category_waiver_reason_ar",
+                _("الاستثناء بلا سبب مسجَّل ليس استثناءً — سجّل السبب (C-12)."),
+            )
+        return cleaned
+
+
+class TransferRejectForm(forms.Form):
+    """WORKFLOWS §5.2 X5 — a rejection always carries its reason."""
+
+    reason_ar = forms.CharField(
+        label=_("سبب الرفض"), widget=forms.Textarea({"rows": 2}), max_length=1000
+    )
+
+
+class TransferExecuteForm(forms.Form):
+    """
+    §5.4 — the settlement, and the code the new enrolment will carry.
+
+    The new enrolment's code is asked for rather than generated: enrolment
+    codes are the centre's own numbering everywhere else in this system, and
+    a transfer is not the place to invent a second convention.
+    """
+
+    executed_on = forms.DateField(
+        label=_("تاريخ التنفيذ"), widget=forms.DateInput({"type": "date"})
+    )
+    new_code = forms.CharField(label=_("رمز التسجيل الجديد"), max_length=32)
+
+
 __all__ = [
     "CertificateDateForm",
     "CertificateIssueForm",
@@ -332,4 +418,7 @@ __all__ = [
     "MoheResubmissionForm",
     "MoheSendForm",
     "MoheSubmissionForm",
+    "TransferExecuteForm",
+    "TransferRejectForm",
+    "TransferRequestForm",
 ]

@@ -44,6 +44,9 @@ from apps.operations.forms import (
     MoheResubmissionForm,
     MoheSendForm,
     MoheSubmissionForm,
+    TransferExecuteForm,
+    TransferRejectForm,
+    TransferRequestForm,
 )
 from apps.operations.services import (
     certificate_service,
@@ -51,6 +54,7 @@ from apps.operations.services import (
     cohort_service,
     enrollment_service,
     mohe_service,
+    transfer_service,
 )
 from apps.partners.services import partner_service
 from apps.people.constants import Action, Screen
@@ -939,3 +943,252 @@ def _run_mohe_action(request: HttpRequest, action: str, submission: Any) -> int 
     )
     messages.success(request, _("فُتح ملف جديد يردّ على الرفض — أرفق المستندين ثم أرسله."))
     return int(fresh.pk)
+
+
+# ---------------------------------------------------------------------------
+# Transfers (Sprint 8H)
+# ---------------------------------------------------------------------------
+#: §3.2/6's own split, which is why three different people appear on one
+#: record: the registration officer opens the request (``C`` on §3.2/7), the
+#: centre manager recommends or refuses it (``A``), and finance settles and
+#: executes it (``E`` — footnote ⁶, the fee-difference settlement). The
+#: manager holds no ``E`` here and finance holds no ``A``; neither can do the
+#: other's step.
+TRANSFER_ACTIONS: dict[str, tuple[str, str]] = {
+    "recommend": (Screen.TRANSFERS, Action.APPROVE),
+    "reject": (Screen.TRANSFERS, Action.APPROVE),
+    "execute": (Screen.TRANSFERS, Action.EDIT),
+}
+
+
+@require_http_methods(["GET"])
+def transfers_view(request: HttpRequest) -> HttpResponse:
+    """§3.2/6 — every transfer, whatever stage it has reached."""
+    return render(
+        request,
+        "operations/transfers.html",
+        {
+            "title": _("النقل بين الدورات"),
+            "active_screen": Screen.TRANSFERS,
+            "transfers": transfer_service.list_transfers(
+                actor=request.user,
+                status=request.GET.get("status", "").strip(),
+                query=request.GET.get("q", "").strip(),
+                request=request,
+            ),
+            "query": request.GET.get("q", ""),
+            "status": request.GET.get("status", ""),
+            "can_request": policy.is_allowed(request.user, Screen.TRANSFER_NEW, Action.CREATE),
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def transfer_new_view(request: HttpRequest) -> HttpResponse:
+    """
+    §3.2/7 — raise a transfer request.
+
+    Two POSTs, and the difference matters. ``preview`` runs the rule engine
+    and the BR-064 arithmetic and writes nothing, so the operator sees the
+    refusal — or the difference the participant will owe — before committing
+    anybody to it. ``submit`` is the request itself.
+
+    Opens on VIEW and submits on CREATE, so the audit account can read the
+    form it may not file.
+    """
+    policy.require(request.user, Screen.TRANSFER_NEW, Action.VIEW, request=request)
+
+    form = TransferRequestForm(
+        request.POST or None,
+        enrollment_choices=transfer_service.transferable_enrollment_choices(
+            actor=request.user, request=request
+        ),
+        cohort_choices=transfer_service.destination_cohort_choices(
+            actor=request.user, request=request
+        ),
+        reason_choices=transfer_service.reason_choices(),
+        initial={"requested_on": timezone.localdate()},
+    )
+    preview = None
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        if action == "submit":
+            policy.require(request.user, Screen.TRANSFER_NEW, Action.CREATE, request=request)
+        if form.is_valid():
+            if action == "submit":
+                created = _submit_transfer(request, form)
+                if created is not None:
+                    return redirect("operations:transfer-detail", code=created)
+            else:
+                preview = _preview_transfer(request, form)
+
+    return render(
+        request,
+        "operations/transfer_new.html",
+        {
+            "title": _("طلب نقل جديد"),
+            "active_screen": Screen.TRANSFER_NEW,
+            "form": form,
+            "preview": preview,
+            "can_create": policy.is_allowed(request.user, Screen.TRANSFER_NEW, Action.CREATE),
+        },
+    )
+
+
+def _transfer_inputs(request: HttpRequest, form: TransferRequestForm) -> dict[str, Any]:
+    """
+    Resolve the two records and settle who granted any waiver.
+
+    The waiver's approver is checked against §3.2/6's ``A`` rather than taken
+    on trust from whoever filled the form. C-12 is precisely about this: the
+    demo granted the waiver on a dropdown pick with nobody's name on it, and
+    ``request_transfer`` still accepts whatever ``waiver_by`` it is handed —
+    so the screen refuses a registrar's self-granted exception here, with a
+    DENIED_ATTEMPT, instead of storing one.
+    """
+    data = form.cleaned_data
+    waiver_by = None
+    if data.get("grant_category_waiver"):
+        policy.require(request.user, Screen.TRANSFERS, Action.APPROVE, request=request)
+        waiver_by = request.user
+
+    return {
+        "from_enrollment": enrollment_service.get_enrollment(
+            actor=request.user, code=data["from_enrollment_code"], request=request
+        ),
+        "to_cohort": cohort_service.get_cohort_instance(
+            actor=request.user, code=data["to_cohort_code"], request=request
+        ),
+        "reason": data["reason"],
+        "waiver_by": waiver_by,
+        "waiver_reason_ar": data.get("category_waiver_reason_ar", ""),
+    }
+
+
+def _preview_transfer(request: HttpRequest, form: TransferRequestForm) -> dict[str, Any] | None:
+    try:
+        inputs = _transfer_inputs(request, form)
+    except ObjectDoesNotExist as exc:
+        messages.error(request, _message_of(exc))
+        return None
+
+    return transfer_service.preview_transfer(
+        actor=request.user,
+        as_of=form.cleaned_data["requested_on"],
+        request=request,
+        **inputs,
+    )
+
+
+def _submit_transfer(request: HttpRequest, form: TransferRequestForm) -> str | None:
+    try:
+        inputs = _transfer_inputs(request, form)
+        transfer = transfer_service.request_transfer(
+            actor=request.user,
+            requested_on=form.cleaned_data["requested_on"],
+            code=form.cleaned_data["code"],
+            request=request,
+            **inputs,
+        )
+    except ObjectDoesNotExist as exc:
+        messages.error(request, _message_of(exc))
+        return None
+    except DjangoValidationError as exc:
+        # The rule engine's own words, with the reference the centre needs.
+        messages.error(request, _message_of(exc))
+        return None
+
+    messages.success(
+        request, _("سُجّل طلب النقل %(code)s — بانتظار تنسيب المدير") % {"code": transfer.code}
+    )
+    return str(transfer.code)
+
+
+@require_http_methods(["GET", "POST"])
+def transfer_detail_view(request: HttpRequest, code: str) -> HttpResponse:
+    """§3.2/6 — one transfer, its frozen evidence, and the step it awaits."""
+    if request.method == "POST":
+        response = _handle_transfer_action(request, code)
+        if response is not None:
+            return response
+
+    try:
+        transfer = transfer_service.get_transfer(actor=request.user, code=code, request=request)
+    except ObjectDoesNotExist as exc:
+        raise Http404(_("لا يوجد طلب نقل بهذا الرمز")) from exc
+
+    decides = policy.is_allowed(request.user, Screen.TRANSFERS, Action.APPROVE)
+    settles = policy.is_allowed(request.user, Screen.TRANSFERS, Action.EDIT)
+
+    return render(
+        request,
+        "operations/transfer_detail.html",
+        {
+            "title": _("طلب نقل"),
+            "active_screen": Screen.TRANSFERS,
+            "transfer": transfer,
+            "reject_form": TransferRejectForm(),
+            "execute_form": TransferExecuteForm(initial={"executed_on": timezone.localdate()}),
+            "can_recommend": decides and transfer["awaits_manager"],
+            "can_reject": decides and not transfer["is_closed"],
+            "can_execute": settles and transfer["awaits_finance"],
+        },
+    )
+
+
+def _handle_transfer_action(request: HttpRequest, code: str) -> HttpResponse | None:
+    action = request.POST.get("action", "")
+    if action not in TRANSFER_ACTIONS:
+        return None
+
+    screen, permission = TRANSFER_ACTIONS[action]
+    policy.require(request.user, screen, permission, request=request)
+
+    try:
+        transfer = transfer_service.transfer_instance(
+            actor=request.user, code=code, request=request
+        )
+    except ObjectDoesNotExist as exc:
+        raise Http404(_("لا يوجد طلب نقل بهذا الرمز")) from exc
+
+    try:
+        _run_transfer_action(request, action, transfer)
+    except DjangoValidationError as exc:
+        messages.error(request, _message_of(exc))
+
+    return redirect("operations:transfer-detail", code=code)
+
+
+def _run_transfer_action(request: HttpRequest, action: str, transfer: Any) -> None:
+    if action == "recommend":
+        transfer_service.manager_recommend(actor=request.user, transfer=transfer, request=request)
+        messages.success(request, _("نُسّب الطلب — بانتظار التسوية المالية."))
+        return
+
+    if action == "reject":
+        form = TransferRejectForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, _("سبب الرفض إلزامي."))
+            return
+        transfer_service.reject_transfer(
+            actor=request.user,
+            transfer=transfer,
+            reason_ar=form.cleaned_data["reason_ar"],
+            request=request,
+        )
+        messages.success(request, _("رُفض طلب النقل."))
+        return
+
+    execute_form = TransferExecuteForm(request.POST)
+    if not execute_form.is_valid():
+        messages.error(request, _("تاريخ التنفيذ ورمز التسجيل الجديد مطلوبان."))
+        return
+    transfer_service.execute_transfer(
+        actor=request.user,
+        transfer=transfer,
+        executed_on=execute_form.cleaned_data["executed_on"],
+        new_code=execute_form.cleaned_data["new_code"],
+        request=request,
+    )
+    messages.success(request, _("نُفِّذ النقل وسُوّيت الرسوم."))

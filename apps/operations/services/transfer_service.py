@@ -77,6 +77,41 @@ def _quote_for(enrollment: Enrollment, cohort: Cohort, as_of: date) -> Any:
     )
 
 
+def fee_difference_for(
+    *, from_enrollment: Enrollment, to_cohort: Cohort, as_of: date
+) -> dict[str, Decimal]:
+    """
+    BR-064 — what the move costs, in one implementation (Sprint 8H).
+
+    Lifted verbatim out of ``_execute`` when the screens needed to SHOW the
+    figure before anybody committed to it. A second copy in a preview would
+    be a second opinion, and the two would disagree the first time either
+    changed — which on this particular number means telling a participant one
+    thing at the counter and charging them another.
+
+    Positive means the participant owes the gap and it becomes an explicit
+    ``TRANSFER_DIFFERENCE`` line; negative means the new course is cheaper and
+    the surplus surfaces as a credit, because a charge cannot be negative.
+    """
+    from apps.billing.models import ChargeLine, ChargeType
+
+    lines = list(ChargeLine.objects.filter(enrollment=from_enrollment, voided=False))
+    old_tuition = sum(
+        (line.net_amount for line in lines if line.charge_type == ChargeType.TUITION), ZERO
+    )
+    registration_carried = sum(
+        (line.net_amount for line in lines if line.charge_type == ChargeType.REGISTRATION), ZERO
+    )
+    new_tuition = _quote_for(from_enrollment, to_cohort, as_of).course_fee
+
+    return {
+        "old_tuition": old_tuition,
+        "new_tuition": new_tuition,
+        "difference": new_tuition - old_tuition,
+        "registration_carried": registration_carried,
+    }
+
+
 def validate_transfer(
     *,
     from_enrollment: Enrollment,
@@ -387,18 +422,11 @@ def _execute(
 
     # --- 2. the charge lines: void on the old, re-raise on the new ----------
     old_lines = list(ChargeLine.objects.filter(enrollment=old, voided=False))
-    old_tuition = sum(
-        (line.net_amount for line in old_lines if line.charge_type == ChargeType.TUITION),
-        ZERO,
-    )
-    registration_carried = sum(
-        (line.net_amount for line in old_lines if line.charge_type == ChargeType.REGISTRATION),
-        ZERO,
-    )
-
-    quote = _quote_for(old, to_cohort, executed_on)
-    new_tuition = quote.course_fee
-    difference = new_tuition - old_tuition
+    money = fee_difference_for(from_enrollment=old, to_cohort=to_cohort, as_of=executed_on)
+    old_tuition = money["old_tuition"]
+    registration_carried = money["registration_carried"]
+    new_tuition = money["new_tuition"]
+    difference = money["difference"]
 
     mirror: dict[int, ChargeLine] = {}
     for line in old_lines:
@@ -605,6 +633,252 @@ def _recover_partner_share_if_claimed(
     )
 
 
+# ---------------------------------------------------------------------------
+# The read layer the screens need (Sprint 8H)
+# ---------------------------------------------------------------------------
+def _row(transfer: Transfer) -> dict[str, Any]:
+    old = transfer.from_enrollment
+    return {
+        "code": transfer.code,
+        "participant_name": old.participant.name_ar,
+        "participant_number": old.participant.participant_number,
+        "from_enrollment_code": old.code,
+        "from_cohort_code": old.cohort.code,
+        "from_program_name": old.cohort.program.name_ar,
+        "to_cohort_code": transfer.to_cohort.code,
+        "to_program_name": transfer.to_cohort.program.name_ar,
+        "to_enrollment_code": (
+            transfer.to_enrollment.code if transfer.to_enrollment is not None else ""
+        ),
+        "requested_on": transfer.requested_on,
+        "reason": transfer.reason,
+        "reason_display": transfer.get_reason_display(),
+        "status": transfer.status,
+        "status_display": transfer.get_status_display(),
+        "same_category": transfer.same_category,
+        "category_waiver_granted": transfer.category_waiver_granted,
+        "lectures_attended_at_request": transfer.lectures_attended_at_request,
+        "fee_difference": transfer.fee_difference,
+        "registration_fee_transferred": transfer.registration_fee_transferred,
+        "rejection_reason_ar": transfer.rejection_reason_ar,
+    }
+
+
+def list_transfers(
+    *, actor: Any, status: str = "", query: str = "", request: Any = None
+) -> list[dict[str, Any]]:
+    """Transfers as rows (§3.2/6), every status including the rejected ones."""
+    policy.require(actor, Screen.TRANSFERS, Action.VIEW, request=request)
+
+    queryset = Transfer.objects.select_related(
+        "from_enrollment__participant",
+        "from_enrollment__cohort__program",
+        "to_cohort__program",
+        "to_enrollment",
+    )
+    if status:
+        queryset = queryset.filter(status=status)
+    if query:
+        queryset = (
+            queryset.filter(code__icontains=query)
+            | queryset.filter(from_enrollment__participant__name_ar__icontains=query)
+            | queryset.filter(from_enrollment__code__icontains=query)
+        )
+    return [_row(t) for t in queryset.order_by("-requested_on", "-id")]
+
+
+def get_transfer(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
+    """
+    One transfer with its frozen evidence and the money that actually moved.
+
+    ``transferred_amount`` is read back from the ledger rather than from a
+    remembered figure, and the two are shown side by side on purpose: the
+    difference that was CHARGED and the money that MOVED answer different
+    questions, and a screen showing only one invites the wrong conclusion.
+    """
+    from apps.core.display import person_name
+
+    policy.require(actor, Screen.TRANSFERS, Action.VIEW, request=request)
+
+    transfer = Transfer.objects.select_related(
+        "from_enrollment__participant",
+        "from_enrollment__cohort__program",
+        "to_cohort__program",
+        "to_enrollment",
+        "requested_by",
+        "manager_approved_by",
+        "finance_settled_by",
+        "category_waiver_by",
+    ).get(code=code)
+
+    detail = _row(transfer)
+    detail.update(
+        {
+            "attendance_record_ref_at_request": transfer.attendance_record_ref_at_request,
+            "category_waiver_reason_ar": transfer.category_waiver_reason_ar,
+            "category_waiver_by": person_name(transfer.category_waiver_by),
+            "requested_by": person_name(transfer.requested_by),
+            "manager_approved_by": person_name(transfer.manager_approved_by),
+            "manager_approved_at": transfer.manager_approved_at,
+            "finance_settled_by": person_name(transfer.finance_settled_by),
+            "finance_settled_at": transfer.finance_settled_at,
+            "transferred_amount": transferred_amount(transfer),
+            # WORKFLOWS §5.2 — which act is next, decided here so the template
+            # never reads a status and infers a workflow.
+            "awaits_manager": transfer.status == TransferStatus.PENDING_MANAGER,
+            "awaits_finance": transfer.status == TransferStatus.PENDING_FINANCE,
+            "is_closed": transfer.status in {TransferStatus.EXECUTED, TransferStatus.REJECTED},
+        }
+    )
+    return detail
+
+
+def reason_choices() -> list[tuple[str, str]]:
+    """
+    The two documented reasons, projected for a form (A-05).
+
+    Trivial, and it earns its place: without it the view reaches into
+    ``apps.operations.models`` for ``TransferReason`` — which the architecture
+    test refuses, and rightly. A screen that imports an enum today imports a
+    queryset tomorrow.
+    """
+    return [(value, str(label)) for value, label in TransferReason.choices]
+
+
+def transfer_instance(*, actor: Any, code: str, request: Any = None) -> Transfer:
+    """The model object, for handing back into this module (A-05)."""
+    policy.require(actor, Screen.TRANSFERS, Action.VIEW, request=request)
+    return Transfer.objects.select_related("from_enrollment", "to_cohort").get(code=code)
+
+
+def transferable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    (code, label) of enrolments a transfer could start from.
+
+    Short courses only (BR-060), still live, and not already the source of a
+    transfer that is on its way through. The lecture deadline is NOT applied
+    here: BR-062 refuses the move with a number in the message — «حضر 5» —
+    and silently dropping the enrolment from the list would replace that
+    explanation with an absence the user cannot interpret.
+    """
+    from apps.catalog.models import ProgramType
+
+    policy.require(actor, Screen.TRANSFER_NEW, Action.VIEW, request=request)
+
+    in_flight = set(
+        Transfer.objects.filter(
+            status__in=(
+                TransferStatus.DRAFT,
+                TransferStatus.PENDING_MANAGER,
+                TransferStatus.PENDING_FINANCE,
+                TransferStatus.EXECUTED,
+            )
+        ).values_list("from_enrollment_id", flat=True)
+    )
+    return [
+        (
+            e.code,
+            f"{e.code} — {e.participant.name_ar} · {e.cohort.code}",
+        )
+        for e in Enrollment.objects.select_related("participant", "cohort__program")
+        .filter(
+            cohort__program__program_type=ProgramType.SHORT_COURSE,
+            status__in=(
+                EnrollmentStatus.ACTIVE,
+                EnrollmentStatus.PENDING_FINANCE,
+                EnrollmentStatus.PENDING_APPROVAL,
+                EnrollmentStatus.PAYMENT_OVERDUE,
+            ),
+        )
+        .order_by("-enrolled_on")
+        if e.pk not in in_flight
+    ]
+
+
+def destination_cohort_choices(
+    *, actor: Any, from_code: str = "", request: Any = None
+) -> list[tuple[str, str]]:
+    """
+    (code, label) of cohorts a transfer could land on.
+
+    Short courses the ministry has approved — the two checks
+    ``validate_transfer`` would otherwise refuse on — minus the source cohort
+    itself. Category is deliberately not filtered: BR-061 allows a
+    cross-category move on a centre cancellation with a recorded waiver, and a
+    list that hid the option would hide the exception too.
+    """
+    from apps.catalog.models import ProgramType
+
+    policy.require(actor, Screen.TRANSFER_NEW, Action.VIEW, request=request)
+
+    source_cohort_id = None
+    if from_code:
+        source = Enrollment.objects.filter(code=from_code).first()
+        source_cohort_id = source.cohort_id if source else None
+
+    return [
+        (c.code, f"{c.code} — {c.name_ar} ({c.program.name_ar})")
+        for c in Cohort.objects.select_related("program")
+        .filter(program__program_type=ProgramType.SHORT_COURSE)
+        .order_by("-starts_on")
+        if c.pk != source_cohort_id and mohe_service.cohort_is_approved(c)
+    ]
+
+
+def preview_transfer(
+    *,
+    actor: Any,
+    from_enrollment: Enrollment,
+    to_cohort: Cohort,
+    reason: str,
+    as_of: date,
+    waiver_by: Any = None,
+    waiver_reason_ar: str = "",
+    request: Any = None,
+) -> dict[str, Any]:
+    """
+    Run the rules and the arithmetic without writing anything (§4 dry-run).
+
+    ``validate_transfer`` is called, not reimplemented, and the money comes
+    from ``fee_difference_for`` — the same function the execution uses. A
+    preview that computed its own answer would be a promise the execution had
+    not made.
+
+    A refusal is RETURNED rather than raised. The caller here is a screen
+    asking "what would happen?", and the answer «BR-062: حضر 5» is the useful
+    output of that question, not an error condition. ``request_transfer``
+    still raises, so nothing depends on this having been called.
+    """
+    policy.require(actor, Screen.TRANSFER_NEW, Action.VIEW, request=request)
+
+    result: dict[str, Any] = {
+        "from_enrollment_code": from_enrollment.code,
+        "to_cohort_code": to_cohort.code,
+        "allowed": False,
+        "refusal": "",
+        "evidence": {},
+        "money": {},
+    }
+    try:
+        result["evidence"] = validate_transfer(
+            from_enrollment=from_enrollment,
+            to_cohort=to_cohort,
+            reason=reason,
+            as_of=as_of,
+            waiver_by=waiver_by,
+            waiver_reason_ar=waiver_reason_ar,
+        )
+    except ValidationError as refusal:
+        result["refusal"] = " · ".join(str(m) for m in refusal.messages)
+        return result
+
+    result["allowed"] = True
+    result["money"] = fee_difference_for(
+        from_enrollment=from_enrollment, to_cohort=to_cohort, as_of=as_of
+    )
+    return result
+
+
 def transferred_amount(transfer: Transfer) -> Decimal:
     """What actually moved, read back from the ledger rather than remembered."""
     from apps.cashbox.models import PaymentAllocation, ReceiptStatus
@@ -621,10 +895,18 @@ __all__ = [
     "LECTURE_LIMIT_KEY",
     "AttendanceNotDocumentedError",
     "TransferRuleError",
+    "destination_cohort_choices",
     "execute_transfer",
+    "fee_difference_for",
+    "get_transfer",
+    "list_transfers",
     "manager_recommend",
+    "preview_transfer",
+    "reason_choices",
     "reject_transfer",
     "request_transfer",
+    "transfer_instance",
+    "transferable_enrollment_choices",
     "transferred_amount",
     "validate_transfer",
 ]
