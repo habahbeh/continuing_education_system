@@ -6,8 +6,15 @@
   <h1>{{ name_ar }}</h1>
   <p class="note" dir="ltr">{{ number }}</p>
 
-  {# Only the fields the service projected reach this template. A field the
-     role may not see is absent from the response entirely (BR-101, T-283). #}
+  {% comment %}
+    Only the fields the service projected reach this template. A field the
+    role may not see is absent from the response entirely (BR-101, T-283).
+
+    A block comment and not a hash comment: Django's hash form is
+    SINGLE-LINE, so the second line of the old two-line version rendered as
+    visible page text — a developer note about BR-101 printed above the
+    participant's details. Found in the Sprint 8I browser pass.
+  {% endcomment %}
   <table class="tbl">
     <tbody>
       {% for key, label, value in rows %}

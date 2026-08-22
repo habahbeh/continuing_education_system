@@ -1094,8 +1094,10 @@ def _submit_transfer(request: HttpRequest, form: TransferRequestForm) -> str | N
     except ObjectDoesNotExist as exc:
         messages.error(request, _message_of(exc))
         return None
-    except DjangoValidationError as exc:
-        # The rule engine's own words, with the reference the centre needs.
+    except (DjangoValidationError, *transfer_service.PRICING_ERRORS) as exc:
+        # The rule engine's own words, with the reference the centre needs —
+        # and the pricing refusals beside them, which are plain Exceptions
+        # and answered with a 500 until Sprint 8I found it in the browser.
         messages.error(request, _message_of(exc))
         return None
 
@@ -1154,7 +1156,10 @@ def _handle_transfer_action(request: HttpRequest, code: str) -> HttpResponse | N
 
     try:
         _run_transfer_action(request, action, transfer)
-    except DjangoValidationError as exc:
+    except (DjangoValidationError, *transfer_service.PRICING_ERRORS) as exc:
+        # Executing re-prices the target course, so the same pricing refusals
+        # reach here. A settlement that cannot be priced is a message, not a
+        # traceback.
         messages.error(request, _message_of(exc))
 
     return redirect("operations:transfer-detail", code=code)

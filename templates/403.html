@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% comment %}
+  Django renders this for every PermissionDenied, and without it the answer
+  was the framework's bare `<h1>403 Forbidden</h1>` — unbranded, English, and
+  with no way back. Two audiences reach it and they need different sentences:
+
+  * A signed-in user who opened a screen their role does not hold. BR-080
+    denies by default, so this is ordinary and the page says so plainly; the
+    refusal is already on the audit trail (BR-085).
+  * A user whose session has expired. Q-12 ends a session after 30 minutes of
+    inactivity, and `policy.require` cannot tell that apart from a refusal —
+    it raises PermissionDenied either way. Before this page that meant a
+    working user idling through lunch came back to a blank English error with
+    no link to log in again.
+
+  Found in the Sprint 8I browser pass.
+{% endcomment %}
+
+{% block content %}
+<div class="card2">
+  <div class="card2-head"><h1>{% translate "لا صلاحية للوصول" %}</h1></div>
+  <div class="card2-body">
+    {% if user.is_authenticated %}
+      <div class="note warn">
+        {% translate "هذه الشاشة ليست ضمن صلاحيات دورك. الصلاحيات تُمنح بالدور لا بالطلب — راجع مدير النظام إن كنت تحتاجها." %}
+      </div>
+      <a class="btn2" href="{% url 'operations:dashboard' %}">{% translate "العودة إلى لوحة المؤشرات" %}</a>
+    {% else %}
+      <div class="note info">
+        {% translate "انتهت الجلسة أو لم تسجّل الدخول بعد. تُغلق الجلسة تلقائياً بعد مدة من عدم الاستخدام حمايةً للبيانات." %}
+      </div>
+      <a class="btn2 primary" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

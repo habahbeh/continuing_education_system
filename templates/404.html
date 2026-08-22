@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% comment %}
+  The same reasoning as 403.html: without this file a mistyped or stale link
+  answers with the framework's bare English page. Added in the Sprint 8I
+  browser pass so a wrong URL still leaves the user inside the system.
+{% endcomment %}
+
+{% block content %}
+<div class="card2">
+  <div class="card2-head"><h1>{% translate "الصفحة غير موجودة" %}</h1></div>
+  <div class="card2-body">
+    <div class="note">
+      {% translate "الرابط غير صحيح أو أن السجل المطلوب لم يعد موجوداً." %}
+    </div>
+    {% if user.is_authenticated %}
+      <a class="btn2" href="{% url 'operations:dashboard' %}">{% translate "العودة إلى لوحة المؤشرات" %}</a>
+    {% else %}
+      <a class="btn2" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

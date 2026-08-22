@@ -39,6 +39,17 @@
   .note.warn    { @apply border-warn/30 bg-warn-soft text-warn; }
   .note.danger  { @apply border-danger/30 bg-danger-soft text-danger; }
   .note.info    { @apply border-info/30 bg-info-soft text-info; }
+  /* Django's message tags are success/error/warning/debug, and `_messages.html`
+     prints them straight into the class attribute. Only `info` happened to
+     collide with a rule that existed, so every success and every refusal in
+     the system rendered in the same neutral grey box — a cashier could not
+     tell "تم الحفظ" from "مرفوض" without reading it. Found in the Sprint 8I
+     browser pass; aliased rather than renamed so the `.note.ok` / `.warn` /
+     `.danger` classes the templates use directly keep working. */
+  .note.success { @apply border-ok/30 bg-ok-soft text-ok; }
+  .note.warning { @apply border-warn/30 bg-warn-soft text-warn; }
+  .note.error   { @apply border-danger/30 bg-danger-soft text-danger; }
+  .note.debug   { @apply border-info/30 bg-info-soft text-info; }
 
   .kpi          { @apply bg-white border border-line rounded-xl p-4; }
   .kpi .label   { @apply text-xs text-ink-3 font-bold; }
@@ -46,8 +57,25 @@
 
   .calc-row     { @apply flex items-center justify-between px-3 py-2 border-b border-line-2; }
   .calc-row .val{ @apply font-bold tabular-nums; }
+  /* `.calc-row` began as a read-only calculation line and ten templates then
+     reused it to lay out FORMS — login and the participant form among them.
+     Only `.fld input` had ever been given a border, so on those screens the
+     inputs rendered with no box at all: invisible until focused, and the
+     login page shipped with a password field a user could not see. The rule
+     mirrors `.fld input` rather than inventing a second look. Found in the
+     Sprint 8I browser pass. */
+  .calc-row input,
+  .calc-row select,
+  .calc-row textarea
+                { @apply rounded-lg border border-line bg-white px-3 py-2 text-sm min-w-[16rem]; }
+  .calc-row input[type="checkbox"]
+                { @apply w-auto p-0; }
 
-  .btn2         { @apply inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-bold; }
+  /* `text-ink` is not decoration. Without it the button inherits its
+     colour, and inside `.topbar` — which sets white on maroon — the white
+     background then carries white text: the logout button rendered as an
+     empty white box. Found in the Sprint 8I browser pass. */
+  .btn2         { @apply inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-bold text-ink; }
   .btn2.primary { @apply bg-brand text-white border-brand; }
 
   .dl           { @apply grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm; }

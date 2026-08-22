@@ -177,9 +177,39 @@ def nav_for(user: Any) -> list[dict[str, Any]]:
     return groups
 
 
+def mark_active(groups: list[dict[str, Any]], path: str) -> list[dict[str, Any]]:
+    """
+    Flag the ONE entry the current page belongs to (Sprint 8I).
+
+    Longest matching prefix, and that is the whole subtlety. Two entries can
+    share a Screen — «الشركاء المتعاقدون» (/partners/) and «شريك جديد»
+    (/partners/new/) are both PARTNERS — so the template's old test on
+    ``item.screen == active_screen`` highlighted both at once. Matching on the
+    path alone is not enough either: an exact test leaves nothing lit on a
+    detail page like /partners/PRT-1/, and a plain prefix test lights the
+    parent AND the child on /partners/new/.
+
+    Taking the longest prefix answers all three: the child wins on its own
+    page, the parent wins on a detail page beneath it, and exactly one entry
+    is ever marked.
+    """
+    candidates = [
+        item["url"]
+        for group in groups
+        for item in group["items"]
+        if path == item["url"] or path.startswith(item["url"])
+    ]
+    best = max(candidates, key=len) if candidates else None
+    for group in groups:
+        for item in group["items"]:
+            item["is_active"] = item["url"] == best
+    return groups
+
+
 def navigation(request: Any) -> dict[str, Any]:
     """Context processor — every template gets the menu without asking."""
-    return {"nav_groups": nav_for(getattr(request, "user", None))}
+    groups = nav_for(getattr(request, "user", None))
+    return {"nav_groups": mark_active(groups, getattr(request, "path", ""))}
 
 
-__all__ = ["NAV", "NavGroup", "NavItem", "nav_for", "navigation"]
+__all__ = ["NAV", "NavGroup", "NavItem", "mark_active", "nav_for", "navigation"]

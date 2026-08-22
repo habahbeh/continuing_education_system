@@ -25,6 +25,7 @@ from typing import Any
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import OperationalError, transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.core.exceptions import ConcurrencyRetryExhausted
 from apps.core.services.audit_service import write_audit
@@ -152,9 +153,31 @@ def get_participant_display(
     participant = Participant.objects.get(participant_number=participant_number)
     labels = field_labels()
     return [
-        (name, labels.get(name, name), getattr(participant, name))
+        (name, labels.get(name, name), _readable(participant, name))
         for name in visible_fields_for(actor)
     ]
+
+
+def _readable(participant: Participant, name: str) -> Any:
+    """
+    The value as a person reads it, not as the column stores it.
+
+    The detail screen was printing ``UNIVERSITY``, ``NATIONAL_ID`` and
+    ``True`` at an Arabic-speaking registrar — the codes are the storage, and
+    the model already carries the Arabic for every one of them in its
+    ``choices``. Django generates ``get_<field>_display`` for exactly this;
+    booleans have no equivalent, so they get one here.
+
+    Found in the Sprint 8I browser pass.
+    """
+    display = getattr(participant, f"get_{name}_display", None)
+    if callable(display):
+        return display()
+
+    value = getattr(participant, name)
+    if isinstance(value, bool):
+        return _("نعم") if value else _("لا")
+    return value
 
 
 def get_editable(*, actor: Any, participant_number: str, request: Any = None) -> Participant:

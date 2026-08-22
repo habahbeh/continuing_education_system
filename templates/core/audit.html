@@ -39,7 +39,13 @@
       {% for e in events %}
         <tr>
           <td dir="ltr">{{ e.occurred_at|date:"Y/m/d H:i" }}</td>
-          <td>{{ e.actor.full_name_ar|default:e.actor.username|default:"—" }}</td>
+          {% comment %}
+            A system event has no actor, and `default:` resolves its ARGUMENT
+            eagerly — `e.actor.username` on a null actor raises
+            VariableDoesNotExist instead of being silenced, which took the
+            whole audit screen down with a 500. Sprint 8I browser pass.
+          {% endcomment %}
+          <td>{% if e.actor %}{{ e.actor.full_name_ar|default:e.actor.username }}{% else %}<span class="muted">{% translate "النظام" %}</span>{% endif %}</td>
           <td>{{ e.actor_role|default:"—" }}</td>
           <td>{{ e.action }}</td>
           <td>{{ e.entity_type }}</td>

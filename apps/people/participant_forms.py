@@ -35,7 +35,11 @@ class ParticipantForm(forms.Form):
     gender = forms.ChoiceField(
         choices=BLANK + list(Gender.choices), required=False, label=_("الجنس")
     )
-    date_of_birth = forms.DateField(required=False, label=_("تاريخ الميلاد"))
+    date_of_birth = forms.DateField(
+        required=False,
+        label=_("تاريخ الميلاد"),
+        widget=forms.DateInput({"type": "date"}),
+    )
 
     qualification = forms.ChoiceField(required=False, choices=[], label=_("المؤهل العلمي"))
     city = forms.ChoiceField(required=False, choices=[], label=_("المدينة"))
@@ -45,7 +49,9 @@ class ParticipantForm(forms.Form):
     email = forms.EmailField(required=False, label=_("البريد الإلكتروني"))
     employer = forms.CharField(max_length=150, required=False, label=_("جهة العمل"))
 
-    registered_on = forms.DateField(label=_("تاريخ التسجيل"))
+    registered_on = forms.DateField(
+        label=_("تاريخ التسجيل"), widget=forms.DateInput({"type": "date"})
+    )
 
     no_refund_pledge_accepted = forms.BooleanField(
         required=False, label=_("أقرّ بالتعهّد بعدم استرداد الرسوم")
@@ -55,7 +61,11 @@ class ParticipantForm(forms.Form):
     exemption_approval_ref = forms.CharField(
         max_length=64, required=False, label=_("رقم موافقة رئيس الجامعة")
     )
-    exemption_approval_date = forms.DateField(required=False, label=_("تاريخ الموافقة"))
+    exemption_approval_date = forms.DateField(
+        required=False,
+        label=_("تاريخ الموافقة"),
+        widget=forms.DateInput({"type": "date"}),
+    )
 
     #: BR-005 — filled in only when the user is confirming a known duplicate.
     duplicate_override_reason = forms.CharField(

@@ -2,7 +2,11 @@
 {% comment %}
   The sidebar. Entries come from apps/people/nav.py, which reads the
   permission matrix — this template decides nothing about who sees what.
-  `active_screen` is set by each view so the current entry can mark itself.
+  `is_active` is decided in nav.py against the request path, because two
+  entries can share one Screen — «الشركاء المتعاقدون» and «شريك جديد» are
+  both PARTNERS, since creation is an ACTION on that screen rather than a
+  screen of its own — and marking on the screen alone lit them both at once.
+  Found in the Sprint 8I browser pass.
 {% endcomment %}
 {% if nav_groups %}
   <nav class="sidebar" aria-label="{% translate 'التنقّل الرئيسي' %}">
@@ -10,9 +14,9 @@
       <div class="nav-group">
         <div class="nav-group-title">{{ group.title }}</div>
         {% for item in group.items %}
-          <a class="nav-item{% if item.screen == active_screen %} active{% endif %}"
+          <a class="nav-item{% if item.is_active %} active{% endif %}"
              href="{{ item.url }}"
-             {% if item.screen == active_screen %}aria-current="page"{% endif %}>
+             {% if item.is_active %}aria-current="page"{% endif %}>
             {{ item.label }}
           </a>
         {% endfor %}

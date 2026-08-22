@@ -32,6 +32,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.billing.services.account_service import ZERO
+from apps.catalog.services import pricing_service
 from apps.core.services.audit_service import write_audit
 from apps.core.services.settings_service import get_setting
 from apps.operations.models import (
@@ -53,6 +54,12 @@ ENTITY = "operations.Transfer"
 LECTURE_LIMIT_KEY = "transfer_lecture_limit"
 
 
+#: Pricing refuses in plain ``Exception`` subclasses rather than in
+#: ``ValidationError``, so every caller that prices something has to name them
+#: or wear a 500. The transfer screen learned that the hard way (Sprint 8I).
+PRICING_ERRORS = (pricing_service.NoEffectivePriceListError, pricing_service.ProgramNotPricedError)
+
+
 class TransferRuleError(ValidationError):
     """A transfer that BR-060 … BR-065 forbid."""
 
@@ -67,8 +74,6 @@ class AttendanceNotDocumentedError(TransferRuleError):
 
 
 def _quote_for(enrollment: Enrollment, cohort: Cohort, as_of: date) -> Any:
-    from apps.catalog.services import pricing_service
-
     return pricing_service.resolve_price(
         program=cohort.program,
         participant_category=enrollment.participant.category,
@@ -872,10 +877,22 @@ def preview_transfer(
         result["refusal"] = " · ".join(str(m) for m in refusal.messages)
         return result
 
+    try:
+        result["money"] = fee_difference_for(
+            from_enrollment=from_enrollment, to_cohort=to_cohort, as_of=as_of
+        )
+    except PRICING_ERRORS as unpriced:
+        # The rules pass and the arithmetic cannot be done: no approved price
+        # list covers the date, or the target programme has no item on it.
+        # ``NoEffectivePriceListError`` is a plain Exception rather than a
+        # ValidationError, so before Sprint 8I it escaped this function and
+        # the transfer screen answered a preview with a 500. A preview exists
+        # to report exactly this kind of "not yet" — it is an answer, not a
+        # crash.
+        result["refusal"] = str(unpriced)
+        return result
+
     result["allowed"] = True
-    result["money"] = fee_difference_for(
-        from_enrollment=from_enrollment, to_cohort=to_cohort, as_of=as_of
-    )
     return result
 
 
@@ -893,6 +910,7 @@ def transferred_amount(transfer: Transfer) -> Decimal:
 
 __all__ = [
     "LECTURE_LIMIT_KEY",
+    "PRICING_ERRORS",
     "AttendanceNotDocumentedError",
     "TransferRuleError",
     "destination_cohort_choices",
