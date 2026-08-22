@@ -75,6 +75,18 @@ class NoEnrollmentError(Exception):
     """A balance with nowhere to land cannot be approved."""
 
 
+class NotACreditError(Exception):
+    """The two credit outcomes belong to credits alone."""
+
+
+class AlreadyResolvedError(Exception):
+    """The credit has already been carried forward or declared refundable."""
+
+
+class NotALaterRegistrationError(Exception):
+    """Client decision 1 — a credit is carried forward, never backward."""
+
+
 # ---------------------------------------------------------------------------
 # 1 · Propose
 # ---------------------------------------------------------------------------
@@ -235,17 +247,25 @@ def review(
     actor: Any,
     balance: OpeningBalance,
     enrollment: Any = None,
+    participant: Any = None,
     note_ar: str,
     request: Any = None,
 ) -> OpeningBalance:
     """
     A second person checks the figure against its source. Still no ledger row.
 
-    This is also where the enrolment is usually attached: working out which
-    live enrolment an old debt belongs to is the reviewer's job, and it is a
-    judgement, not a lookup. Nothing is matched automatically — the archive
-    holds eight legacy numbers carrying two different names, and a matcher
-    that guessed would attach one person's debt to another's account.
+    This is also where the enrolment and the participant are attached: working
+    out whose old debt this is, and which live enrolment it belongs to, is the
+    reviewer's job and it is a judgement, not a lookup. Nothing is matched
+    automatically — the archive holds eight legacy numbers carrying two
+    different names, and a matcher that guessed would attach one person's debt
+    to another's account.
+
+    The participant is recorded separately from the enrolment (Sprint 8D-3)
+    because client decision 2 blocks the PERSON from a clearance, and a debt
+    whose owner never registered again has no enrolment to be found through.
+    Passing the enrolment alone fills in its participant, since that link is
+    itself already reviewed; nothing is inferred from a name or a number.
     """
     policy.require(actor, Screen.OPENING_BALANCES, Action.EDIT, request=request)
 
@@ -261,13 +281,24 @@ def review(
         raise ValidationError("ملاحظة المراجعة إلزامية — ماذا قابلتَ الرقم به؟")
 
     return _apply_review(
-        actor=actor, balance=balance, enrollment=enrollment, note_ar=note_ar, request=request
+        actor=actor,
+        balance=balance,
+        enrollment=enrollment,
+        participant=participant,
+        note_ar=note_ar,
+        request=request,
     )
 
 
 @transaction.atomic
 def _apply_review(
-    *, actor: Any, balance: OpeningBalance, enrollment: Any, note_ar: str, request: Any
+    *,
+    actor: Any,
+    balance: OpeningBalance,
+    enrollment: Any,
+    participant: Any,
+    note_ar: str,
+    request: Any,
 ) -> OpeningBalance:
     fields = ["status", "reviewed_by", "reviewed_at", "review_note_ar"]
     balance.status = OpeningBalanceStatus.REVIEWED
@@ -277,6 +308,12 @@ def _apply_review(
     if enrollment is not None:
         balance.enrollment = enrollment
         fields.append("enrollment")
+    # Taken from the enrolment when one is given — that link was reviewed by a
+    # person too, so following it is not a guess.
+    resolved_participant = participant or getattr(enrollment, "participant", None)
+    if resolved_participant is not None:
+        balance.participant = resolved_participant
+        fields.append("participant")
     balance.save(update_fields=fields)
 
     write_audit(
@@ -289,6 +326,7 @@ def _apply_review(
         changes={
             "status": OpeningBalanceStatus.REVIEWED,
             "enrollment": getattr(enrollment, "code", ""),
+            "participant": getattr(resolved_participant, "participant_number", ""),
             "note_ar": balance.review_note_ar,
             "ledger_effect": "لا شيء — المراجعة لا تُنشئ بنداً",
         },
@@ -490,6 +528,179 @@ def _write_charge_line(*, actor: Any, balance: OpeningBalance, request: Any) -> 
 
 
 # ---------------------------------------------------------------------------
+# 5 · What becomes of a CREDIT — client decision 1 (Sprint 8D-3)
+# ---------------------------------------------------------------------------
+def carry_forward(
+    *, actor: Any, balance: OpeningBalance, enrollment: Any, note_ar: str, request: Any = None
+) -> OpeningBalance:
+    """
+    Apply an approved credit to a LATER registration.
+
+    «إذا كان الطالب سجّل مواد لاحقاً، يُرحَّل له الرصيد على ذلك التسجيل.»
+
+    No receipt is created, and that is the point. The centre never received
+    this money through this system, so there is nothing to issue a receipt
+    for; what exists is an acknowledged obligation, and applying it reduces
+    what the participant owes on the new enrolment. ``get_account_state``
+    carries it as its own term, so it can never be mistaken for a payment or
+    counted as revenue.
+
+    "Later" is enforced rather than assumed: the enrolment must have been
+    entered on or after the date the credit is stated as of. Applying a 2022
+    credit to a 2021 enrolment would be rewriting a closed year.
+    """
+    policy.require(actor, Screen.OPENING_BALANCES, Action.APPROVE, request=request)
+
+    _guard_credit_outcome(balance)
+    if enrollment is None:
+        raise NoEnrollmentError("لا ترحيل بلا تسجيل لاحق يُرحَّل إليه الرصيد.")
+    if not note_ar.strip():
+        raise ValidationError("مسوّغ الترحيل إلزامي.")
+
+    enrolled_on = getattr(enrollment, "enrolled_on", None)
+    if enrolled_on is not None and enrolled_on < balance.as_of:
+        raise NotALaterRegistrationError(
+            f"التسجيل {enrollment.code} مؤرخ {enrolled_on} وهو أسبق من تاريخ الرصيد "
+            f"{balance.as_of} — الرصيد يُرحَّل إلى تسجيل لاحق لا سابق."
+        )
+
+    return _resolve_credit(
+        actor=actor,
+        balance=balance,
+        status=OpeningBalanceStatus.APPLIED,
+        enrollment=enrollment,
+        note_ar=note_ar,
+        request=request,
+    )
+
+
+def mark_refund_due(
+    *, actor: Any, balance: OpeningBalance, note_ar: str, request: Any = None
+) -> OpeningBalance:
+    """
+    Declare that the centre owes this money back in cash.
+
+    «إذا لم يكن للطالب تسجيل لاحق، يُعاد له الرصيد.»
+
+    The declaration is the whole of it. Handing the cash over is a movement
+    the cashbox records when it actually happens, with a real document and a
+    real date — this service will not manufacture one, because a refund
+    receipt for money that never arrived is exactly the invention Sprint 8D-1
+    refused. What this creates is a standing, audited obligation that the
+    screen shows until somebody settles it.
+    """
+    policy.require(actor, Screen.OPENING_BALANCES, Action.APPROVE, request=request)
+
+    _guard_credit_outcome(balance)
+    if not note_ar.strip():
+        raise ValidationError("مسوّغ الردّ إلزامي — لماذا لا يُرحَّل الرصيد؟ (لا تسجيل لاحق؟)")
+
+    return _resolve_credit(
+        actor=actor,
+        balance=balance,
+        status=OpeningBalanceStatus.REFUND_DUE,
+        enrollment=None,
+        note_ar=note_ar,
+        request=request,
+    )
+
+
+def _guard_credit_outcome(balance: OpeningBalance) -> None:
+    """Shared refusals for both outcomes, checked before any transaction."""
+    if balance.direction != OpeningBalanceDirection.CREDIT:
+        raise NotACreditError(
+            f"الرصيد {balance.code} ذمة لا رصيد دائن — الترحيل والردّ للأرصدة الدائنة وحدها."
+        )
+    if balance.status in {OpeningBalanceStatus.APPLIED, OpeningBalanceStatus.REFUND_DUE}:
+        raise AlreadyResolvedError(
+            f"الرصيد {balance.code} مُسوّى سلفاً ({balance.get_status_display()}) — "
+            "التسوية مرة واحدة، وإلا نال المشارك رصيده مرتين."
+        )
+    if balance.status != OpeningBalanceStatus.APPROVED:
+        raise OpeningBalanceStateError(
+            f"لا تُسوّى إلا الأرصدة المعتمَدة — حالة {balance.code} الآن "
+            f"{balance.get_status_display()}."
+        )
+
+
+@transaction.atomic
+def _resolve_credit(
+    *,
+    actor: Any,
+    balance: OpeningBalance,
+    status: str,
+    enrollment: Any,
+    note_ar: str,
+    request: Any,
+) -> OpeningBalance:
+    """The write half — permission and state already decided by the caller."""
+    fields = ["status", "resolved_by", "resolved_at", "resolution_note_ar"]
+    balance.status = status
+    balance.resolved_by = actor
+    balance.resolved_at = timezone.now()
+    balance.resolution_note_ar = note_ar.strip()[:255]
+    if enrollment is not None:
+        balance.enrollment = enrollment
+        fields.append("enrollment")
+    balance.save(update_fields=fields)
+
+    write_audit(
+        action="UPDATE",
+        entity_type=ENTITY,
+        entity_id=str(balance.pk),
+        reference=balance.code,
+        summary_ar=(f"تسوية رصيد دائن {balance.amount} — {balance.get_status_display()}"),
+        actor=actor,
+        changes={
+            "status": status,
+            "enrollment": getattr(enrollment, "code", ""),
+            "note_ar": balance.resolution_note_ar,
+            "receipt_created": "لا — لم يُنشأ سند قبض عن مال لم يستلمه النظام",
+            "ledger_effect": (
+                "يخفض ما على التسجيل عبر معادلة الرصيد"
+                if status == OpeningBalanceStatus.APPLIED
+                else "لا شيء — التزام قائم حتى يُدفع نقداً بسند حقيقي"
+            ),
+        },
+        request=request,
+    )
+    return balance
+
+
+# ---------------------------------------------------------------------------
+# 6 · The clearance guard — client decision 2 (Sprint 8D-3)
+# ---------------------------------------------------------------------------
+def unsettled_debt_for(participant: Any) -> list[OpeningBalance]:
+    """
+    Old debts that must stop this participant being cleared.
+
+    «الذمة القديمة تبقى معلّقة، ولا يُمنح براءة ذمة ولا شهادة حتى تُسدَّد.»
+
+    Deliberately NOT a permission-gated read: it is called from inside the
+    clearance step, on behalf of whoever is certifying it, and adding a second
+    screen's permission there would refuse a finance officer the answer to a
+    question their own screen is asking.
+
+    Only debts the balance equation cannot see are returned — see
+    ``OpeningBalance.blocks_clearance``. A posted debt is already a charge
+    line, and BR-073 stops the clearance on it under its own rule.
+    """
+    if participant is None:
+        return []
+    return [
+        balance
+        for balance in OpeningBalance.objects.filter(
+            participant=participant, direction=OpeningBalanceDirection.RECEIVABLE
+        ).exclude(status__in=[OpeningBalanceStatus.POSTED, OpeningBalanceStatus.REJECTED])
+        if balance.blocks_clearance
+    ]
+
+
+def unsettled_debt_total(participant: Any) -> Decimal:
+    return sum((balance.amount for balance in unsettled_debt_for(participant)), ZERO)
+
+
+# ---------------------------------------------------------------------------
 # Reads (A-05 — the screens ask here, never the models)
 # ---------------------------------------------------------------------------
 def list_balances(
@@ -499,7 +710,14 @@ def list_balances(
 
     policy.require(actor, Screen.OPENING_BALANCES, Action.VIEW, request=request)
     queryset = OpeningBalance.objects.select_related(
-        "created_by", "reviewed_by", "approved_by", "posted_by", "enrollment", "posted_charge_line"
+        "created_by",
+        "reviewed_by",
+        "approved_by",
+        "posted_by",
+        "resolved_by",
+        "participant",
+        "enrollment",
+        "posted_charge_line",
     )
     if status:
         queryset = queryset.filter(status=status)
@@ -528,6 +746,10 @@ def list_balances(
             "review_note_ar": balance.review_note_ar,
             "decision_note_ar": balance.decision_note_ar,
             "is_postable": balance.is_postable,
+            "is_resolvable_credit": balance.is_resolvable_credit,
+            "resolved_by": person_name(balance.resolved_by),
+            "resolution_note_ar": balance.resolution_note_ar,
+            "participant_number": text_of(balance.participant, "participant_number"),
             "credit_blocked": balance.direction == OpeningBalanceDirection.CREDIT,
         }
         for balance in queryset
@@ -559,6 +781,10 @@ def totals(*, actor: Any, request: Any = None) -> dict[str, Any]:
         "reviewed": _sum(status=OpeningBalanceStatus.REVIEWED),
         "approved_not_posted": _sum(status=OpeningBalanceStatus.APPROVED),
         "posted": _sum(status=OpeningBalanceStatus.POSTED),
+        # Sprint 8D-3 — the two ends a credit can come to, shown apart. One
+        # reduces a later bill; the other is cash the centre still owes.
+        "credit_applied": _sum(status=OpeningBalanceStatus.APPLIED),
+        "refund_due": _sum(status=OpeningBalanceStatus.REFUND_DUE),
         "credit_carried": _sum(direction=OpeningBalanceDirection.CREDIT),
     }
 
@@ -579,14 +805,19 @@ def direction_choices() -> list[tuple[str, str]]:
 
 __all__ = [
     "AlreadyPostedError",
+    "AlreadyResolvedError",
     "CreditNotPostableError",
     "NoEnrollmentError",
+    "NotACreditError",
+    "NotALaterRegistrationError",
     "OpeningBalanceStateError",
     "SeparationOfDutiesError",
     "approve",
     "balance_instance",
+    "carry_forward",
     "direction_choices",
     "list_balances",
+    "mark_refund_due",
     "post",
     "propose_from_archive",
     "propose_manually",
@@ -594,4 +825,6 @@ __all__ = [
     "review",
     "status_choices",
     "totals",
+    "unsettled_debt_for",
+    "unsettled_debt_total",
 ]

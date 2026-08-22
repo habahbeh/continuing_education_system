@@ -307,12 +307,20 @@ OPENING_BALANCE_ACTIONS = {
     "approve": Action.APPROVE,
     "reject": Action.APPROVE,
     "post": Action.APPROVE,
+    # Sprint 8D-3 — resolving a credit is the manager's act too. It writes no
+    # ledger row, but it decides who ends up with money, which is the same
+    # weight of decision.
+    "carry-forward": Action.APPROVE,
+    "refund-due": Action.APPROVE,
 }
 
 #: Every business refusal this screen can meet, so a rule arrives as a message
 #: carrying its own reference while a role violation stays a 403.
 OPENING_BALANCE_REFUSALS = (
     opening_balance_service.AlreadyPostedError,
+    opening_balance_service.AlreadyResolvedError,
+    opening_balance_service.NotACreditError,
+    opening_balance_service.NotALaterRegistrationError,
     opening_balance_service.CreditNotPostableError,
     opening_balance_service.NoEnrollmentError,
     opening_balance_service.OpeningBalanceStateError,
@@ -460,6 +468,21 @@ def _advance_opening_balance(request: HttpRequest, action: str) -> HttpResponse 
             actor=request.user, balance=balance, note_ar=note, request=request
         )
         messages.success(request, _("رُفض الرصيد"))
+    elif action == "carry-forward":
+        code = request.POST.get("enrollment_code", "").strip()
+        opening_balance_service.carry_forward(
+            actor=request.user,
+            balance=balance,
+            enrollment=_enrollment(request, code) if code else None,
+            note_ar=note,
+            request=request,
+        )
+        messages.success(request, _("رُحّل الرصيد الدائن إلى التسجيل اللاحق — بلا سند قبض"))
+    elif action == "refund-due":
+        opening_balance_service.mark_refund_due(
+            actor=request.user, balance=balance, note_ar=note, request=request
+        )
+        messages.success(request, _("سُجّل الرصيد مستحقاً للردّ نقداً — الصرف بسند حقيقي لاحقاً"))
     else:
         line = opening_balance_service.post(actor=request.user, balance=balance, request=request)
         messages.success(

@@ -34,6 +34,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.billing.services import opening_balance_service
 from apps.billing.services.account_service import ZERO, get_account_state
 from apps.core.services.audit_service import write_audit
 from apps.core.services.settings_service import get_setting
@@ -361,6 +362,20 @@ def certify_finance_step(*, actor: Any, clearance: Clearance, request: Any = Non
     balance = get_account_state(enrollment).balance
     deposit = deposit_settlement_state(enrollment)
 
+    # Sprint 8D-3 · client decision 2 — «لا يُمنح براءة ذمة ولا شهادة حتى
+    # تُسدَّد الذمة القديمة». Checked BEFORE the balance, because an old debt
+    # is the more specific reason and the participant deserves to be told the
+    # real one. Only debts the balance cannot see reach here: a posted
+    # opening balance is already a charge line and falls to BR-073 below.
+    old_debt = opening_balance_service.unsettled_debt_for(enrollment.participant)
+    if old_debt:
+        total = sum((item.amount for item in old_debt), ZERO)
+        _block_on_old_debt(actor=actor, clearance=clearance, debts=old_debt, request=request)
+        raise ClearanceBlockedError(
+            f"براءة الذمة موقوفة — ذمة قديمة غير مسدَّدة بمقدار {total} "
+            f"على {len(old_debt)} رصيد افتتاحي (BR-073 · BR-094)."
+        )
+
     if balance != ZERO:
         _block(actor=actor, clearance=clearance, balance=balance, request=request)
         raise ClearanceBlockedError(_balance_message(balance))
@@ -373,6 +388,36 @@ def certify_finance_step(*, actor: Any, clearance: Clearance, request: Any = Non
 
     return _certify_finance(
         actor=actor, clearance=clearance, balance=balance, deposit=deposit, request=request
+    )
+
+
+@transaction.atomic
+def _block_on_old_debt(*, actor: Any, clearance: Clearance, debts: list[Any], request: Any) -> None:
+    """
+    Park the clearance and say which debts did it.
+
+    The codes are listed rather than summarised: the participant standing at
+    the counter is entitled to know which balance to argue about, and a total
+    on its own is unanswerable.
+    """
+    if clearance.status != ClearanceStatus.BLOCKED:
+        clearance.status = ClearanceStatus.BLOCKED
+        clearance.save(update_fields=["status", "active_key"])
+
+    total = sum((item.amount for item in debts), ZERO)
+    write_audit(
+        action="DENIED_ATTEMPT",
+        entity_type=ENTITY,
+        entity_id=str(clearance.pk),
+        reference=clearance.code,
+        summary_ar=f"محاولة إغلاق الخطوة المالية وعلى المشارك ذمة قديمة {total}",
+        actor=actor,
+        denial_rule="BR-094",
+        changes={
+            "old_debt_total": str(total),
+            "opening_balances": ", ".join(item.code for item in debts),
+        },
+        request=request,
     )
 
 

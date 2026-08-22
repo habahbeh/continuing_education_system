@@ -110,12 +110,21 @@ def revenue_report(
             kind = enrollment.cohort.program.program_type
             by_program_type[kind] = by_program_type.get(kind, ZERO) + allocation.amount
 
+    # Sprint 8D-3 · client decision 3 — «يُدرج تحصيل ذمم السنوات السابقة
+    # بنداً مستقلاً لا ضمن إيراد السنة الجارية». Split by CHARGE TYPE, which
+    # is what the ledger already records, rather than by weakening the
+    # ``is_revenue`` constraint that C-21 depends on. The cash is real and it
+    # arrived in this period; what it is NOT is this period's business.
+    prior_year_settlements = by_type.get(ChargeType.OPENING_BALANCE, ZERO)
+
     return {
         "number": 1,
         "title": REPORT_TITLES[1],
         "date_from": date_from,
         "date_to": date_to,
         "total": total,
+        "prior_year_settlements": prior_year_settlements,
+        "current_period_total": total - prior_year_settlements,
         "registration_total": by_type.get(ChargeType.REGISTRATION, ZERO),
         "tuition_total": by_type.get(ChargeType.TUITION, ZERO),
         "extra_fee_total": by_type.get(ChargeType.EXTRA_FEE, ZERO),
@@ -151,7 +160,23 @@ def net_income_report(
     from apps.settlements.models import ClaimStatus, PartnerClaim
 
     revenue = revenue_report(actor=actor, date_from=date_from, date_to=date_to, request=request)
-    collected = revenue["total"] - revenue["deposit_total"]
+
+    # Sprint 8D-3 · client decision 3. Two subtractions, for two different
+    # reasons, and conflating them would be an accounting error rather than a
+    # presentation one:
+    #
+    #   * deposits are not income at all — money held on someone's behalf
+    #     (C-21);
+    #   * prior-year settlements ARE income, but they are last year's. Cash
+    #     recovered on a 2022 arrear does not tell the reader anything about
+    #     how the centre traded this month, which is the question §9.2 asks.
+    #
+    # So net income is computed on ordinary current-period collections, and
+    # the recovered arrears are reported beside it with their own total. The
+    # cash that actually came through the door is ``total_cash_in``, and it is
+    # shown too — hiding it would be its own kind of lie.
+    prior_year_settlements = revenue["prior_year_settlements"]
+    collected = revenue["total"] - revenue["deposit_total"] - prior_year_settlements
 
     claims = PartnerClaim.objects.filter(
         status__in=(ClaimStatus.APPROVED, ClaimStatus.PAID),
@@ -178,6 +203,8 @@ def net_income_report(
         "date_to": date_to,
         "collected": collected,
         "deposits_excluded": revenue["deposit_total"],
+        "prior_year_settlements": prior_year_settlements,
+        "total_cash_in": collected + prior_year_settlements,
         "partner_total": partner_total,
         "by_partner": sorted(by_partner.items()),
         "expenses_total": expenses_total,

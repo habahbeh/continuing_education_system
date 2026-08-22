@@ -53,19 +53,23 @@ class ChargeType(models.TextChoices):
 #: BR-022 — the order a payment is consumed in. Deposit sits between
 #: consumables and tuition and appears only when the programme has a policy.
 #:
-#: The opening balance sits LAST, and the position is a decision rather than
-#: an append. A participant handing over money for this term is paying for
-#: this term; clearing a 2022 arrear first would take their tuition payment
-#: and apply it to a debt they may not even accept yet. The centre chases
-#: arrears deliberately, through report 4, not as a side effect of the till.
+#: **The opening balance is FIRST, by the client's decision (Sprint 8D-3).**
+#:
+#: Sprint 8D-2 put it last and argued the case: money handed over for this
+#: term is for this term, and clearing an old arrear from it takes a payment
+#: the participant may think is buying something else. The centre decided the
+#: other way, and their reasoning governs — an old debt is the debt most at
+#: risk of never being collected, and a participant paying anything at all is
+#: the moment to recover it. It is recorded here as a decision and not as a
+#: default so that the next person to read this order knows it was chosen.
 ALLOCATION_ORDER: tuple[str, ...] = (
+    ChargeType.OPENING_BALANCE,
     ChargeType.REGISTRATION,
     ChargeType.CONSUMABLES,
     ChargeType.DEPOSIT,
     ChargeType.TUITION,
     ChargeType.EXTRA_FEE,
     ChargeType.TRANSFER_DIFFERENCE,
-    ChargeType.OPENING_BALANCE,
 )
 
 
@@ -614,15 +618,25 @@ class OpeningBalanceStatus(models.TextChoices):
     DRAFT = "DRAFT", _("مسودة")
     REVIEWED = "REVIEWED", _("مُراجَع")
     APPROVED = "APPROVED", _("معتمَد")
+    #: A RECEIVABLE reached the ledger as a charge line.
     POSTED = "POSTED", _("مُرحَّل إلى الدفتر")
+    #: Sprint 8D-3 · client decision 1 — a CREDIT carried forward onto a later
+    #: registration. It reduces what that enrolment must pay, and it does so
+    #: through the balance equation rather than through an invented receipt.
+    APPLIED = "APPLIED", _("مُرحَّل لتسجيل لاحق")
+    #: Sprint 8D-3 · client decision 1 — a CREDIT with no later registration.
+    #: The centre owes cash back; the obligation stands until it is paid, and
+    #: paying it is a cash movement the cashbox records when it happens.
+    REFUND_DUE = "REFUND_DUE", _("مستحق الردّ نقداً")
     REJECTED = "REJECTED", _("مرفوض")
 
 
 class OpeningBalanceDirection(models.TextChoices):
     #: The participant owes the centre. Posts a charge line.
     RECEIVABLE = "RECEIVABLE", _("ذمة على المشارك")
-    #: The centre owes the participant. Recorded and reviewed; NOT postable in
-    #: Sprint 8D-2 — see ``OpeningBalance`` below for why.
+    #: The centre owes the participant. Never posted as a charge line; Sprint
+    #: 8D-3 resolves it either onto a later registration (APPLIED) or as cash
+    #: the centre must hand back (REFUND_DUE).
     CREDIT = "CREDIT", _("رصيد دائن للمشارك")
 
 
@@ -703,6 +717,26 @@ class OpeningBalance(models.Model):
         verbose_name=_("التسجيل"),
     )
 
+    #: Sprint 8D-3 · client decision 2 — an unpaid old debt must stop the
+    #: PARTICIPANT getting a clearance or a certificate, and a participant is
+    #: not an enrolment. A debt whose owner never registered again has no
+    #: enrolment to hang on, yet still has to block them if they ever come
+    #: back; and a debt attached to one enrolment must block a clearance on
+    #: another. So the person is recorded separately from the account.
+    #:
+    #: Set by the reviewer, by hand, exactly like ``enrollment``. Nothing here
+    #: matches a participant automatically: eight legacy numbers in the
+    #: delivered workbooks carry two different names, and a matcher that
+    #: guessed would attach one person's debt to another's file.
+    participant = models.ForeignKey(
+        "people.Participant",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances",
+        verbose_name=_("المشارك"),
+    )
+
     status = ShortCode(
         choices=OpeningBalanceStatus.choices,
         default=OpeningBalanceStatus.DRAFT,
@@ -759,6 +793,24 @@ class OpeningBalance(models.Model):
         verbose_name=_("رحّله"),
     )
     posted_at = models.DateTimeField(null=True, blank=True)
+
+    # --- Sprint 8D-3 · how a CREDIT ended -----------------------------------
+    #: Stamped when a credit is carried forward or declared refundable. Kept
+    #: apart from the posting stamps because they are different acts with
+    #: different consequences, and flattening them would make the audit read
+    #: as though a credit had reached the ledger.
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opening_balances_resolved",
+        verbose_name=_("سوّاه"),
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_note_ar = models.CharField(
+        max_length=255, blank=True, verbose_name=_("مسوّغ التسوية")
+    )
 
     class Meta:
         verbose_name = _("رصيد افتتاحي")
@@ -825,13 +877,45 @@ class OpeningBalance(models.Model):
                 | models.Q(status=OpeningBalanceStatus.POSTED),
                 name="billing_opening_balance_line_implies_posted",
             ),
-            # Sprint 8D-2 scope, in the database as well as the service: a
-            # credit cannot reach the ledger, because posting one would mean
+            # A credit never reaches the ledger as a charge line, in the
+            # database as well as in the service: posting one would mean
             # inventing a receipt for money never received.
             models.CheckConstraint(
                 condition=~models.Q(direction=OpeningBalanceDirection.CREDIT)
                 | models.Q(posted_charge_line__isnull=True),
                 name="billing_opening_balance_credit_is_not_posted",
+            ),
+            # Sprint 8D-3 — and the two credit outcomes belong to credits
+            # alone. A receivable that somehow reached APPLIED would silently
+            # reduce an enrolment's balance by a debt.
+            models.CheckConstraint(
+                condition=~models.Q(
+                    status__in=[
+                        OpeningBalanceStatus.APPLIED,
+                        OpeningBalanceStatus.REFUND_DUE,
+                    ]
+                )
+                | models.Q(direction=OpeningBalanceDirection.CREDIT),
+                name="billing_opening_balance_credit_outcomes_are_credits",
+            ),
+            # Both outcomes name who decided and when — the same rule the
+            # posting stamps carry, for the same reason.
+            models.CheckConstraint(
+                condition=~models.Q(
+                    status__in=[
+                        OpeningBalanceStatus.APPLIED,
+                        OpeningBalanceStatus.REFUND_DUE,
+                    ]
+                )
+                | (models.Q(resolved_by__isnull=False) & models.Q(resolved_at__isnull=False)),
+                name="billing_opening_balance_resolution_is_stamped",
+            ),
+            # A carried-forward credit lands on a named enrolment. Without one
+            # it reduces nothing and the status is a claim about nowhere.
+            models.CheckConstraint(
+                condition=~models.Q(status=OpeningBalanceStatus.APPLIED)
+                | models.Q(enrollment__isnull=False),
+                name="billing_opening_balance_applied_has_enrollment",
             ),
             # One balance per archived row. A second proposal from the same
             # source is a duplicate, and duplicates are how a debt gets
@@ -844,6 +928,7 @@ class OpeningBalance(models.Model):
         ]
         indexes = [
             models.Index(fields=["status"], name="bil_ob_status_idx"),
+            models.Index(fields=["participant", "status"], name="bil_ob_part_status_idx"),
             models.Index(fields=["direction", "status"], name="bil_ob_dir_status_idx"),
             models.Index(fields=["enrollment"], name="bil_ob_enrollment_idx"),
             models.Index(fields=["source_legacy_number"], name="bil_ob_legacy_idx"),
@@ -861,3 +946,29 @@ class OpeningBalance(models.Model):
             and self.enrollment_id is not None
             and self.posted_charge_line_id is None
         )
+
+    @property
+    def is_resolvable_credit(self) -> bool:
+        """An approved credit still waiting to be carried forward or refunded."""
+        return (
+            self.status == OpeningBalanceStatus.APPROVED
+            and self.direction == OpeningBalanceDirection.CREDIT
+        )
+
+    @property
+    def blocks_clearance(self) -> bool:
+        """
+        Sprint 8D-3 · client decision 2 — an old debt that is still owed.
+
+        REJECTED does not block: somebody looked and said no. POSTED does not
+        block HERE either, because a posted line is already in the balance
+        equation and BR-073 catches it there; double-blocking would report the
+        same debt twice and under the wrong rule. What blocks is the debt that
+        the balance cannot see — proposed, reviewed or approved and not yet
+        posted, and therefore invisible to every existing guard.
+        """
+        return self.direction == OpeningBalanceDirection.RECEIVABLE and self.status in {
+            OpeningBalanceStatus.DRAFT,
+            OpeningBalanceStatus.REVIEWED,
+            OpeningBalanceStatus.APPROVED,
+        }

@@ -197,10 +197,14 @@ def test_the_new_charge_type_is_in_the_allocation_order() -> None:
     """
     BR-022 — a charge type missing from the order can never be paid.
 
-    Last, on purpose: money handed over for this term should not silently
-    clear a 2022 arrear the participant may not have accepted yet.
+    FIRST, by the client's decision in Sprint 8D-3. This test asserted LAST
+    when 8D-2 wrote it, on the argument that money handed over for this term
+    is for this term; the centre decided the other way, because an old debt is
+    the one most at risk of never being collected. The reversal is recorded
+    here rather than quietly edited, so the next reader knows the position was
+    chosen twice and by whom.
     """
     from apps.billing.models import ALLOCATION_ORDER, ChargeType
 
     assert set(ALLOCATION_ORDER) == set(ChargeType.values)
-    assert ALLOCATION_ORDER[-1] == ChargeType.OPENING_BALANCE
+    assert ALLOCATION_ORDER[0] == ChargeType.OPENING_BALANCE

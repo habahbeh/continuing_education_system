@@ -49,6 +49,13 @@ class AccountState:
 
     unallocated_credit: Decimal
 
+    #: Sprint 8D-3 · client decision 1 — a historical credit carried forward
+    #: onto this enrolment. It is money the centre already owed the
+    #: participant, so it reduces what they must pay here; it is NOT money
+    #: received, so it is not ``total_paid`` and it never becomes revenue.
+    #: Keeping it as its own term is what stops it being mistaken for either.
+    opening_credit_applied: Decimal
+
     @property
     def is_settled(self) -> bool:
         """BR-073 — clearance needs exactly zero, in either direction."""
@@ -75,7 +82,14 @@ def get_account_state(enrollment: Any) -> AccountState:
     Voided charge lines and voided receipts are excluded rather than deleted —
     a void is a reversing entry, and the original stays visible (BR-025).
     """
-    from apps.billing.models import ChargeLine, DepositForfeiture, DepositReturn
+    from apps.billing.models import (
+        ChargeLine,
+        DepositForfeiture,
+        DepositReturn,
+        OpeningBalance,
+        OpeningBalanceDirection,
+        OpeningBalanceStatus,
+    )
     from apps.cashbox.models import PaymentAllocation, ReceiptStatus
 
     live_lines = ChargeLine.objects.filter(enrollment=enrollment, voided=False)
@@ -91,7 +105,21 @@ def get_account_state(enrollment: Any) -> AccountState:
     )
     total_paid = _sum(live_allocations, "amount")
 
-    balance = total_due - total_discount - total_paid
+    # Sprint 8D-3 — a credit the centre carried forward from before the system
+    # existed. Deliberately NOT modelled as a payment: no money arrived
+    # through this system, and inventing a receipt for it is the fabrication
+    # the whole archive boundary exists to prevent. It is a fifth term in the
+    # equation instead, visible in its own right on the statement.
+    opening_credit_applied = _sum(
+        OpeningBalance.objects.filter(
+            enrollment=enrollment,
+            direction=OpeningBalanceDirection.CREDIT,
+            status=OpeningBalanceStatus.APPLIED,
+        ),
+        "amount",
+    )
+
+    balance = total_due - total_discount - total_paid - opening_credit_applied
 
     # BR-093 — the partner's base is the NET portion of what was actually
     # collected against shareable lines. Cash basis (BR-044): what was
@@ -134,6 +162,7 @@ def get_account_state(enrollment: Any) -> AccountState:
         revenue=revenue,
         deposit_liability=deposit_liability,
         unallocated_credit=unallocated,
+        opening_credit_applied=opening_credit_applied,
     )
 
 
