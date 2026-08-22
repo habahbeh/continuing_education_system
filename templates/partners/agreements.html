@@ -5,6 +5,11 @@
 <div class="note info">
   {% translate "النظام يدعم ثلاثة نماذج تعاقد ولا يثبّت أياً منها في الكود — تُعرض بنود كل اتفاقية كما وُقّعت." %}
 </div>
+{% if can_create %}
+  <form class="toolbar">
+    <a class="btn2" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>
+  </form>
+{% endif %}
 <div class="card2">
   <table class="tbl">
     <thead><tr>

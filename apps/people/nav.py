@@ -36,9 +36,21 @@ from apps.people.permissions.matrix import allowed_actions
 
 @dataclass(frozen=True)
 class NavItem:
+    """
+    One menu entry, and the permission that earns it.
+
+    ``action`` exists because not every screen's entry is a VIEW. Recording a
+    partner is ``C`` on the partners screen — there is no PARTNER_NEW row in
+    the matrix — so an entry filtered on VIEW would offer the finance officer
+    and the audit account, who hold ``V P`` there, a link to a page that
+    refuses them. VIEW remains the default because it is what almost every
+    entry means.
+    """
+
     screen: str
     route: str
     label: Any
+    action: str = Action.VIEW
 
 
 @dataclass(frozen=True)
@@ -95,7 +107,13 @@ NAV: tuple[NavGroup, ...] = (
         _("الشركاء والمخالصات"),
         (
             NavItem(Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),
+            # Sprint 8F — creation is an ACTION on the partners screen, not a
+            # screen of its own, so this entry is earned by C rather than V.
+            NavItem(Screen.PARTNERS, "partners:partner-new", _("شريك جديد"), action=Action.CREATE),
             NavItem(Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
+            # §3.5/25 IS a screen, and its V cell is what this reads — the
+            # audit account may open the editor and may not submit it.
+            NavItem(Screen.AGREEMENT_NEW, "partners:agreement-new", _("تسجيل اتفاقية موقّعة")),
             NavItem(Screen.CLAIMS, "settlements:claims", _("المطالبات")),
             NavItem(Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
             NavItem(Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
@@ -137,7 +155,7 @@ def nav_for(user: Any) -> list[dict[str, Any]]:
     for group in NAV:
         items = []
         for item in group.items:
-            if Action.VIEW not in allowed_actions(role, item.screen):
+            if item.action not in allowed_actions(role, item.screen):
                 continue
             try:
                 url = reverse(item.route)

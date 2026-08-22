@@ -3,11 +3,14 @@
 {% block content %}
 <h1>{{ title }}</h1>
 <div class="note info">
-  {% translate "شاشة قراءة — الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها، ولا يُنشئها." %}
+  {% translate "الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها كما وردت — لا يؤلّفها ولا يعدّلها بعد سريانها." %}
 </div>
 <form method="get" class="toolbar">
   <input name="q" value="{{ query }}" placeholder="{% translate 'بحث بالاسم أو الرمز' %}">
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
+  {% if can_create %}
+    <a class="btn2" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>
+  {% endif %}
 </form>
 <div class="card2">
   <table class="tbl">

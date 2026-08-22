@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% comment %}
+  The calculation model decides which numbers the agreement carries, and the
+  database refuses one that is missing its own. So the form shows only the
+  group in play — Alpine switches on the same select the service reads.
+
+  The hiding is courtesy, not the control: `AgreementForm.clean` asks
+  `partner_service.check_agreement_terms` the identical question on every POST,
+  so a submission with JavaScript off is refused with the same message beside
+  the same field rather than by a database constraint violation.
+{% endcomment %}
+
+{% block content %}
+<div class="card2" x-data="{ model: '{{ form.calculation_model.value|default:"PERCENT" }}' }">
+  <div class="card2-head"><h1>{% translate "تسجيل اتفاقية موقّعة" %}</h1></div>
+  <div class="card2-body">
+    <p class="note">
+      {% translate "تُسجَّل الاتفاقية كما وُقّعت. تُحفظ مسودةً ثم تسري باعتماد منفصل من صفحتها (D-15)." %}
+    </p>
+
+    {% if not can_create %}
+      <div class="note">
+        {% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — تسجيل الاتفاقيات لمدير المركز (§3.5/25)." %}
+      </div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="note">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      {% for group in form.grouped %}
+        <div {% if group.model %}x-show="model === '{{ group.model }}'"{% endif %}>
+          <h2>{{ group.title }}</h2>
+          {% for field in group.fields %}
+            <div class="calc-row">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {% if field.name == "calculation_model" %}
+                <select name="calculation_model" id="{{ field.id_for_label }}" x-model="model">
+                  {% for value, label in field.field.choices %}
+                    <option value="{{ value }}" {% if field.value == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                {{ field }}
+              {% endif %}
+              {% if field.help_text %}<small class="note">{{ field.help_text }}</small>{% endif %}
+              {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+
+      {% if can_create %}
+        <button type="submit" class="btn2">{% translate "حفظ كمسودة" %}</button>
+      {% endif %}
+      <a href="{% url 'partners:agreements' %}">{% translate "إلغاء" %}</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

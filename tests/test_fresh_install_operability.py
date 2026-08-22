@@ -115,23 +115,27 @@ def _take_cohort_through_the_ministry(cohort: Any, *, manager: Any, registrar: A
 # ---------------------------------------------------------------------------
 # The installer's path, end to end
 # ---------------------------------------------------------------------------
-def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
-    client: Client, no_demo_seed: None
-) -> None:
-    from apps.billing.services import account_service, charge_service
-    from apps.cashbox.models import PaymentMethod
-    from apps.cashbox.services import payment_service
-    from apps.catalog.models import PriceList, PriceListStatus, Program
-    from apps.catalog.services import pricing_service
-    from apps.operations.models import Cohort
-    from apps.operations.services import enrollment_service
-    from apps.people.models import (
-        IdDocumentType,
-        ParticipantCategory,
-        Role,
-        User,
+def install_fresh_system(client: Client) -> dict[str, Any]:
+    """
+    Everything an installer does before the first participant exists.
+
+    Returned as a dict rather than asserted here so more than one test can
+    stand on the same install without either owning it. Sprint 8F's partner
+    proof is the second caller: it needs a priced catalogue to have anything
+    for a partner to earn a share OF, and rebuilding one beside this would be
+    two install paths to keep true.
+    """
+    from apps.catalog.models import (
+        CourseCategory,
+        KnowledgeField,
+        PriceList,
+        PriceListStatus,
+        Program,
     )
-    from apps.people.services import participant_service, user_service
+    from apps.catalog.services import pricing_service
+    from apps.core.models import Semester
+    from apps.people.models import Role, User
+    from apps.people.services import user_service
 
     # -- 1. the two commands the README runbook names -----------------------
     call_command("seed_settings", verbosity=0)
@@ -190,8 +194,6 @@ def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
         {"code": "KF-IT", "name_ar": "تكنولوجيا المعلومات", "is_active": "on"},
     )
 
-    from apps.catalog.models import CourseCategory, KnowledgeField
-
     category = CourseCategory.objects.get(code="CAT-IT")
     knowledge_field = KnowledgeField.objects.get(code="KF-IT")
 
@@ -220,8 +222,6 @@ def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
         },
     )
     program = Program.objects.get(code="SC-NET")
-
-    from apps.core.models import Semester
 
     semester = Semester.objects.get(is_active=True)
     _submit(
@@ -292,6 +292,64 @@ def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
     assert quote.course_fee == Decimal("250.000")
     assert quote.registration_fee == Decimal("15.000")
 
+    registrar = user_service.create_user(
+        actor=sysadmin,
+        username="registrar.one",
+        password=PASSWORD,
+        full_name_ar="موظفة التسجيل",
+        role=Role.REGISTRATION_OFFICER,
+    )
+    cashier = user_service.create_user(
+        actor=sysadmin,
+        username="cashier.one",
+        password=PASSWORD,
+        full_name_ar="أمين الصندوق",
+        role=Role.CASHIER,
+    )
+    finance = user_service.create_user(
+        actor=sysadmin,
+        username="finance.one",
+        password=PASSWORD,
+        full_name_ar="موظف الشؤون المالية",
+        role=Role.FINANCE_OFFICER,
+    )
+    return {
+        "sysadmin": sysadmin,
+        "manager": manager,
+        "registrar": registrar,
+        "cashier": cashier,
+        "finance": finance,
+        "semester": semester,
+        "program": program,
+        "price_list": price_list,
+        "quote": quote,
+    }
+
+
+def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
+    client: Client, no_demo_seed: None
+) -> None:
+    from apps.billing.services import account_service, charge_service
+    from apps.cashbox.models import PaymentMethod
+    from apps.cashbox.services import payment_service
+    from apps.operations.models import Cohort
+    from apps.operations.services import enrollment_service
+    from apps.people.models import IdDocumentType, ParticipantCategory
+    from apps.people.services import participant_service
+
+    installed = install_fresh_system(client)
+    manager, registrar, cashier = (
+        installed["manager"],
+        installed["registrar"],
+        installed["cashier"],
+    )
+    program, semester, price_list = (
+        installed["program"],
+        installed["semester"],
+        installed["price_list"],
+    )
+    quote = installed["quote"]
+
     # -- 7. a cohort, a participant, an enrolment, a charge, a payment ------
     cohort = Cohort.objects.create(
         code="CO-NET-1",
@@ -302,26 +360,11 @@ def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
         ends_on=TERM_END,
         capacity=25,
     )
-    registrar = user_service.create_user(
-        actor=sysadmin,
-        username="registrar.one",
-        password=PASSWORD,
-        full_name_ar="موظفة التسجيل",
-        role=Role.REGISTRATION_OFFICER,
-    )
-
     # BR-013 — no enrolment onto a cohort the ministry has not approved. The
     # MOHE screens already exist, so this part of a fresh install was never
     # blocked; it is walked here because leaving it out would prove a path
     # nobody can actually take.
     _take_cohort_through_the_ministry(cohort, manager=manager, registrar=registrar)
-    cashier = user_service.create_user(
-        actor=sysadmin,
-        username="cashier.one",
-        password=PASSWORD,
-        full_name_ar="أمين الصندوق",
-        role=Role.CASHIER,
-    )
     participant = participant_service.create_participant(
         actor=registrar,
         data={
@@ -356,3 +399,164 @@ def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
     assert state.total_due == Decimal("265.000")
     assert state.total_paid == Decimal("265.000")
     assert state.balance == Decimal("0.000")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8F — the partner side of the same fresh database
+# ---------------------------------------------------------------------------
+def test_a_fresh_database_reaches_a_partner_claim_without_any_fixture(
+    client: Client, no_demo_seed: None
+) -> None:
+    """
+    The blocker Sprint 8F was opened for.
+
+    Before it, ``Partner`` and ``Agreement`` existed only where a test fixture
+    made them, which put claims, settlements, obligations and every partner
+    figure in the reports out of reach of a real installation. This walks the
+    whole thing from an empty database: partner recorded, agreement
+    transcribed and activated, cohort placed under it, participant enrolled
+    and paying — and then the ENTITLEMENT and CLAIM services reading terms
+    that no fixture supplied.
+
+    Nothing here imports a partner fixture. ``tests/conftest.py`` does make
+    ``partner`` and ``percent_agreement`` available in this package, which is
+    exactly why the last assertion counts the rows: proving independence by
+    not typing a name proves nothing when the name is in scope.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from apps.billing.services import charge_service
+    from apps.cashbox.models import PaymentMethod
+    from apps.cashbox.services import payment_service
+    from apps.operations.models import Cohort
+    from apps.operations.services import enrollment_service
+    from apps.partners.models import Agreement, AgreementStatus, Partner, PartnerType
+    from apps.partners.services import partner_service
+    from apps.people.models import IdDocumentType, ParticipantCategory
+    from apps.people.services import participant_service
+    from apps.settlements.services import claim_service, entitlement_service
+
+    installed = install_fresh_system(client)
+    manager, registrar, cashier, finance = (
+        installed["manager"],
+        installed["registrar"],
+        installed["cashier"],
+        installed["finance"],
+    )
+    program, semester, price_list, quote = (
+        installed["program"],
+        installed["semester"],
+        installed["price_list"],
+        installed["quote"],
+    )
+
+    # -- the partner, recorded from the contract ----------------------------
+    partner = partner_service.create_partner(
+        actor=manager,
+        data={
+            "code": "PRT-FRESH",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "registry_number": "س.ت 45211",
+        },
+    )
+
+    # -- the agreement, transcribed then made live --------------------------
+    agreement = partner_service.create_agreement(
+        actor=manager,
+        partner=partner,
+        data={
+            "agreement_number": "2026/71",
+            "title_ar": "اتفاقية تدريب نسبية",
+            "signed_on": date(2026, 8, 1),
+            "valid_from": date(2026, 9, 1),
+            "valid_to": date(2027, 8, 31),
+            "calculation_model": "PERCENT",
+            "percent_rate": Decimal("50.0000"),
+            "exclude_registration_fee": True,
+            "exclude_deposits": True,
+        },
+    )
+    assert agreement.status == AgreementStatus.DRAFT, "a signed agreement is not born live"
+    partner_service.activate_agreement(actor=manager, agreement=agreement)
+    agreement.refresh_from_db()
+    assert agreement.status == AgreementStatus.ACTIVE
+
+    # Only now does the cohort form offer it (BR-041).
+    assert ("2026/71", "2026/71 — شركة تناغم للتدريب") in partner_service.agreement_choices(
+        actor=manager
+    )
+
+    # -- a paying participant under that agreement --------------------------
+    cohort = Cohort.objects.create(
+        code="CO-PRT-FRESH",
+        program=program,
+        semester=semester,
+        name_ar="دفعة شراكة",
+        starts_on=TERM_START,
+        ends_on=TERM_END,
+        capacity=25,
+        agreement=agreement,
+    )
+    _take_cohort_through_the_ministry(cohort, manager=manager, registrar=registrar)
+
+    participant = participant_service.create_participant(
+        actor=registrar,
+        data={
+            "category": ParticipantCategory.UNIVERSITY,
+            "name_ar": "رهف عمر خالد الزعبي",
+            "id_document_type": IdDocumentType.NATIONAL_ID,
+            "id_document_number": "9982022222",
+            "registered_on": TERM_START,
+            "no_refund_pledge_accepted": True,
+        },
+    )
+    enrollment = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=TERM_START,
+        price_list=price_list,
+        code="EN-PRT-FRESH",
+    )
+    charge_service.charge_lines_from_quote(
+        actor=registrar, enrollment=enrollment, quote=quote, charged_on=TERM_START
+    )
+    payment_service.take_payment(
+        actor=cashier,
+        enrollment=enrollment,
+        amount=Decimal("265.000"),
+        payment_method=PaymentMethod.objects.create(code="CASH", name_ar="نقداً"),
+        received_on=TERM_START,
+    )
+
+    # -- entitlement reads the terms the manager typed ----------------------
+    verdict = entitlement_service.evaluate_eligibility(enrollment, as_of=TERM_START)
+    assert verdict.is_eligible
+
+    # 265 collected = 15 registration (excluded by the agreement) + 250 tuition.
+    base = entitlement_service.shareable_collected(
+        enrollment, agreement=agreement, as_of=TERM_START
+    )
+    assert base == Decimal("250.000")
+    assert entitlement_service.partner_share_for(
+        agreement=agreement, base=base, student_count=1
+    ) == Decimal("125.000")
+
+    # -- and a claim is drawn against them ----------------------------------
+    claim = claim_service.build_claim(
+        actor=finance,
+        agreement=agreement,
+        cohort=cohort,
+        period_from=TERM_START,
+        period_to=TERM_END,
+        trigger_type="END_OF_COURSE",
+    )
+    assert claim.partner_share == Decimal("125.000")
+    assert claim.model_snapshot == "PERCENT"
+    assert claim.rate_snapshot == Decimal("50.0000")
+
+    # -- no fixture put anything here ---------------------------------------
+    assert list(Partner.objects.values_list("code", flat=True)) == ["PRT-FRESH"]
+    assert list(Agreement.objects.values_list("agreement_number", flat=True)) == ["2026/71"]
