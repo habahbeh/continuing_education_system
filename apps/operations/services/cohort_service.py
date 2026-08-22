@@ -191,6 +191,23 @@ def open_cohort(
         except Agreement.DoesNotExist as exc:
             raise ValidationError(f"اتفاقية غير معروفة: {agreement_number}") from exc
 
+        # Sprint 8F-1 — the list of agreements the form offers is a courtesy;
+        # this is the control. ``open_cohort`` took any number that resolved,
+        # so a stale page or a hand-built POST could place a cohort under a
+        # contract that had lapsed or had never been made live, and every
+        # claim drawn on it afterwards would be drawn on nothing.
+        #
+        # Asked of ``starts_on``, not of today: the question is whether the
+        # contract covers the period this cohort RUNS in. A cohort starting
+        # after its partner's agreement expires earns that partner nothing,
+        # and finding that out at claim time is finding out too late.
+        if not agreement.is_available_on(starts_on):
+            raise ValidationError(
+                f"الاتفاقية {agreement.agreement_number} غير متاحة لدفعة تبدأ في "
+                f"{starts_on} — حالتها {agreement.get_status_display()} "
+                f"وسريانها {agreement.valid_from} حتى {agreement.valid_to}."
+            )
+
     return _open_cohort(
         actor=actor,
         code=code,

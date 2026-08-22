@@ -15,7 +15,7 @@ check names the matrix cell it reads, and the roles that hold ``V`` without
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -48,6 +48,9 @@ TERMS: dict[str, Any] = {
     "valid_from": date(2026, 9, 1),
     "valid_to": date(2027, 8, 31),
 }
+#: A date inside ``TERMS``. Choice assertions name it rather than relying on
+#: the wall clock, which would make them true only between those two dates.
+IN_WINDOW = date(2026, 10, 1)
 MODEL_TERMS: dict[str, dict[str, Any]] = {
     CalculationModel.PERCENT: {"percent_rate": Decimal("50.0000")},
     CalculationModel.FIXED_PER_STUDENT: {
@@ -358,13 +361,22 @@ def test_the_timing_terms_persist(manager: User, a_partner: Partner) -> None:
 def test_a_draft_is_not_offered_to_a_cohort_until_it_is_activated(
     manager: User, a_partner: Partner
 ) -> None:
+    """
+    ``as_of`` is passed explicitly, and Sprint 8F-1 is why.
+
+    ``TERMS`` runs Sept 2026 to Aug 2027. Asking for the choices without a
+    date asks about the wall clock, so this assertion would have answered
+    differently before September 2026 and differently again after August 2027
+    — a test that passes for eleven months and then reports a defect that is
+    not there. Naming the date makes it a question about the agreement.
+    """
     agreement = _make(manager, a_partner, CalculationModel.PERCENT)
-    assert partner_service.agreement_choices(actor=manager) == []
+    assert partner_service.agreement_choices(actor=manager, as_of=IN_WINDOW) == []
 
     partner_service.activate_agreement(actor=manager, agreement=agreement)
-    assert [n for n, _label in partner_service.agreement_choices(actor=manager)] == [
-        agreement.agreement_number
-    ]
+    assert [
+        n for n, _label in partner_service.agreement_choices(actor=manager, as_of=IN_WINDOW)
+    ] == [agreement.agreement_number]
 
 
 def test_an_active_agreement_cannot_be_activated_again(manager: User, a_partner: Partner) -> None:
@@ -676,3 +688,406 @@ def test_activating_a_live_agreement_from_the_screen_reports_the_refusal(
     )
     assert response.status_code == 200
     assert any("D-15" in str(m) for m in response.context["messages"])
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8F-1 — expiry is computed, and it gates new work only
+# ---------------------------------------------------------------------------
+LAPSED: dict[str, Any] = {
+    "signed_on": date(2024, 1, 1),
+    "valid_from": date(2024, 2, 1),
+    "valid_to": date(2024, 12, 31),
+}
+FUTURE: dict[str, Any] = {
+    "signed_on": date(2026, 8, 1),
+    "valid_from": date(2030, 1, 1),
+    "valid_to": date(2031, 1, 1),
+}
+
+
+def _live(manager: User, partner: Partner, number: str, **window: Any) -> Agreement:
+    """An ACTIVE agreement with the given window, activated from inside it."""
+    agreement = _make(manager, partner, CalculationModel.PERCENT, agreement_number=number, **window)
+    partner_service.activate_agreement(
+        actor=manager, agreement=agreement, as_of=window.get("valid_from", TERMS["valid_from"])
+    )
+    agreement.refresh_from_db()
+    return agreement
+
+
+def test_the_model_answers_the_validity_question_without_storing_it(
+    manager: User, a_partner: Partner
+) -> None:
+    """
+    ``AgreementStatus.EXPIRED`` exists and nothing writes it, on purpose.
+
+    Time passing is not a decision anybody took, and a stored expiry would
+    make "was this in force last March?" unanswerable — which is the question
+    a claim raised last March needs answered.
+    """
+    agreement = _make(manager, a_partner, CalculationModel.PERCENT)
+
+    assert agreement.covers(date(2026, 9, 1)), "the first day is inside the window"
+    assert agreement.covers(date(2027, 8, 31)), "and so is the last"
+    assert not agreement.covers(date(2026, 8, 31))
+    assert not agreement.covers(date(2027, 9, 1))
+
+    # DRAFT: inside the window and still not available for new work.
+    assert not agreement.is_available_on(IN_WINDOW)
+    partner_service.activate_agreement(actor=manager, agreement=agreement)
+    agreement.refresh_from_db()
+    assert agreement.is_available_on(IN_WINDOW)
+    assert not agreement.is_available_on(date(2028, 1, 1))
+    assert agreement.status == AgreementStatus.ACTIVE, "expiry never rewrites the status"
+
+
+def test_an_open_ended_agreement_is_not_representable(a_partner: Partner) -> None:
+    """
+    The brief asked what a NULL ``valid_to`` should mean. It cannot occur.
+
+    ``valid_to`` is NOT NULL with a CHECK requiring it to exceed
+    ``valid_from``, so every agreement in this system has both ends of its
+    window and there is no open-ended case for the expiry rule to treat. This
+    is asserted rather than assumed, because making it nullable later would
+    silently give ``covers`` a ``None`` to compare against.
+    """
+    field = Agreement._meta.get_field("valid_to")
+    assert not field.null
+    assert {c.name for c in Agreement._meta.constraints} >= {"partners_agreement_valid_period"}
+
+
+def test_agreement_choices_omits_an_agreement_whose_window_has_closed(
+    manager: User, a_partner: Partner
+) -> None:
+    live = _live(manager, a_partner, "8F1/LIVE")
+    lapsed = _live(manager, a_partner, "8F1/LAPSED", **LAPSED)
+
+    offered = [n for n, _label in partner_service.agreement_choices(actor=manager, as_of=IN_WINDOW)]
+    assert offered == [live.agreement_number]
+    assert lapsed.status == AgreementStatus.ACTIVE, "still ACTIVE — only the calendar moved"
+
+
+def test_agreement_choices_omits_one_whose_window_has_not_opened(
+    manager: User, a_partner: Partner
+) -> None:
+    """A contract signed for 2030 is live in the file and not yet offerable."""
+    _live(manager, a_partner, "8F1/FUTURE", **FUTURE)
+    assert partner_service.agreement_choices(actor=manager, as_of=IN_WINDOW) == []
+    assert [
+        n for n, _label in partner_service.agreement_choices(actor=manager, as_of=date(2030, 6, 1))
+    ] == ["8F1/FUTURE"]
+
+
+def test_agreement_choices_includes_both_ends_of_the_window(
+    manager: User, a_partner: Partner
+) -> None:
+    """«سارية حتى» is inclusive — the last day is still a day of the contract."""
+    agreement = _live(manager, a_partner, "8F1/EDGES")
+
+    for on_date in (agreement.valid_from, agreement.valid_to):
+        assert [
+            n for n, _label in partner_service.agreement_choices(actor=manager, as_of=on_date)
+        ] == ["8F1/EDGES"], on_date
+
+
+def test_agreement_choices_defaults_to_today(manager: User, a_partner: Partner) -> None:
+    """No ``as_of`` asks about now, which is what every screen wants."""
+    from django.utils import timezone
+
+    today = timezone.localdate()
+    _live(
+        manager,
+        a_partner,
+        "8F1/NOW",
+        signed_on=today - timedelta(days=30),
+        valid_from=today - timedelta(days=10),
+        valid_to=today + timedelta(days=10),
+    )
+    _live(manager, a_partner, "8F1/GONE", **LAPSED)
+
+    assert [n for n, _label in partner_service.agreement_choices(actor=manager)] == ["8F1/NOW"]
+
+
+def test_a_draft_and_a_terminated_agreement_stay_out_of_the_choices(
+    manager: User, a_partner: Partner
+) -> None:
+    """The status filter Sprint 8B had is not replaced by the date filter."""
+    _make(manager, a_partner, CalculationModel.PERCENT, agreement_number="8F1/DRAFT")
+
+    original = _live(manager, a_partner, "8F1/OLD")
+    appendix = _make(
+        manager,
+        a_partner,
+        CalculationModel.PERCENT,
+        agreement_number="8F1/APPENDIX",
+        supersedes=original,
+    )
+    partner_service.activate_agreement(actor=manager, agreement=appendix)
+
+    offered = [n for n, _label in partner_service.agreement_choices(actor=manager, as_of=IN_WINDOW)]
+    assert offered == ["8F1/APPENDIX"], "the draft and the superseded original are both out"
+
+
+# --- activation -------------------------------------------------------------
+def test_activating_a_lapsed_agreement_is_refused(manager: User, a_partner: Partner) -> None:
+    agreement = _make(
+        manager, a_partner, CalculationModel.PERCENT, agreement_number="8F1/PAST", **LAPSED
+    )
+
+    with pytest.raises(ValidationError, match="انتهت مدة سريان"):
+        partner_service.activate_agreement(actor=manager, agreement=agreement)
+
+    agreement.refresh_from_db()
+    assert agreement.status == AgreementStatus.DRAFT
+
+
+def test_activating_a_future_dated_agreement_is_allowed(manager: User, a_partner: Partner) -> None:
+    """
+    The asymmetry, and the reason for it.
+
+    Agreements are signed in August for a term starting in September. Refusing
+    activation until ``valid_from`` would mean the centre could not record its
+    own signed contracts until the day they took effect. So a future window
+    activates, and ``agreement_choices`` simply does not offer it yet.
+    """
+    agreement = _make(
+        manager, a_partner, CalculationModel.PERCENT, agreement_number="8F1/SOON", **FUTURE
+    )
+    partner_service.activate_agreement(actor=manager, agreement=agreement)
+
+    agreement.refresh_from_db()
+    assert agreement.status == AgreementStatus.ACTIVE
+    assert partner_service.agreement_choices(actor=manager, as_of=IN_WINDOW) == []
+
+
+def test_a_lapsed_agreement_may_still_be_recorded(manager: User, a_partner: Partner) -> None:
+    """
+    Creation is not guarded and must not be.
+
+    A claim on work delivered under a contract that has since run out needs
+    that contract to exist in the system. What 8F-1 refuses is pretending it
+    is in force, not writing it down.
+    """
+    agreement = _make(
+        manager, a_partner, CalculationModel.PERCENT, agreement_number="8F1/HIST", **LAPSED
+    )
+    assert agreement.pk is not None
+    assert agreement.status == AgreementStatus.DRAFT
+
+
+def test_the_expired_agreement_page_offers_no_activation(
+    client: Client, manager: User, a_partner: Partner
+) -> None:
+    agreement = _make(
+        manager, a_partner, CalculationModel.PERCENT, agreement_number="8F1/UIPAST", **LAPSED
+    )
+    client.force_login(manager)
+
+    response = client.get(reverse("partners:agreement-detail", args=[agreement.agreement_number]))
+    assert response.status_code == 200
+    assert response.context["agreement"]["is_expired"] is True
+    assert "انقضت مدة سريان" in response.content.decode("utf-8")
+
+
+# --- historical reads are untouched -----------------------------------------
+def test_a_lapsed_agreement_stays_fully_readable(manager: User, a_partner: Partner) -> None:
+    """§3 — the listing shows every agreement, expiry is a badge not a filter."""
+    live = _live(manager, a_partner, "8F1/R-LIVE")
+    lapsed = _live(manager, a_partner, "8F1/R-GONE", **LAPSED)
+
+    rows = {r["agreement_number"]: r for r in partner_service.list_agreements(actor=manager)}
+    assert set(rows) == {live.agreement_number, lapsed.agreement_number}
+    assert rows["8F1/R-GONE"]["is_expired"] is True
+    assert rows["8F1/R-GONE"]["percent_rate"] == Decimal("50.0000"), "terms as signed"
+    assert rows["8F1/R-LIVE"]["is_expired"] is False
+
+    one = partner_service.get_agreement(actor=manager, agreement_number="8F1/R-GONE")
+    assert one["status"] == AgreementStatus.ACTIVE
+    assert (
+        partner_service.agreement_instance(actor=manager, agreement_number="8F1/R-GONE").pk
+        == lapsed.pk
+    )
+
+
+def test_the_expired_agreement_detail_page_still_opens(
+    client: Client, manager: User, a_partner: Partner
+) -> None:
+    lapsed = _live(manager, a_partner, "8F1/R-PAGE", **LAPSED)
+    client.force_login(manager)
+    response = client.get(reverse("partners:agreement-detail", args=[lapsed.agreement_number]))
+    assert response.status_code == 200
+    # The terms as signed, read off the context rather than the rendered
+    # digits: the page renders under the Arabic locale, which formats a
+    # Decimal with the Arabic decimal separator.
+    assert response.context["agreement"]["percent_rate"] == Decimal("50.0000")
+    assert lapsed.agreement_number in response.content.decode("utf-8")
+
+
+def test_settlement_choices_are_deliberately_not_filtered_by_expiry(
+    manager: User, a_partner: Partner
+) -> None:
+    """
+    Settling a lapsed agreement is the NORMAL case, not an edge one.
+
+    Money owed for a course that finished is settled after the contract runs
+    out — that is what a settlement is. ``open_agreement_choices`` therefore
+    keeps its own filter (no cycle currently open) and takes no date, and this
+    test fails if somebody copies the expiry rule into it.
+    """
+    from apps.people.models import Role
+    from apps.settlements.services import settlement_service
+
+    lapsed = _live(manager, a_partner, "8F1/SETTLE", **LAPSED)
+    finance = _user(Role.FINANCE_OFFICER, "fin.settle.expiry")
+
+    offered = [n for n, _label in settlement_service.open_agreement_choices(actor=finance)]
+    assert lapsed.agreement_number in offered
+
+
+# --- the cohort is where the gap actually bit -------------------------------
+def test_a_cohort_cannot_be_opened_under_a_lapsed_agreement(
+    manager: User, a_partner: Partner, priced_catalog: Any, active_semester: Any
+) -> None:
+    """
+    The list is the courtesy; this is the control.
+
+    ``open_cohort`` accepted any agreement number that resolved, so a stale
+    page or a hand-built POST could place a cohort under a contract that had
+    run out — and every claim drawn on it afterwards would be drawn on
+    nothing.
+    """
+    from apps.operations.models import Cohort
+    from apps.operations.services import cohort_service
+
+    lapsed = _live(manager, a_partner, "8F1/CO-GONE", **LAPSED)
+
+    with pytest.raises(ValidationError, match="غير متاحة لدفعة تبدأ"):
+        cohort_service.open_cohort(
+            actor=manager,
+            program_code="SC-NET",
+            semester_code=active_semester.code,
+            code="CO-8F1-GONE",
+            name_ar="دفعة تحت اتفاقية منقضية",
+            starts_on=date(2026, 9, 20),
+            ends_on=date(2026, 12, 20),
+            capacity=20,
+            agreement_number=lapsed.agreement_number,
+        )
+    assert not Cohort.objects.filter(code="CO-8F1-GONE").exists()
+
+
+def test_a_cohort_cannot_be_opened_under_a_draft_agreement(
+    manager: User, a_partner: Partner, priced_catalog: Any, active_semester: Any
+) -> None:
+    from apps.operations.services import cohort_service
+
+    draft = _make(manager, a_partner, CalculationModel.PERCENT, agreement_number="8F1/CO-DRAFT")
+
+    with pytest.raises(ValidationError, match="غير متاحة لدفعة تبدأ"):
+        cohort_service.open_cohort(
+            actor=manager,
+            program_code="SC-NET",
+            semester_code=active_semester.code,
+            code="CO-8F1-DRAFT",
+            name_ar="دفعة تحت مسودة",
+            starts_on=date(2026, 9, 20),
+            ends_on=date(2026, 12, 20),
+            capacity=20,
+            agreement_number=draft.agreement_number,
+        )
+
+
+def test_a_cohort_is_refused_when_the_agreement_lapses_before_it_starts(
+    manager: User, a_partner: Partner, priced_catalog: Any, active_semester: Any
+) -> None:
+    """
+    Asked of ``starts_on``, not of today — which is the whole point.
+
+    The agreement is in force as this is written and runs out before the
+    cohort begins. A list filtered on today would offer it; the service asks
+    the date that matters and names both in the refusal.
+    """
+    from django.utils import timezone
+
+    from apps.operations.services import cohort_service
+
+    today = timezone.localdate()
+    ending = _live(
+        manager,
+        a_partner,
+        "8F1/CO-ENDS",
+        signed_on=today - timedelta(days=60),
+        valid_from=today - timedelta(days=30),
+        valid_to=today + timedelta(days=5),
+    )
+    assert ending.agreement_number in [
+        n for n, _label in partner_service.agreement_choices(actor=manager)
+    ], "offered today"
+
+    with pytest.raises(ValidationError, match="غير متاحة لدفعة تبدأ"):
+        cohort_service.open_cohort(
+            actor=manager,
+            program_code="SC-NET",
+            semester_code=active_semester.code,
+            code="CO-8F1-ENDS",
+            name_ar="دفعة تبدأ بعد انقضاء الاتفاقية",
+            starts_on=today + timedelta(days=40),
+            ends_on=today + timedelta(days=120),
+            capacity=20,
+            agreement_number=ending.agreement_number,
+        )
+
+
+def test_a_cohort_opens_normally_under_an_agreement_that_covers_it(
+    manager: User, a_partner: Partner, priced_catalog: Any, active_semester: Any
+) -> None:
+    """The guard must not refuse the ordinary case."""
+    from apps.operations.services import cohort_service
+
+    live = _live(manager, a_partner, "8F1/CO-OK")
+    cohort = cohort_service.open_cohort(
+        actor=manager,
+        program_code="SC-NET",
+        semester_code=active_semester.code,
+        code="CO-8F1-OK",
+        name_ar="دفعة سليمة",
+        starts_on=date(2026, 9, 20),
+        ends_on=date(2026, 12, 20),
+        capacity=20,
+        agreement_number=live.agreement_number,
+    )
+    assert cohort.agreement_id == live.pk
+
+
+def test_a_cohort_already_under_a_now_lapsed_agreement_keeps_working(
+    manager: User, a_partner: Partner, priced_catalog: Any, active_semester: Any
+) -> None:
+    """
+    §3 — the guard gates NEW attachment and touches nothing already attached.
+
+    A cohort opened under a contract that has since run out still reads its
+    agreement, still evaluates eligibility, and still supports a claim. That
+    is the whole reason expiry is computed rather than stored.
+    """
+    from apps.operations.models import Cohort
+    from apps.settlements.services import entitlement_service
+
+    lapsed = _live(manager, a_partner, "8F1/CO-HIST", **LAPSED)
+    cohort = Cohort.objects.create(
+        code="CO-8F1-HIST",
+        program=priced_catalog.items.first().program,
+        semester=active_semester,
+        name_ar="دفعة قديمة",
+        starts_on=date(2024, 3, 1),
+        ends_on=date(2024, 6, 1),
+        capacity=20,
+        agreement=lapsed,
+    )
+
+    cohort.refresh_from_db()
+    attached = cohort.agreement
+    assert attached is not None
+    assert attached.agreement_number == "8F1/CO-HIST"
+    assert entitlement_service.partner_share_for(
+        agreement=attached, base=Decimal("100.000"), student_count=1
+    ) == Decimal("50.000")

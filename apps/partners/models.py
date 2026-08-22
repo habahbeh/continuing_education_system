@@ -15,6 +15,8 @@ university share. The database now makes that combination unrepresentable
 
 from __future__ import annotations
 
+from datetime import date
+
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -255,6 +257,36 @@ class Agreement(models.Model):
             AgreementStatus.EXPIRED,
             AgreementStatus.TERMINATED,
         }
+
+    # -- validity (Sprint 8F-1) --------------------------------------------
+    #
+    # Expiry is COMPUTED, never stored. ``AgreementStatus.EXPIRED`` exists in
+    # the vocabulary and nothing writes it, which is deliberate: a status is a
+    # decision somebody took, and time passing is not a decision. Storing it
+    # would mean either a nightly job that rewrites signed contracts or a
+    # column that silently disagrees with the calendar between runs — and it
+    # would make "was this agreement in force last March?" unanswerable, which
+    # is exactly the question a claim raised last March needs answered.
+    #
+    # ``valid_to`` is NOT NULL and a CHECK requires it to exceed
+    # ``valid_from``, so there is no open-ended agreement to consider. Every
+    # agreement in this system has both ends of its window.
+
+    def covers(self, on_date: date) -> bool:
+        """Does the signed validity window include this date? Both ends inclusive."""
+        return self.valid_from <= on_date <= self.valid_to
+
+    def is_available_on(self, on_date: date) -> bool:
+        """
+        May new operational work be placed under this agreement on this date?
+
+        Two conditions and both are needed. ACTIVE is the lifecycle answer —
+        a draft was never made live, a terminated one was ended by someone.
+        ``covers`` is the calendar answer. An agreement can be ACTIVE and
+        lapsed at the same time, and before Sprint 8F-1 that combination was
+        offered to the cohort form as though it were in force.
+        """
+        return self.status == AgreementStatus.ACTIVE and self.covers(on_date)
 
 
 class AgreementProgramSnapshot(models.Model):

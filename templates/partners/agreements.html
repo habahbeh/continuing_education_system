@@ -31,7 +31,10 @@
           </td>
           <td>{{ a.discount_split_mode_display }}</td>
           <td>{{ a.settlement_cycle_display }}</td>
-          <td><span class="chip">{{ a.status_display }}</span></td>
+          <td>
+            <span class="chip">{{ a.status_display }}</span>
+            {% if a.is_expired %}<span class="chip warn">{% translate "منقضية" %}</span>{% endif %}
+          </td>
           <td><a class="btn2" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
         </tr>
       {% empty %}<tr><td colspan="8" class="empty">{% translate "لا اتفاقيات" %}</td></tr>{% endfor %}

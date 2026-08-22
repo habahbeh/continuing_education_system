@@ -2,13 +2,21 @@
 {% load i18n %}
 {% block content %}
 <h1>{{ title }} <span dir="ltr">{{ agreement.agreement_number }}</span></h1>
-{% if can_activate %}
+{% if agreement.is_expired %}
+  <div class="note warn">
+    {% translate "انقضت مدة سريان هذه الاتفاقية — تبقى مقروءة ومرجعاً لما بُني عليها من مطالبات، ولا تُعرض على الدفعات الجديدة ولا تُعتمد. التعاقد المستمر يكون بملحق بمدة سريان جديدة." %}
+  </div>
+{% elif can_activate %}
   <div class="note">
     {% translate "مسودة — لا تُحتسب عليها استحقاقات ولا تُعرض على الدفعات حتى تسري. السريان يجمّد بنودها (D-15)، ويُنهي الاتفاقية التي تحلّ محلّها إن وُجدت." %}
     <form method="post" action="{% url 'partners:agreement-activate' agreement.agreement_number %}">
       {% csrf_token %}
       <button type="submit" class="btn2">{% translate "اعتماد السريان" %}</button>
     </form>
+  </div>
+{% elif agreement.status == "ACTIVE" and not agreement.is_available %}
+  <div class="note">
+    {% translate "سارية على الورق ولم تبدأ مدتها بعد — تُعرض على الدفعات ابتداءً من تاريخ بدء السريان." %}
   </div>
 {% endif %}
 <div class="card2">

@@ -36,11 +36,13 @@ exactly the fields that differ between the signed agreements in the file.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.core.display import text_of
 from apps.core.exceptions import ImmutableRecordError
@@ -117,6 +119,7 @@ def list_agreements(
 
     policy.require(actor, Screen.AGREEMENTS, Action.VIEW, request=request)
 
+    today = timezone.localdate()
     queryset = Agreement.objects.select_related("partner")
     if partner_code:
         queryset = queryset.filter(partner__code=partner_code)
@@ -153,6 +156,13 @@ def list_agreements(
             "name_list_due_days": a.name_list_due_days,
             "entitlement_rule_ar": a.entitlement_rule_ar,
             "supersedes": text_of(a.supersedes, "agreement_number"),
+            # Computed, not stored (Sprint 8F-1). The listing shows every
+            # agreement including the lapsed ones — a contract that ended is
+            # still the contract a past claim was raised under — and these two
+            # flags let the screen say so without anybody having to compare
+            # dates in their head.
+            "is_expired": a.valid_to < today,
+            "is_available": a.is_available_on(today),
         }
         for a in queryset.order_by("-valid_from", "agreement_number")
     ]
@@ -164,22 +174,43 @@ def get_agreement(*, actor: Any, agreement_number: str, request: Any = None) -> 
     return next((r for r in rows if r["agreement_number"] == agreement_number), {})
 
 
-def agreement_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+def agreement_choices(
+    *, actor: Any, as_of: date | None = None, request: Any = None
+) -> list[tuple[str, str]]:
     """
-    (number, label) pairs of ACTIVE agreements, for the cohort form.
+    (number, label) pairs of agreements in force on ``as_of``, for the cohort form.
 
-    Expired and terminated agreements are omitted: a cohort opened today
-    cannot sensibly be placed under a contract that has ended, and offering
-    one would invite exactly that.
+    Sprint 8B's docstring here claimed expired agreements were omitted and
+    Sprint 8F left the claim standing, but the filter was on STATUS alone and
+    nothing ever writes EXPIRED — so a contract that ran out last year was
+    offered to the cohort form exactly like one signed last week. That is the
+    defect Sprint 8F-1 exists for.
+
+    **Filtered on the day the list is drawn, not on the cohort's start date.**
+    The honest question for a cohort is whether the contract covers the period
+    it runs in, and ``cohort_service`` asks precisely that when the form is
+    submitted, because by then ``starts_on`` is known. Here it is not — the
+    dropdown is rendered before the user has typed a date — so the list uses
+    today and the service uses the date that matters. A contract that lapses
+    between the two is offered and then refused BY NAME, with both dates in
+    the message, which is a better outcome than a list that cannot be built.
+
+    Terminated and draft agreements stay out for the reason they always did:
+    one was ended by somebody and the other was never made live.
     """
     from apps.partners.models import Agreement, AgreementStatus
 
     policy.require(actor, Screen.AGREEMENTS, Action.VIEW, request=request)
+    on_date = as_of or timezone.localdate()
 
     return [
         (a.agreement_number, f"{a.agreement_number} — {a.partner.name_ar}")
         for a in Agreement.objects.select_related("partner")
-        .filter(status=AgreementStatus.ACTIVE)
+        .filter(
+            status=AgreementStatus.ACTIVE,
+            valid_from__lte=on_date,
+            valid_to__gte=on_date,
+        )
         .order_by("agreement_number")
     ]
 
@@ -424,7 +455,9 @@ def supersede_agreement(*, actor: Any, previous: Any, successor: Any, request: A
     return previous
 
 
-def activate_agreement(*, actor: Any, agreement: Any, request: Any = None) -> Any:
+def activate_agreement(
+    *, actor: Any, agreement: Any, as_of: date | None = None, request: Any = None
+) -> Any:
     """
     Make a draft live, and end what it replaces in the same breath (``A``).
 
@@ -432,15 +465,39 @@ def activate_agreement(*, actor: Any, agreement: Any, request: Any = None) -> An
     writes to the agreement again. If the draft names a predecessor, that
     contract ends here — one act, one transaction, so there is no instant in
     which both are live and no instant in which neither is.
+
+    **An already-lapsed window is refused; a future one is not** (Sprint
+    8F-1). The asymmetry is the whole of the rule and it follows the paper:
+    agreements are signed in August for a term that starts in September, so
+    refusing activation until ``valid_from`` would mean the centre could not
+    record its own signed contracts until the day they took effect. Such an
+    agreement is activated, and simply not OFFERED by ``agreement_choices``
+    until its window opens. One whose ``valid_to`` has already passed is a
+    different thing: nothing it could be attached to lies inside its window,
+    so activating it would produce a contract that is live and unusable in the
+    same breath.
+
+    Recording a lapsed agreement is still allowed — ``create_agreement`` takes
+    any dates, because a claim on work delivered under an old contract needs
+    that contract to exist in the system. What is refused is pretending it is
+    in force.
     """
     from apps.partners.models import AgreementStatus
 
     policy.require(actor, Screen.AGREEMENTS, Action.APPROVE, request=request)
+    on_date = as_of or timezone.localdate()
 
     previous = agreement.supersedes
     if previous is not None:
         policy.require(actor, Screen.AGREEMENTS, Action.EDIT, request=request)
         _refuse_unless_supersedable(previous, agreement)
+
+    if agreement.valid_to < on_date:
+        raise ValidationError(
+            f"انتهت مدة سريان الاتفاقية {agreement.agreement_number} في "
+            f"{agreement.valid_to} — لا تُعتمد اتفاقية منقضية. "
+            "التعاقد المستمر يكون بملحق جديد بمدة سريان جديدة."
+        )
 
     if agreement.status != AgreementStatus.DRAFT:
         raise ImmutableRecordError(

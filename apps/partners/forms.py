@@ -83,7 +83,14 @@ class AgreementForm(forms.Form):
     title_ar = forms.CharField(label=_("عنوان الاتفاقية"), max_length=255)
     signed_on = forms.DateField(label=_("تاريخ التوقيع"), widget=forms.DateInput({"type": "date"}))
     valid_from = forms.DateField(label=_("سارية من"), widget=forms.DateInput({"type": "date"}))
-    valid_to = forms.DateField(label=_("سارية حتى"), widget=forms.DateInput({"type": "date"}))
+    valid_to = forms.DateField(
+        label=_("سارية حتى"),
+        widget=forms.DateInput({"type": "date"}),
+        help_text=_(
+            "بعد هذا التاريخ لا تُعرض الاتفاقية على الدفعات الجديدة ولا تُعتمد — "
+            "وتبقى مقروءة ومرجعاً لما بُني عليها (8F-1)"
+        ),
+    )
 
     calculation_model = forms.ChoiceField(
         label=_("نموذج الاحتساب"), choices=CalculationModel.choices

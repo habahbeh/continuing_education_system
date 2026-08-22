@@ -483,9 +483,11 @@ def test_a_fresh_database_reaches_a_partner_claim_without_any_fixture(
     agreement.refresh_from_db()
     assert agreement.status == AgreementStatus.ACTIVE
 
-    # Only now does the cohort form offer it (BR-041).
+    # Only now does the cohort form offer it (BR-041) — and only for a date
+    # inside its window, which Sprint 8F-1 added. The whole scenario runs on
+    # TERM_START, so that is the date asked about.
     assert ("2026/71", "2026/71 — شركة تناغم للتدريب") in partner_service.agreement_choices(
-        actor=manager
+        actor=manager, as_of=TERM_START
     )
 
     # -- a paying participant under that agreement --------------------------
