@@ -61,6 +61,17 @@ class User(AbstractUser):
     )
     department = models.CharField(max_length=150, blank=True, verbose_name=_("الدائرة"))
 
+    # ``createsuperuser`` asks for the role (Sprint 8F-0). Not a schema change
+    # — ``REQUIRED_FIELDS`` only tells the command what to prompt for.
+    #
+    # Without it a fresh install ends in a deadlock: the first account is made
+    # by ``createsuperuser``, which leaves ``role`` blank, and T-165 refuses a
+    # bare superuser the user admin on purpose (Δ-02 names the ROLE as the
+    # authority). Nobody could then create the first real user. Prompting here
+    # is the smallest fix that does not weaken that refusal — the installer
+    # states the role instead of the system inferring one from a flag.
+    REQUIRED_FIELDS = ["email", "role"]
+
     # --- Local authentication state (Q-12) --------------------------------
     # Counters, not policy: the thresholds themselves are EffectiveSettings
     # (`login_max_failed_attempts`, `session_idle_timeout_minutes`) because a
