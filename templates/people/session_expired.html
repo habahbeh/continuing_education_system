@@ -1,10 +1,22 @@
 {% extends "base.html" %}
 {% load i18n %}
 
+{% block title %}{% translate "انتهت الجلسة — مركز التعليم المستمر" %}{% endblock %}
+
 {% block content %}
-<div class="card2" style="max-width: 32rem; margin-inline: auto;">
-  <h1>{% translate "انتهت الجلسة" %}</h1>
-  <p class="note">{% translate "انتهت جلستك بسبب الخمول. يرجى تسجيل الدخول من جديد." %}</p>
-  <a class="btn2" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="card2">
+      <div class="card2-head"><h1>{% translate "انتهت الجلسة" %}</h1></div>
+      <div class="card2-body">
+        <div class="note info">
+          {% translate "انتهت جلستك بسبب الخمول. تُغلق الجلسة تلقائياً بعد مدة من عدم الاستخدام حمايةً للبيانات." %}
+        </div>
+        <div class="form-acts">
+          <a class="btn2 primary" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

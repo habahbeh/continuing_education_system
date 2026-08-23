@@ -1,11 +1,22 @@
 {% extends "base.html" %}
 {% load i18n %}
 
+{% block title %}{% translate "الحساب مقفل — مركز التعليم المستمر" %}{% endblock %}
+
 {% block content %}
-<div class="card2" style="max-width: 32rem; margin-inline: auto;">
-  <h1>{% translate "الحساب مقفل" %}</h1>
-  <p class="note">
-    {% translate "تم قفل الحساب بعد تجاوز حد المحاولات الفاشلة. يلزم فكّ القفل من مدير النظام بسبب موثّق." %}
-  </p>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="card2">
+      <div class="card2-head"><h1>{% translate "الحساب مقفل" %}</h1></div>
+      <div class="card2-body">
+        <div class="note danger" role="alert">
+          {% translate "تم قفل الحساب بعد تجاوز حد المحاولات الفاشلة." %}
+        </div>
+        <p class="hint">
+          {% translate "فكّ القفل يتم من مدير النظام بسبب موثّق — لا يُفتح الحساب بمرور الوقت ولا بإعادة المحاولة." %}
+        </p>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

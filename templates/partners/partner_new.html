@@ -1,29 +1,26 @@
 {% extends "base.html" %}
 {% load i18n %}
 
+{% block title %}{% translate "شريك جديد — مركز التعليم المستمر" %}{% endblock %}
+
 {% block content %}
+<div class="page-head">
+  <h1>{% translate "شريك جديد" %}</h1>
+</div>
+
 <div class="card2">
-  <div class="card2-head"><h1>{% translate "شريك جديد" %}</h1></div>
   <div class="card2-body">
-    <p class="note">
+    <p class="hint boxed">
       {% translate "الشريك هو الطرف المتعاقد كما يرد في الاتفاقية. شروط القسمة تُسجَّل على الاتفاقية لا هنا." %}
     </p>
 
     <form method="post" novalidate>
       {% csrf_token %}
-      {% if form.non_field_errors %}
-        <div class="note">{{ form.non_field_errors }}</div>
-      {% endif %}
-      {% for field in form %}
-        <div class="calc-row">
-          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-          {{ field }}
-          {% if field.help_text %}<small class="note">{{ field.help_text }}</small>{% endif %}
-          {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
-        </div>
-      {% endfor %}
-      <button type="submit" class="btn2">{% translate "حفظ" %}</button>
-      <a href="{% url 'partners:partners' %}">{% translate "إلغاء" %}</a>
+      {% include "partials/_form.html" %}
+      <div class="form-acts">
+        <button type="submit" class="btn2 primary">{% translate "حفظ" %}</button>
+        <a class="btn2" href="{% url 'partners:partners' %}">{% translate "إلغاء" %}</a>
+      </div>
     </form>
   </div>
 </div>

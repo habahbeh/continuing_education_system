@@ -327,12 +327,19 @@
   /* الحقل المرفوض يُعلَّم بالإطار لا باللون وحده. */
   .fld.has-error input, .fld.has-error select, .fld.has-error textarea {
                   @apply border-danger; }
-  /* خانة الاختيار كانت ترث `w-full` من `.fld input` فتتمدّد عبر العمود.
-     هنا تصير سطراً واحداً: الصندوق ونصّه هدف نقر واحد بلا منطقة ميتة. */
-  .fld.is-check { @apply flex-row-reverse items-center justify-end gap-2; }
+  /* خانة الاختيار كانت ترث `w-full` من `.fld input` فتتمدّد عبر العمود
+     وعنوانها معلّق فوقها. هنا سطر واحد: الصندوق ونصّه هدف نقر واحد بلا منطقة
+     ميتة بينهما. الصندوق أولاً في DOM، و`flex-row` في RTL يضعه على اليمين
+     والنص إلى يساره — وهو الترتيب الصحيح عربياً بلا أداة اتجاهية. */
+  .fld.is-check .check-row { @apply flex flex-row items-center gap-2; }
   .fld.is-check label { @apply text-sm font-bold text-ink cursor-pointer; }
   .fld.is-check input[type="checkbox"] {
                   @apply w-4 h-4 shrink-0 accent-brand-700 cursor-pointer; }
+
+  /* شاشة دخول: بطاقة واحدة في وسط الصفحة. كانت ثلاث شاشات مصادقة تحمل
+     `style="max-width:..."` سطرياً لأن الصنف لم يكن موجوداً. */
+  .auth-card    { @apply w-full mx-auto; max-width: 26rem; }
+  .auth-wrap    { @apply flex items-start justify-center py-6 sm:py-12; }
   .fld-group    { @apply mb-5; }
   .fld-group > legend, .fld-group > .legend {
                   @apply text-xs font-extrabold text-brand-800 mb-2 pb-1.5 w-full border-b border-line; }

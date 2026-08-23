@@ -1,27 +1,25 @@
 {% extends "base.html" %}
 {% load i18n %}
 
-{% block content %}
-<div class="card2">
-  <h1>{% translate "تعديل بيانات مشارك" %}</h1>
-  <p class="note">
-    {% translate "الرقم الجامعي دائم ولا يُعدَّل (BR-001)." %}
-  </p>
+{% block title %}{% translate "تعديل بيانات مشارك — مركز التعليم المستمر" %}{% endblock %}
 
-  <form method="post" novalidate>
-    {% csrf_token %}
-    {% if form.non_field_errors %}
-      <div class="note">{{ form.non_field_errors }}</div>
-    {% endif %}
-    {% for field in form %}
-      <div class="calc-row">
-        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-        {{ field }}
-        {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
+{% block content %}
+<div class="page-head">
+  <h1>{% translate "تعديل بيانات مشارك" %}</h1>
+</div>
+
+<div class="card2">
+  <div class="card2-body">
+    <p class="hint boxed">{% translate "الرقم الجامعي دائم ولا يُعدَّل (BR-001)." %}</p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "partials/_form.html" %}
+      <div class="form-acts">
+        <button type="submit" class="btn2 primary">{% translate "حفظ" %}</button>
+        <a class="btn2" href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
       </div>
-    {% endfor %}
-    <button type="submit" class="btn2">{% translate "حفظ" %}</button>
-    <a href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
-  </form>
+    </form>
+  </div>
 </div>
 {% endblock %}

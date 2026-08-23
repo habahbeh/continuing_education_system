@@ -1,21 +1,45 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n form_ui %}
+
+{% block title %}{% translate "تسجيل الدخول — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  هذه الشاشة كانت مبنية على `.calc-row` — وهو سطر حساب للقراءة فقط يوزّع
+  طرفيه بـ `justify-between`. استُعير لتخطيط نموذج، فجاء العنوان والحقل على
+  سطر واحد متباعدَين، ولم يكن للحقل إطار أصلاً حتى اضطر Sprint 8I إلى ترقيع
+  `.calc-row input` بحدّ. البنية نفسها كانت خطأً لا مظهرها: النموذج يُبنى
+  بـ `.fld` كسائر نماذج النظام.
+{% endcomment %}
 
 {% block content %}
-<div class="card2" style="max-width: 26rem; margin-inline: auto;">
-  <h1>{% translate "تسجيل الدخول" %}</h1>
-  <p class="note">{% translate "حساب محلي داخل النظام — الدور يأتي من الحساب" %}</p>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="card2">
+      <div class="card2-head"><h1>{% translate "تسجيل الدخول" %}</h1></div>
+      <div class="card2-body">
+        <p class="hint">{% translate "حساب محلي داخل النظام — الدور يأتي من الحساب." %}</p>
 
-  <form method="post" novalidate>
-    {% csrf_token %}
-    {% for field in form %}
-      <div class="calc-row">
-        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-        {{ field }}
-        {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
+        {% if form.non_field_errors %}
+          <div class="note danger" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% for field in form %}
+            <div class="fld{% if field.errors %} has-error{% endif %}">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {% field_control field %}
+              {% if field.errors %}
+                <div class="err" id="{% field_error_id field %}">{{ field.errors|join:" · " }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+          <div class="form-acts">
+            <button type="submit" class="btn2 primary">{% translate "دخول" %}</button>
+          </div>
+        </form>
       </div>
-    {% endfor %}
-    <button type="submit" class="btn2">{% translate "دخول" %}</button>
-  </form>
+    </div>
+  </div>
 </div>
 {% endblock %}

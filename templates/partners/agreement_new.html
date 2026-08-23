@@ -1,5 +1,7 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n form_ui %}
+
+{% block title %}{% translate "تسجيل اتفاقية موقّعة — مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
   The calculation model decides which numbers the agreement carries, and the
@@ -10,18 +12,27 @@
   `partner_service.check_agreement_terms` the identical question on every POST,
   so a submission with JavaScript off is refused with the same message beside
   the same field rather than by a database constraint violation.
+
+  Sprint 8J — العرض وحده. `form.grouped` كما هي، و`x-show` على المجموعات كما
+  هو، و`<select>` المكتوب يدوياً يبقى مكتوباً يدوياً لأن `x-model` يحتاج أن
+  يمسك هذا العنصر بعينه. المتغيّر أن الصفوف تُبنى بـ `.fld` لا بـ `.calc-row`
+  — فيقع كل عنوان فوق حقله بدل أن يفترقا إلى طرفَي الصفحة — وأن نص المساعدة
+  صار نصَّ مساعدة لا تنبيهاً رمادياً عائماً.
 {% endcomment %}
 
 {% block content %}
+<div class="page-head">
+  <h1>{% translate "تسجيل اتفاقية موقّعة" %}</h1>
+</div>
+
 <div class="card2" x-data="{ model: '{{ form.calculation_model.value|default:"PERCENT" }}' }">
-  <div class="card2-head"><h1>{% translate "تسجيل اتفاقية موقّعة" %}</h1></div>
   <div class="card2-body">
-    <p class="note">
+    <p class="hint boxed">
       {% translate "تُسجَّل الاتفاقية كما وُقّعت. تُحفظ مسودةً ثم تسري باعتماد منفصل من صفحتها (D-15)." %}
     </p>
 
     {% if not can_create %}
-      <div class="note">
+      <div class="note info">
         {% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — تسجيل الاتفاقيات لمدير المركز (§3.5/25)." %}
       </div>
     {% endif %}
@@ -29,35 +40,55 @@
     <form method="post" novalidate>
       {% csrf_token %}
       {% if form.non_field_errors %}
-        <div class="note">{{ form.non_field_errors }}</div>
+        <div class="note danger" role="alert">{{ form.non_field_errors }}</div>
       {% endif %}
 
       {% for group in form.grouped %}
-        <div {% if group.model %}x-show="model === '{{ group.model }}'"{% endif %}>
-          <h2>{{ group.title }}</h2>
-          {% for field in group.fields %}
-            <div class="calc-row">
-              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-              {% if field.name == "calculation_model" %}
-                <select name="calculation_model" id="{{ field.id_for_label }}" x-model="model">
-                  {% for value, label in field.field.choices %}
-                    <option value="{{ value }}" {% if field.value == value %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              {% else %}
-                {{ field }}
-              {% endif %}
-              {% if field.help_text %}<small class="note">{{ field.help_text }}</small>{% endif %}
-              {% for error in field.errors %}<small class="note">{{ error }}</small>{% endfor %}
-            </div>
-          {% endfor %}
-        </div>
+        <fieldset class="fld-group" {% if group.model %}x-show="model === '{{ group.model }}'"{% endif %}>
+          <legend>{{ group.title }}</legend>
+          <div class="grid2">
+            {% for field in group.fields %}
+              <div class="fld{% if field|is_checkbox %} is-check{% endif %}{% if field.errors %} has-error{% endif %}">
+                {% if field.name == "calculation_model" %}
+                  {# مكتوب يدوياً عمداً: `x-model` يربط Alpine بهذا العنصر. #}
+                  <label for="{{ field.id_for_label }}">
+                    {{ field.label }}{% if field.field.required %}<span class="req" aria-hidden="true">*</span>{% endif %}
+                  </label>
+                  <select name="calculation_model" id="{{ field.id_for_label }}" x-model="model">
+                    {% for value, label in field.field.choices %}
+                      <option value="{{ value }}" {% if field.value == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                {% elif field|is_checkbox %}
+                  <div class="check-row">
+                    {% field_control field %}
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                  </div>
+                {% else %}
+                  <label for="{{ field.id_for_label }}">
+                    {{ field.label }}{% if field.field.required %}<span class="req" aria-hidden="true">*</span>{% endif %}
+                  </label>
+                  {% field_control field %}
+                {% endif %}
+
+                {% if field.help_text %}
+                  <div class="help" id="{% field_help_id field %}">{{ field.help_text }}</div>
+                {% endif %}
+                {% if field.errors %}
+                  <div class="err" id="{% field_error_id field %}">{{ field.errors|join:" · " }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </fieldset>
       {% endfor %}
 
-      {% if can_create %}
-        <button type="submit" class="btn2">{% translate "حفظ كمسودة" %}</button>
-      {% endif %}
-      <a href="{% url 'partners:agreements' %}">{% translate "إلغاء" %}</a>
+      <div class="form-acts">
+        {% if can_create %}
+          <button type="submit" class="btn2 primary">{% translate "حفظ كمسودة" %}</button>
+        {% endif %}
+        <a class="btn2" href="{% url 'partners:agreements' %}">{% translate "إلغاء" %}</a>
+      </div>
     </form>
   </div>
 </div>

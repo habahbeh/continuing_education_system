@@ -1,14 +1,49 @@
-{% load i18n %}
-{% comment %}Renders a plain Form. Errors come from the form; service refusals arrive as messages.{% endcomment %}
+{% load i18n form_ui %}
+{% comment %}
+  Renders a plain Form. Errors come from the form; service refusals arrive as
+  messages.
+
+  Sprint 8J — العرض وحده تغيّر. لا اسم حقل ولا نوع أداة ولا قاعدة تحقّق:
+
+  * `help_text` كان يُهمَل إهمالاً كاملاً. ثمانية وعشرون حقلاً في النظام تحمل
+    جملة تشرح قاعدة — «Q-01 · BR-092 — تعطيله يتطلب نصاً صريحاً في الاتفاقية» —
+    وكانت كلها تُكتب في النموذج ولا تصل إلى من يملأ الحقل.
+  * الحقل المرفوض لم يكن يحمل `aria-invalid`، ولا كان النص المفسِّر مربوطاً
+    بأداته بـ `aria-describedby`؛ كان لوناً أحمر يراه المبصر وحده.
+  * خانة الاختيار كانت ترث `w-full` من `.fld input` فتتمدّد عبر العمود
+    وعنوانها معلّق فوقها. الآن سطر واحد وهدف نقر واحد.
+  * الحقول المخفية كانت تدخل الشبكة ومعها عنوان مرئي لأداة غير مرئية.
+  * الحقل الإلزامي لم يكن يُميَّز إطلاقاً. النجمة `aria-hidden` لأن Django
+    يضع `required` على الأداة نفسها وقارئ الشاشة ينطق بها.
+{% endcomment %}
+
 {% if form.non_field_errors %}
-  <div class="note danger">{{ form.non_field_errors }}</div>
+  <div class="note danger" role="alert">{{ form.non_field_errors }}</div>
 {% endif %}
+
+{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+
 <div class="grid2">
-  {% for field in form %}
-    <div class="fld">
-      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.errors %}<div class="err">{{ field.errors|join:" · " }}</div>{% endif %}
+  {% for field in form.visible_fields %}
+    <div class="fld{% if field|is_checkbox %} is-check{% endif %}{% if field.errors %} has-error{% endif %}">
+      {% if field|is_checkbox %}
+        <div class="check-row">
+          {% field_control field %}
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        </div>
+      {% else %}
+        <label for="{{ field.id_for_label }}">
+          {{ field.label }}{% if field.field.required %}<span class="req" aria-hidden="true">*</span>{% endif %}
+        </label>
+        {% field_control field %}
+      {% endif %}
+
+      {% if field.help_text %}
+        <div class="help" id="{% field_help_id field %}">{{ field.help_text }}</div>
+      {% endif %}
+      {% if field.errors %}
+        <div class="err" id="{% field_error_id field %}">{{ field.errors|join:" · " }}</div>
+      {% endif %}
     </div>
   {% endfor %}
 </div>
