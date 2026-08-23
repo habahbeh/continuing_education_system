@@ -47,6 +47,10 @@
     U+FB50-FDFF, U+FE70-FEFF;
 }
 
+/* Alpine يُعرّف `x-cloak` على العناصر التي لا تُعرض قبل إقلاعه. خارج أي
+   `@layer` عمداً: المحدِّد بلا صنف، وداخل طبقة المكوّنات يُسقطه التنقيح. */
+[x-cloak] { display: none !important; }
+
 /*
  * ===========================================================================
  * @layer base — ما كان مفقوداً في كل شاشة
@@ -412,10 +416,32 @@
 
   /* --- Sprint 8B: the shell ------------------------------------------- */
   .layout       { @apply flex flex-1 items-stretch min-w-0; }
-  /* القائمة الجانبية تبقى في هذه الشريحة كما هي. تحويلها إلى درج على الهاتف
-     يحتاج زرّ فتح في `base.html`، وهو نطاق الشريحة الثانية — وشحن الدرج قبل
-     زرّه يخفي التنقّل عن الهاتف بلا بديل. */
-  .sidebar      { @apply w-64 shrink-0 border-e border-line bg-white py-3 overflow-y-auto; }
+  /*
+   * القائمة الجانبية كانت `w-64 shrink-0` بلا نقطة توقف واحدة: على الهاتف
+   * تبتلع 256px وتسحق عمود المحتوى إلى شريط لا يُقرأ. من `md` فصاعداً تبقى
+   * كما كانت تماماً؛ دونها تصير درجاً ينزلق من الحافة **المنطقية** البادئة.
+   *
+   * الإزاحة عبر متغيّر لا عبر `-translate-x-full`: محور X للشاشة لا للنص،
+   * فقيمته تنعكس مع اتجاه الصفحة. هكذا يعمل الدرج في RTL وفي LTR معاً.
+   */
+  .sidebar      { @apply w-64 shrink-0 border-e border-line bg-white py-3 overflow-y-auto; --nav-off: -100%; }
+  [dir="rtl"] .sidebar { --nav-off: 100%; }
+  .nav-close-row{ @apply hidden; }
+
+  @media (max-width: 767px) {
+    .sidebar {
+      @apply fixed z-40 transition-transform duration-150;
+      inset-block: 0; inset-inline-start: 0;
+      transform: translateX(var(--nav-off));
+    }
+    .sidebar.is-open { transform: translateX(0); }
+    .nav-close-row { @apply flex justify-end px-4 pb-3 mb-1 border-b border-line; }
+  }
+  .nav-scrim    { @apply fixed inset-0 z-30 bg-ink/45 md:hidden; }
+  .nav-toggle   { @apply md:hidden inline-flex items-center justify-center w-9 h-9 shrink-0
+                         rounded-lg text-white bg-white/10; touch-action: manipulation; }
+  .nav-toggle:hover { @apply bg-white/20; }
+  .nav-toggle svg { @apply w-5 h-5; }
   .nav-group    { @apply mb-4; }
   .nav-group-title { @apply px-4 pb-1 text-2xs font-black text-ink-3; letter-spacing: .04em; }
   .nav-item     { @apply flex items-center gap-2 px-4 py-2 text-sm font-bold text-ink-2 transition-colors duration-150;

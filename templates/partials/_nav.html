@@ -7,15 +7,30 @@
   both PARTNERS, since creation is an ACTION on that screen rather than a
   screen of its own — and marking on the screen alone lit them both at once.
   Found in the Sprint 8I browser pass.
+
+  Sprint 8J: نفس الشجرة ونفس المصدر، ولا قرار صلاحية جديد هنا. المضاف سلوك
+  العرض وحده — على الهاتف تصير القائمة درجاً ينزلق من الحافة البادئة بدل أن
+  تبتلع 256px من عرض الشاشة وتسحق عمود المحتوى. الحالة في Alpine على
+  `<body>`، والدرج مغلق افتراضياً وظاهر ثابتاً من `md` فصاعداً.
 {% endcomment %}
 {% if nav_groups %}
-  <nav class="sidebar" aria-label="{% translate 'التنقّل الرئيسي' %}">
+  <nav class="sidebar" id="sidebar" aria-label="{% translate 'التنقّل الرئيسي' %}"
+       :class="{ 'is-open': nav }">
+
+    {# زرّ الإغلاق للهاتف وحده: على الشاشة الكبيرة القائمة ليست درجاً. #}
+    <div class="nav-close-row">
+      <button type="button" class="btn2 sm" x-ref="navClose" @click="nav = false">
+        {% translate "إغلاق" %}
+      </button>
+    </div>
+
     {% for group in nav_groups %}
       <div class="nav-group">
         <div class="nav-group-title">{{ group.title }}</div>
         {% for item in group.items %}
           <a class="nav-item{% if item.is_active %} active{% endif %}"
              href="{{ item.url }}"
+             @click="nav = false"
              {% if item.is_active %}aria-current="page"{% endif %}>
             {{ item.label }}
           </a>

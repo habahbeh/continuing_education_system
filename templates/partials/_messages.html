@@ -1,5 +1,14 @@
+{% comment %}
+  رسائل Django. `message.tags` تُطبع كما هي في الصنف، ومفرداتها
+  success/error/warning/debug — ولكل واحدة قاعدة لون في `input.css`
+  (وفحص `test_every_django_message_tag_has_a_colour` يثبّت ذلك).
+
+  Sprint 8J: أُضيف `aria-live`. الرسالة هنا نتيجة فعل تمّ للتوّ — حفظ نجح أو
+  رفض بقاعدة — وتظهر بعد إعادة تحميل الصفحة، فقارئ الشاشة قد يمرّ فوقها.
+  `role="status"` يُسمعها دون مقاطعة ما يقرأه المستخدم.
+{% endcomment %}
 {% if messages %}
-  <div class="messages">
+  <div class="messages" role="status" aria-live="polite">
     {% for message in messages %}
       <div class="note {{ message.tags }}">{{ message }}</div>
     {% endfor %}

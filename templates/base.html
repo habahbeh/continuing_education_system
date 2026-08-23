@@ -4,32 +4,69 @@
   {# الكتلة هنا لا داخل `_head.html`: كتل Django لا تعبر `{% include %}`. #}
   <title>{% block title %}{% translate "مركز التعليم المستمر — جامعة البترا" %}{% endblock %}</title>
   {% include "partials/_head.html" %}
+  {% comment %}
+    شبكة أمان: القائمة الجانبية تصير درجاً على الهاتف يفتحه Alpine. إن تعطّل
+    JS يعود الدرج إلى مكانه في التدفّق بدل أن يبقى مخفياً بلا زرّ يفتحه —
+    التنقّل لا يجوز أن يتوقف على سكربت.
+  {% endcomment %}
+  <noscript><style>
+    @media (max-width:767px){
+      .layout{flex-direction:column}
+      .sidebar{position:static!important;transform:none!important;width:100%!important;
+               border-inline-end:0;border-block-end:1px solid #d7dde4}
+    }
+  </style></noscript>
 </head>
-<body class="bg-surface text-ink">
+<body class="bg-surface text-ink"
+      x-data="{ nav: false }"
+      @keydown.escape.window="if (nav) { nav = false; $refs.navToggle && $refs.navToggle.focus() }">
+
+  {# أول ما يصل إليه التركيز في الصفحة: قفزة فوق القائمة إلى المحتوى. #}
+  <a class="skip-link" href="#main">{% translate "تخطَّ إلى المحتوى" %}</a>
+
   <div class="min-h-screen flex flex-col">
     <header class="topbar">
+      {% if nav_groups %}
+        <button type="button" class="nav-toggle" x-ref="navToggle"
+                @click="nav = !nav; if (nav) $nextTick(() => $refs.navClose && $refs.navClose.focus())"
+                :aria-expanded="nav ? 'true' : 'false'"
+                aria-controls="sidebar"
+                aria-label="{% translate 'القائمة' %}">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" aria-hidden="true">
+            <path d="M3 5h14M3 10h14M3 15h14"/>
+          </svg>
+        </button>
+      {% endif %}
+
       <div class="brand">
-        <span class="logo">UOP</span>
+        <span class="logo" translate="no">UOP</span>
         <span>
           {% translate "مركز التعليم المستمر وخدمة المجتمع" %}
           <small>{% translate "جامعة البترا — عمّان، الأردن" %}</small>
         </span>
       </div>
+
       {% if user.is_authenticated %}
         <div class="topbar-user">
-          <span>{{ user.full_name_ar|default:user.get_username }}</span>
+          <span class="who">{{ user.full_name_ar|default:user.get_username }}</span>
           <span class="chip">{{ user.get_role_display }}</span>
           <form method="post" action="{% url 'people:logout' %}">
             {% csrf_token %}
-            <button type="submit" class="btn2">{% translate "خروج" %}</button>
+            <button type="submit" class="btn2 sm">{% translate "خروج" %}</button>
           </form>
         </div>
       {% endif %}
     </header>
 
     <div class="layout">
+      {% if nav_groups %}
+        {# الحاجب يغلق الدرج بالنقر خارجه. مخفي عن قارئ الشاشة — الزرّ يكفيه. #}
+        <div class="nav-scrim" x-show="nav" x-cloak @click="nav = false" aria-hidden="true"></div>
+      {% endif %}
       {% include "partials/_nav.html" %}
-      <main class="content flex-1">
+
+      <main class="content flex-1" id="main" tabindex="-1">
         {% include "partials/_messages.html" %}
         {% block content %}{% endblock %}
       </main>
