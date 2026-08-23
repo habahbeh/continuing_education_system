@@ -3,29 +3,173 @@
 @tailwind utilities;
 
 /*
- * Component layer — carries the demo's visual identity so templates stay
- * readable instead of turning into utility soup (ADR-003).
+ * ===========================================================================
+ * الخط — Noto Kufi Arabic، مستضاف محلياً (OFL-1.1)
+ * ===========================================================================
+ * `tailwind.config.js` كان يطلب هذا الخط منذ Sprint 1، و`static/fonts/` كان
+ * فارغاً ولا `@font-face` في المشروع — فكان كل النظام يُعرض بخط النظام:
+ * Geeza Pro على macOS و Segoe UI على Windows. الطباعة كانت عرَضاً لا اختياراً.
  *
- * RTL RULE: logical properties only (ms-/me-/ps-/pe-/start-/end-).
- * Directional utilities (ml-/mr-/pl-/pr-/left-/right-) are banned and the
- * static test A-06 fails the build if one appears in a template.
+ * A-07 يمنع أي مورد خارجي، فالملفات مودَعة في المستودع لا مربوطة بـ CDN.
+ * المصدر والرخصة في `static/fonts/PROVENANCE.md`.
+ *
+ * `unicode-range` يقصر التحميل على النص العربي: الأرقام والرموز اللاتينية
+ * تبقى على خط النظام لأن أرقامه الجدولية أدق في محاذاة المبالغ.
+ */
+@font-face {
+  font-family: "Noto Kufi Arabic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/noto-kufi-arabic-400.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+    U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "Noto Kufi Arabic";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/noto-kufi-arabic-600.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+    U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "Noto Kufi Arabic";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../fonts/noto-kufi-arabic-800.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+    U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+
+/*
+ * ===========================================================================
+ * @layer base — ما كان مفقوداً في كل شاشة
+ * ===========================================================================
+ */
+@layer base {
+  /*
+   * أخطر عيب وجدَته مراجعة Sprint 8J، وأصعبه ظهوراً في مراجعة الكود:
+   * Preflight من Tailwind يُصدر `h1,h2,h3,h4,h5,h6{font-size:inherit;
+   * font-weight:inherit}` — وفي القوالب ثمانية وخمسون `<h1>` وخمسة وسبعون
+   * `<h2>` **بلا صنف واحد**. فكان عنوان كل شاشة في النظام يُعرض بحجم النص
+   * العادي ووزنه: `<h1>{{ title }}</h1>` في لوحة المؤشرات لا يختلف عن أي
+   * فقرة. لم يكن في النظام تدرّج عناوين إطلاقاً.
+   *
+   * إصلاحه هنا — في طبقة الأساس — يصلح الشاشات الإحدى والسبعين كلها بلا
+   * تعديل قالب واحد.
+   */
+  h1 { @apply text-2xl font-extrabold text-ink; text-wrap: balance; }
+  h2 { @apply text-lg font-extrabold text-ink; text-wrap: balance; }
+  h3 { @apply text-sm font-extrabold text-ink; }
+  h4 { @apply text-xs font-extrabold text-ink-2; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    @apply bg-surface text-ink text-base antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /*
+   * لم يكن في المشروع قاعدة تركيز واحدة. الاعتماد كان على حلقة المتصفح
+   * الافتراضية، وهي على شريط العنوان العنابي وعلى عنصر القائمة النشط
+   * (عنابي على تدرّج عنابي) تكاد لا تُرى. نظام إدخال بيانات يُشغَّل نصفه
+   * بلوحة المفاتيح لا يجوز أن يكون موضع التركيز فيه تخميناً.
+   *
+   * `:focus-visible` لا `:focus` — حتى لا تظهر الحلقة على النقر بالفأرة.
+   */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white rounded-sm;
+  }
+
+  ::selection { @apply bg-brand-100 text-brand-900; }
+
+  /* الأرقام في كل مكان: جدولية بلا استثناء حتى تصطفّ المبالغ عمودياً. */
+  input[type="number"], input[type="date"], .num, td.num, th.num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Windows بالوضع الداكن يقلب `<select>` الأصلي إن لم تُصرَّح ألوانه. */
+  select { @apply bg-white text-ink; }
+
+  [hidden] { display: none !important; }
+}
+
+/*
+ * ===========================================================================
+ * @layer components — الهوية البصرية
+ * ===========================================================================
+ * القوالب تبقى Django مقروءاً بدل أن تتحول إلى حساء أصناف (ADR-003).
+ *
+ * قاعدة RTL: الخصائص المنطقية وحدها (ms-/me-/ps-/pe-/start-/end-).
+ * الأدوات الاتجاهية (ml-/mr-/pl-/pr-/left-/right-) ممنوعة، والفحص الثابت
+ * A-06 يُفشل البناء عند ظهور واحدة منها في قالب.
+ *
+ * العنصر المميِّز — «حاشية الدفتر»: خط عنابي بعرض 3px على الحافة المنطقية
+ * البادئة. كان موجوداً أصلاً في عنصر القائمة النشط وحده؛ رُقّي هنا إلى إشارة
+ * واحدة متسقة تعني في كل موضع الشيء نفسه: *هذا هو السجل الحالي، أو هذا
+ * موضعك منه*. لا يظهر إلا في أربعة مواضع، وأهمها بطاقات خطوات براءة الذمة —
+ * ممتلئ إذا صودق على الخطوة، شعرة إن كانت قائمة — فيصير تقدّم المعاملة
+ * مقروءاً من الحاشية بنظرة واحدة بلا أداة جديدة.
  */
 @layer components {
-  .topbar   { @apply flex items-center gap-3 bg-brand text-white px-5 py-3; }
-  .brand    { @apply flex items-center gap-3 font-extrabold; }
-  .brand small { @apply block font-normal text-xs opacity-80; }
-  .logo     { @apply inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/15 font-black; }
-  .content  { @apply p-5 max-w-6xl mx-auto w-full; }
-  .footer   { @apply px-5 py-3 text-ink-3 border-t border-line; }
 
+  /* --- القشرة ---------------------------------------------------------- */
+  .topbar   { @apply flex items-center gap-3 bg-brand-700 text-white px-4 py-2.5 sm:px-5 sm:py-3; }
+  .brand    { @apply flex items-center gap-3 font-extrabold min-w-0; }
+  .brand > span { @apply min-w-0 truncate; }
+  .brand small { @apply block font-normal text-2xs opacity-80 truncate; }
+  .logo     { @apply inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-lg bg-white/15 font-black text-xs;
+              letter-spacing: .02em; }
+  .content  { @apply p-4 sm:p-6 w-full min-w-0; max-width: theme(maxWidth.content); }
+  .footer   { @apply px-5 py-3 text-xs text-ink-3 border-t border-line bg-white; }
+
+  /* يقفز إلى المحتوى قبل أي شيء آخر في الصفحة، ويبقى مخفياً حتى يُركَّز. */
+  .skip-link { @apply sr-only; }
+  .skip-link:focus {
+    @apply not-sr-only fixed top-2 z-50 rounded-lg bg-white px-4 py-2 text-sm font-bold text-brand-700
+           ring-2 ring-brand-500;
+    inset-inline-start: theme(spacing.2);
+  }
+
+  /* --- ترويسة الصفحة --------------------------------------------------- */
+  /* لم يكن في النظام نمط ترويسة: كل قالب يبدأ بـ `<h1>` سائب، والإجراءات
+     تتناثر بين شريط أدوات فوق المحتوى وروابط عائمة أسفل الصفحة. */
+  .page-head {
+    @apply flex flex-wrap items-start gap-x-4 gap-y-3 mb-5 ps-4;
+    border-inline-start: 3px solid theme(colors.brand.700);
+  }
+  .page-head h1     { @apply m-0 min-w-0; }
+  .page-head .eyebrow { @apply block text-2xs font-bold text-ink-3 mb-1; letter-spacing: .04em; }
+  .page-head .sub   { @apply mt-1 text-xs text-ink-3 max-w-prose; text-wrap: pretty; }
+  .page-head .code  { @apply text-base font-bold text-ink-3 align-middle; font-variant-numeric: tabular-nums; }
+  .page-head .acts  { @apply flex flex-wrap items-center gap-2; margin-inline-start: auto; }
+
+  /* --- البطاقات -------------------------------------------------------- */
   .card2        { @apply bg-white border border-line rounded-xl overflow-hidden mb-4; }
-  .card2-head   { @apply flex items-center gap-3 px-4 py-3 border-b border-line bg-surface-2; }
-  .card2-head h2{ @apply text-base font-extrabold m-0; }
+  .card2-head   { @apply flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b border-line bg-surface-2; }
+  .card2-head h2{ @apply text-sm font-extrabold m-0 min-w-0; }
+  .card2-head .acts { @apply flex flex-wrap items-center gap-2; margin-inline-start: auto; }
   .card2-body   { @apply p-4; }
 
+  /* --- الجداول --------------------------------------------------------- */
+  /* بعض الجداول عشرة أعمدة (المخالصات · دفعات الترحيل)، ولم يكن لها مهرب
+     أفقي: كانت تدفع جسم الصفحة كله للتمدد. الغلاف يحصر التمرير فيها. */
+  .tbl-wrap     { @apply w-full overflow-x-auto; overscroll-behavior-x: contain; }
   .tbl          { @apply w-full border-collapse text-sm; }
-  .tbl th       { @apply text-start font-bold bg-surface-2 px-3 py-2 border-b border-line; }
-  .tbl td       { @apply px-3 py-2 border-b border-line-2; }
+  .tbl th       { @apply text-start font-bold text-ink-2 bg-surface-2 px-3 py-2 border-b border-line whitespace-nowrap; }
+  .tbl td       { @apply px-3 py-2 border-b border-line-2 align-middle; }
+  .tbl tbody tr:last-child td { @apply border-b-0; }
+  .tbl tbody tr:hover td      { @apply bg-brand-50; }
+  .tbl tbody tr.is-selected td{ @apply bg-brand-50; }
+  /* المبالغ إلى الحافة المنتهية حتى تصطفّ الآحاد تحت الآحاد. */
+  .tbl td.num, .tbl th.num { @apply text-end; font-variant-numeric: tabular-nums; }
   /* An action cell holds a link plus ONE <form> per button — a button that
      POSTs needs its own form and its own CSRF token — and a form is a block
      element, so the buttons stacked vertically down the row instead of
@@ -35,19 +179,34 @@
   .tbl td > form + form,
   .tbl td > a + form
                 { @apply ms-1; }
+  .tbl td .btn2 { @apply px-2 py-1 text-xs; }
+  /* خلية الإجراءات لا تلتفّ ولا تُمطّ. */
+  .tbl td.acts  { @apply whitespace-nowrap text-end; }
 
-  .chip         { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-surface-2 text-ink-2; }
-  .chip.ok      { @apply bg-ok-soft text-ok; }
-  .chip.warn    { @apply bg-warn-soft text-warn; }
-  .chip.danger  { @apply bg-danger-soft text-danger; }
-  .chip.info    { @apply bg-info-soft text-info; }
-  .chip.brand   { @apply bg-brand-soft text-brand; }
+  /* --- الشارات --------------------------------------------------------- */
+  .chip         { @apply inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-2xs font-bold
+                         bg-surface-2 text-ink-2 whitespace-nowrap; }
+  .chip.ok      { @apply bg-ok-soft text-ok border-ok-line; }
+  .chip.warn    { @apply bg-warn-soft text-warn border-warn-line; }
+  .chip.danger  { @apply bg-danger-soft text-danger border-danger-line; }
+  .chip.info    { @apply bg-info-soft text-info border-info-line; }
+  .chip.brand   { @apply bg-brand-100 text-brand-700 border-brand-200; }
+  /* نقطة الحالة: إشارة ثانية إلى جانب اللون، لأن اللون وحده لا يكفي. */
+  .chip.dot::before {
+    content: ""; @apply inline-block w-1.5 h-1.5 rounded-full bg-current shrink-0;
+  }
 
-  .note         { @apply flex gap-2 rounded-lg border px-3 py-2.5 mb-3 text-sm border-line bg-surface-2; }
-  .note.ok      { @apply border-ok/30 bg-ok-soft text-ok; }
-  .note.warn    { @apply border-warn/30 bg-warn-soft text-warn; }
-  .note.danger  { @apply border-danger/30 bg-danger-soft text-danger; }
-  .note.info    { @apply border-info/30 bg-info-soft text-info; }
+  /* --- التنبيهات ------------------------------------------------------- */
+  /* `.note` كان يؤدي ثلاث وظائف: تنبيه، وشرح داخل نموذج، وتعليق تحت اسم
+     المشارك. هنا يبقى تنبيهاً؛ الشرح انتقل إلى `.hint`. */
+  .note         { @apply flex gap-2 rounded-lg border border-line bg-surface-2 text-ink-2 ps-3 pe-3 py-2.5 mb-3 text-sm;
+                  border-inline-start-width: 3px; border-inline-start-color: theme(colors.line.DEFAULT);
+                  text-wrap: pretty; }
+  .note > :last-child { @apply min-w-0; }
+  .note.ok      { @apply border-ok-line bg-ok-soft text-ok; border-inline-start-color: theme(colors.ok.DEFAULT); }
+  .note.warn    { @apply border-warn-line bg-warn-soft text-warn; border-inline-start-color: theme(colors.warn.DEFAULT); }
+  .note.danger  { @apply border-danger-line bg-danger-soft text-danger; border-inline-start-color: theme(colors.danger.DEFAULT); }
+  .note.info    { @apply border-info-line bg-info-soft text-info; border-inline-start-color: theme(colors.info.DEFAULT); }
   /* Django's message tags are success/error/warning/debug, and `_messages.html`
      prints them straight into the class attribute. Only `info` happened to
      collide with a rule that existed, so every success and every refusal in
@@ -55,17 +214,76 @@
      tell "تم الحفظ" from "مرفوض" without reading it. Found in the Sprint 8I
      browser pass; aliased rather than renamed so the `.note.ok` / `.warn` /
      `.danger` classes the templates use directly keep working. */
-  .note.success { @apply border-ok/30 bg-ok-soft text-ok; }
-  .note.warning { @apply border-warn/30 bg-warn-soft text-warn; }
-  .note.error   { @apply border-danger/30 bg-danger-soft text-danger; }
-  .note.debug   { @apply border-info/30 bg-info-soft text-info; }
+  .note.success { @apply border-ok-line bg-ok-soft text-ok; border-inline-start-color: theme(colors.ok.DEFAULT); }
+  .note.warning { @apply border-warn-line bg-warn-soft text-warn; border-inline-start-color: theme(colors.warn.DEFAULT); }
+  .note.error   { @apply border-danger-line bg-danger-soft text-danger; border-inline-start-color: theme(colors.danger.DEFAULT); }
+  .note.debug   { @apply border-info-line bg-info-soft text-info; border-inline-start-color: theme(colors.info.DEFAULT); }
 
+  /* شرح داخل السياق — قاعدة عمل أو حدّ نظام، لا حدث. أهدأ من التنبيه. */
+  .hint         { @apply text-xs text-ink-3 mb-3; text-wrap: pretty; }
+  .hint.boxed   { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2; }
+
+  /* --- الأزرار --------------------------------------------------------- */
+  /* كانت المفردة كلها `.btn2` و`.btn2.primary`: في صف التسجيلات يتساوى
+     «كشف الحساب» و«استلام الوصل» و«اعتماد»، وفي براءة الذمة تتساوى
+     «مصادرة التأمين» مع «عرض». الأوزان الأربعة تجعل الفعل التالي ظاهراً. */
+  /* `text-ink` is not decoration. Without it the button inherits its
+     colour, and inside `.topbar` — which sets white on maroon — the white
+     background then carries white text: the logout button rendered as an
+     empty white box. Found in the Sprint 8I browser pass. */
+  /* `text-ink` يبقى على هذا السطر بعينه: الفحص
+     `test_the_button_class_sets_its_own_text_colour` يقرأ أول سطر يبدأ
+     بـ `.btn2` ويطلب فيه لوناً، فلفّ `@apply` على سطرين يُسقطه من نظره. */
+  .btn2         { @apply inline-flex items-center justify-center gap-2 text-sm font-bold text-ink whitespace-nowrap; }
+  .btn2         { @apply rounded-lg border border-line bg-white px-3 py-2 transition-colors duration-150;
+                  touch-action: manipulation; }
+  .btn2:hover   { @apply bg-surface-2 border-line; }
+  .btn2:active  { @apply bg-line-2; }
+  .btn2.primary { @apply bg-brand-700 text-white border-brand-700; }
+  .btn2.primary:hover  { @apply bg-brand-600 border-brand-600; }
+  .btn2.primary:active { @apply bg-brand-800 border-brand-800; }
+  .btn2.danger  { @apply bg-white text-danger border-danger-line; }
+  .btn2.danger:hover   { @apply bg-danger-soft border-danger; }
+  .btn2.ghost   { @apply bg-transparent border-transparent text-brand-700 px-2; }
+  .btn2.ghost:hover    { @apply bg-brand-50 border-brand-200; }
+  .btn2.sm      { @apply px-2 py-1 text-xs; }
+  .btn2:disabled, .btn2[aria-disabled="true"] {
+    @apply opacity-50 cursor-not-allowed;
+  }
+  .btn2:disabled:hover { @apply bg-white; }
+
+  /* الروابط داخل المحتوى لم يكن لها أي تنسيق. */
+  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link) {
+    @apply text-brand-700 font-bold;
+  }
+  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):hover {
+    @apply underline;
+  }
+
+  /* --- الملخّصات العددية ----------------------------------------------- */
   .kpi          { @apply bg-white border border-line rounded-xl p-4; }
-  .kpi .label   { @apply text-xs text-ink-3 font-bold; }
-  .kpi .value   { @apply text-2xl font-black mt-1; }
+  .kpi .label   { @apply text-2xs text-ink-3 font-bold; letter-spacing: .03em; }
+  .kpi .value   { @apply text-3xl font-black mt-1 text-ink; font-variant-numeric: tabular-nums; }
+  .kpi .foot    { @apply mt-1 text-2xs text-ink-3; }
+  /* رقم واحد مميَّز لكل دور. التسلسل يأتي من إبراز واحد لا من أربعة متساوية. */
+  .kpi.primary  { @apply bg-brand-100 border-brand-200; }
+  .kpi.primary .label { @apply text-brand-800; }
+  .kpi.primary .value { @apply text-brand-800; }
+  .kpi.primary .foot  { @apply text-brand-800/80; }
+  /* بطاقة قابلة للنقر تصل بالرقم إلى الشاشة التي تفسّره. */
+  a.kpi         { @apply block transition-colors duration-150; }
+  a.kpi:hover   { @apply border-brand-300; }
 
-  .calc-row     { @apply flex items-center justify-between px-3 py-2 border-b border-line-2; }
-  .calc-row .val{ @apply font-bold tabular-nums; }
+  /* --- قوائم التفاصيل -------------------------------------------------- */
+  .dl           { @apply grid gap-x-4 gap-y-0 text-sm; grid-template-columns: max-content 1fr; }
+  .dl dt        { @apply text-xs text-ink-3 font-bold py-2 border-b border-line-2; }
+  .dl dd        { @apply m-0 py-2 border-b border-line-2 min-w-0; overflow-wrap: anywhere; }
+  .dl dt:last-of-type, .dl dd:last-of-type { @apply border-b-0; }
+
+  /* --- سطر الحساب ------------------------------------------------------ */
+  .calc-row     { @apply flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-line-2; }
+  .calc-row:last-child { @apply border-b-0; }
+  .calc-row .val{ @apply font-bold; font-variant-numeric: tabular-nums; }
   /* `.calc-row` began as a read-only calculation line and ten templates then
      reused it to lay out FORMS — login and the participant form among them.
      Only `.fld input` had ever been given a border, so on those screens the
@@ -78,35 +296,93 @@
   .calc-row textarea
                 { @apply rounded-lg border border-line bg-white px-3 py-2 text-sm min-w-[16rem]; }
   .calc-row input[type="checkbox"]
-                { @apply w-auto p-0; }
+                { @apply w-auto min-w-0 p-0; }
 
-  /* `text-ink` is not decoration. Without it the button inherits its
-     colour, and inside `.topbar` — which sets white on maroon — the white
-     background then carries white text: the logout button rendered as an
-     empty white box. Found in the Sprint 8I browser pass. */
-  .btn2         { @apply inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-bold text-ink; }
-  .btn2.primary { @apply bg-brand text-white border-brand; }
+  /* --- شريط الأدوات والمرشّحات ------------------------------------------ */
+  .toolbar      { @apply flex flex-wrap items-center gap-2 mb-3; }
+  .toolbar .spacer { @apply flex-1; }
+  /* شريط بحث/تصفية له صندوقه، فلا يختلط بمحتوى الصفحة. */
+  .filterbar    { @apply flex flex-wrap items-end gap-2 rounded-xl border border-line bg-white p-3 mb-4; }
+  .filterbar .fld { @apply mb-0; }
+  .filterbar input, .filterbar select {
+                  @apply rounded-lg border border-line bg-white px-3 py-2 text-sm; }
+  .filterbar .count { @apply text-xs text-ink-3 font-bold; margin-inline-start: auto; }
 
-  .dl           { @apply grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm; }
-  .dl dt        { @apply text-ink-3 font-bold; }
-  .dl dd        { @apply m-0; }
+  /* --- الحقول ---------------------------------------------------------- */
+  .fld          { @apply flex flex-col gap-1 mb-3 min-w-0; }
+  .fld label    { @apply text-xs font-bold text-ink-2; }
+  .fld .req     { @apply text-danger font-black; }
+  .fld input, .fld select, .fld textarea {
+                  @apply rounded-lg border border-line px-3 py-2 text-sm bg-white w-full text-ink; }
+  .fld textarea { @apply min-h-[5rem]; }
+  .fld input:hover, .fld select:hover, .fld textarea:hover { @apply border-ink-3/50; }
+  .fld input:disabled, .fld select:disabled, .fld textarea:disabled {
+                  @apply bg-surface-2 text-ink-3 cursor-not-allowed; }
+  .fld .help    { @apply text-2xs text-ink-3; text-wrap: pretty; }
+  .fld .err     { @apply text-xs font-bold text-danger; }
+  /* الحقل المرفوض يُعلَّم بالإطار لا باللون وحده. */
+  .fld.has-error input, .fld.has-error select, .fld.has-error textarea {
+                  @apply border-danger; }
+  /* خانة الاختيار كانت ترث `w-full` من `.fld input` فتتمدّد عبر العمود.
+     هنا تصير سطراً واحداً: الصندوق ونصّه هدف نقر واحد بلا منطقة ميتة. */
+  .fld.is-check { @apply flex-row-reverse items-center justify-end gap-2; }
+  .fld.is-check label { @apply text-sm font-bold text-ink cursor-pointer; }
+  .fld.is-check input[type="checkbox"] {
+                  @apply w-4 h-4 shrink-0 accent-brand-700 cursor-pointer; }
+  .fld-group    { @apply mb-5; }
+  .fld-group > legend, .fld-group > .legend {
+                  @apply text-xs font-extrabold text-brand-800 mb-2 pb-1.5 w-full border-b border-line; }
+  .grid2        { @apply grid gap-x-4 sm:grid-cols-2; }
+  /* شريط إجراءات النموذج: الفعل الأساسي أولاً وله وزنه. */
+  .form-acts    { @apply flex flex-wrap items-center gap-2 pt-3 mt-1 border-t border-line; }
+
+  /* --- الخطوات المتسلسلة ------------------------------------------------ */
+  /* براءة الذمة والملف الوزاري والنقل: سجلات تمرّ بخطوات محكومة. هنا تعمل
+     «حاشية الدفتر» عملاً فعلياً — ممتلئة للمصادَق عليها، شعرة للقائمة. */
+  .step         { @apply bg-white border border-line rounded-xl overflow-hidden mb-4;
+                  border-inline-start-width: 3px;
+                  border-inline-start-color: theme(colors.line.DEFAULT); }
+  .step.is-done { border-inline-start-color: theme(colors.brand.700); }
+  .step-head    { @apply flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 border-b border-line bg-surface-2; }
+  .step-head h2 { @apply text-sm font-extrabold m-0 min-w-0; }
+  .step-num     { @apply inline-flex items-center justify-center w-6 h-6 shrink-0 rounded-full
+                         text-2xs font-black bg-line-2 text-ink-2; font-variant-numeric: tabular-nums; }
+  .step.is-done .step-num { @apply bg-brand-700 text-white; }
+  .step-body    { @apply p-4; }
+
+  /* --- الحالات الفارغة -------------------------------------------------- */
+  /* كانت جملة واحدة داخل `<td colspan>`: «لا شركاء». لا سبب ولا خطوة تالية. */
+  .empty        { @apply p-8 text-center text-ink-3 text-sm; }
+  .empty-title  { @apply block text-sm font-extrabold text-ink-2 mb-1; }
+  .empty-body   { @apply block mx-auto max-w-md text-xs text-ink-3; text-wrap: pretty; }
+  .empty-act    { @apply inline-flex mt-3; }
+
+  /* --- شريط الإجراءات على مستوى الصفحة ---------------------------------- */
+  .action-bar   { @apply flex flex-wrap items-center gap-2 rounded-xl border border-line bg-white p-3 mb-4; }
+  .action-bar .spacer { @apply flex-1; }
 
   .messages     { @apply mb-4; }
+  .num          { font-variant-numeric: tabular-nums; }
+  .muted        { @apply text-ink-3; }
 
   /* --- Sprint 8C-1: printed documents ---------------------------------
    * Browser print, no PDF dependency. §7 requires a manual signature and
    * two hand-applied stamps, so the destination is paper — a generated PDF
    * would add a dependency to reach the same printer.
-   * RTL RULE still applies: logical properties only (A-06). */
+   * RTL RULE still applies: logical properties only (A-06).
+   *
+   * الأحجام هنا صريحة لا مأخوذة من سلّم الشاشة: سلّم Sprint 8J أصغر لأنه
+   * مضبوط على كثافة الجداول، والمستند مقصده الورق. */
   .doc          { @apply mx-auto bg-white text-ink; max-width: 21cm; }
-  .doc-head     { @apply flex items-start gap-4 border-b-2 border-ink pb-3 mb-5; }
-  .doc-head .org{ @apply font-extrabold text-lg leading-tight; }
+  .doc-head     { @apply flex items-start gap-4 pb-3 mb-5;
+                  border-block-end: 2px solid theme(colors.brand.900); }
+  .doc-head .org{ @apply font-extrabold leading-tight; font-size: 1.125rem; }
   .doc-head .org small { @apply block font-normal text-xs text-ink-3; }
-  .doc-head .meta { @apply ms-auto text-xs text-ink-3 text-start; }
-  .doc h1       { @apply text-xl font-black text-center my-4; }
+  .doc-head .meta { @apply text-xs text-ink-3; margin-inline-start: auto; text-align: start; }
+  .doc h1       { @apply font-black text-center my-4; font-size: 1.25rem; }
   .doc-section  { @apply border border-line rounded-lg p-4 mb-4; }
   .doc-section h2 { @apply text-sm font-extrabold mb-3 pb-2 border-b border-line; }
-  .doc-grid     { @apply grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2 text-sm; }
+  .doc-grid     { @apply grid gap-x-5 gap-y-2 text-sm; grid-template-columns: max-content 1fr; }
   .doc-grid dt  { @apply text-ink-3 font-bold; }
   .doc-grid dd  { @apply m-0 font-bold; }
   .doc-tbl      { @apply w-full border-collapse text-sm; }
@@ -114,46 +390,50 @@
   .doc-tbl td   { @apply border border-line px-2 py-1.5; }
   .sign-row     { @apply grid gap-6 mt-8; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
   .sign-box     { @apply text-center text-xs text-ink-3; }
-  .sign-line    { @apply border-b border-ink mb-2; height: 3rem; }
+  .sign-line    { @apply mb-2; border-block-end: 1px solid theme(colors.ink.DEFAULT); height: 3rem; }
   .stamp-box    { @apply text-center text-xs text-ink-3; }
   .stamp-ring   { @apply mx-auto mb-2 rounded-full border border-dashed border-line-2;
                   width: 5rem; height: 5rem; }
   .doc-note     { @apply text-xs text-ink-3 border-t border-line pt-3 mt-6; }
-  .doc-warn     { @apply text-xs border border-warn/40 bg-warn-soft text-warn rounded-lg px-3 py-2 mb-4; }
+  .doc-warn     { @apply text-xs border border-warn-line bg-warn-soft text-warn rounded-lg px-3 py-2 mb-4; }
   .no-print     { @apply mb-4; }
 
   @media print {
-    .topbar, .sidebar, .footer, .no-print, .messages { display: none !important; }
-    .layout, .content { display: block !important; padding: 0 !important; margin: 0 !important; }
+    .topbar, .sidebar, .footer, .no-print, .messages,
+    .skip-link, .nav-scrim, .nav-toggle { display: none !important; }
+    .layout, .content { display: block !important; padding: 0 !important; margin: 0 !important; max-width: none !important; }
     body { background: #fff !important; }
     .doc { max-width: none; }
     .doc-section, .sign-row, tr { break-inside: avoid; }
-    .doc-head { position: running(header); }
+    /* `position: running(header)` كان هنا ولا ينفّذه أي متصفح حالي
+       (CSS GCPM) — كان لا عملاً. أُزيل بدل أن يُترك يوهم بأنه يعمل. */
     @page { size: A4; margin: 14mm 12mm; }
   }
 
-
   /* --- Sprint 8B: the shell ------------------------------------------- */
-  .layout       { @apply flex flex-1 items-stretch; }
+  .layout       { @apply flex flex-1 items-stretch min-w-0; }
+  /* القائمة الجانبية تبقى في هذه الشريحة كما هي. تحويلها إلى درج على الهاتف
+     يحتاج زرّ فتح في `base.html`، وهو نطاق الشريحة الثانية — وشحن الدرج قبل
+     زرّه يخفي التنقّل عن الهاتف بلا بديل. */
   .sidebar      { @apply w-64 shrink-0 border-e border-line bg-white py-3 overflow-y-auto; }
   .nav-group    { @apply mb-4; }
-  .nav-group-title { @apply px-4 pb-1 text-xs font-black text-ink-3 tracking-wide; }
-  .nav-item     { @apply flex items-center gap-2 px-4 py-2 text-sm font-bold text-ink-2 border-s-4 border-transparent; }
-  .nav-item:hover { @apply bg-surface-2; }
-  .nav-item.active { @apply border-brand bg-brand-soft text-brand; }
-  .topbar-user  { @apply ms-auto flex items-center gap-3 text-sm; }
+  .nav-group-title { @apply px-4 pb-1 text-2xs font-black text-ink-3; letter-spacing: .04em; }
+  .nav-item     { @apply flex items-center gap-2 px-4 py-2 text-sm font-bold text-ink-2 transition-colors duration-150;
+                  border-inline-start: 3px solid transparent; }
+  .nav-item:hover { @apply bg-brand-50 text-brand-800; }
+  .nav-item.active { @apply bg-brand-100 text-brand-800;
+                     border-inline-start-color: theme(colors.brand.700); }
+  .topbar-user  { @apply flex items-center gap-2 sm:gap-3 text-sm min-w-0; margin-inline-start: auto; }
   .topbar-user form { @apply inline; }
+  .topbar-user .who { @apply hidden sm:block truncate max-w-[12rem]; }
+  .topbar-user .chip { @apply bg-white/15 text-white border-white/25; }
+  /* حلقة التركيز على العنابي: بيضاء لتُرى. */
+  .topbar :where(a, button):focus-visible {
+    @apply ring-2 ring-white ring-offset-2; --tw-ring-offset-color: theme(colors.brand.700);
+  }
 
-  .toolbar      { @apply flex flex-wrap items-center gap-2 mb-3; }
-  .toolbar .spacer { @apply flex-1; }
-  .fld          { @apply flex flex-col gap-1 mb-3; }
-  .fld label    { @apply text-xs font-bold text-ink-3; }
-  .fld input, .fld select, .fld textarea {
-                  @apply rounded-lg border border-line px-3 py-2 text-sm bg-white w-full; }
-  .fld .err     { @apply text-xs font-bold text-danger; }
-  .grid2        { @apply grid gap-x-4 sm:grid-cols-2; }
-  .num          { @apply tabular-nums; }
-  .muted        { @apply text-ink-3; }
-  .empty        { @apply p-6 text-center text-ink-3; }
-
+  /* الحركة اختيارية دائماً. */
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar, .btn2, .nav-item, a.kpi { transition: none !important; }
+  }
 }

@@ -1,6 +1,8 @@
 {% load i18n static %}<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+  {# الكتلة هنا لا داخل `_head.html`: كتل Django لا تعبر `{% include %}`. #}
+  <title>{% block title %}{% translate "مركز التعليم المستمر — جامعة البترا" %}{% endblock %}</title>
   {% include "partials/_head.html" %}
 </head>
 <body class="bg-surface text-ink">

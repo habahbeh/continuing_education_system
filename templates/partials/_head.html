@@ -1,6 +1,22 @@
 {% load i18n static %}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}{% translate "مركز التعليم المستمر — جامعة البترا" %}{% endblock %}</title>
-{# No CDN. Every asset is served locally (ADR-003). #}
+<meta name="color-scheme" content="light">
+{# لون شريط المتصفح على الهاتف يطابق شريط العنوان. #}
+<meta name="theme-color" content="#7b202b">
+
+{% comment %}
+  العنوان كان هنا داخل `{% block title %}` — وقوالب Django لا تعبر حدود
+  `{% include %}`: الكتلة داخل ملف مُضمَّن ليست جزءاً من شجرة كتل الصفحة
+  الأب، فلا يستطيع أي قالب تجاوزها. النتيجة أن الشاشات الإحدى والسبعين كانت
+  تتقاسم عنوان تبويب واحداً، ومن يفتح عشرة تبويبات تشغيلية لا يميّز واحداً
+  منها. العنوان انتقل إلى `base.html` حيث تعمل الكتلة فعلاً.
+{% endcomment %}
+
+{# No CDN. Every asset is served locally (ADR-003 · الفحص الثابت A-07). #}
+{# الخط العربي أول ما يُرسم على الشاشة — يُحمَّل مسبقاً حتى لا تُرى قفزة. #}
+<link rel="preload" as="font" type="font/woff2" crossorigin
+      href="{% static 'fonts/noto-kufi-arabic-400.woff2' %}">
+<link rel="preload" as="font" type="font/woff2" crossorigin
+      href="{% static 'fonts/noto-kufi-arabic-800.woff2' %}">
 <link rel="stylesheet" href="{% static 'css/app.css' %}">
