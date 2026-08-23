@@ -29,37 +29,81 @@ register = template.Library()
 #: Reached its good end, or is validly in force.
 _OK = frozenset(
     {
-        "ACTIVE", "APPROVED", "COMPLETED", "SETTLED", "PAID", "SIGNED",
-        "ISSUED", "DELIVERED", "POSTED", "RECONCILED", "VALIDATED", "VALID",
-        "EXECUTED", "RECOVERED", "COMMITTED", "APPLIED", "REVIEWED",
+        "ACTIVE",
+        "APPROVED",
+        "COMPLETED",
+        "SETTLED",
+        "PAID",
+        "SIGNED",
+        "ISSUED",
+        "DELIVERED",
+        "POSTED",
+        "RECONCILED",
+        "VALIDATED",
+        "VALID",
+        "EXECUTED",
+        "RECOVERED",
+        "COMMITTED",
+        "APPLIED",
+        "REVIEWED",
     }
 )
 
 #: Waiting on a person. These are the rows a working day is spent clearing.
 _WARN = frozenset(
     {
-        "DRAFT", "OPEN", "PENDING_APPROVAL", "PENDING_FINANCE",
-        "PENDING_MANAGER", "PENDING_MOHE", "SUBMITTED", "REQUESTED",
-        "IN_PROGRESS", "PLANNED", "RECORDED", "RAW", "INCOMPLETE",
-        "VARIANCE_PENDING", "REFUND_DUE", "PARTIALLY_RECOVERED", "CALCULATED",
+        "DRAFT",
+        "OPEN",
+        "PENDING_APPROVAL",
+        "PENDING_FINANCE",
+        "PENDING_MANAGER",
+        "PENDING_MOHE",
+        "SUBMITTED",
+        "REQUESTED",
+        "IN_PROGRESS",
+        "PLANNED",
+        "RECORDED",
+        "RAW",
+        "INCOMPLETE",
+        "VARIANCE_PENDING",
+        "REFUND_DUE",
+        "PARTIALLY_RECOVERED",
+        "CALCULATED",
     }
 )
 
 #: Refused, void, or overdue — none of these clear themselves.
 _DANGER = frozenset(
     {
-        "REJECTED", "MOHE_REJECTED", "CANCELLED", "CANCELLED_LOW_ENROLLMENT",
-        "TERMINATED", "VOIDED", "EXPIRED", "BLOCKED", "DISMISSED",
-        "WITHDRAWN", "REF_ERROR", "VALUE_ERROR", "UNIDENTIFIED",
-        "PAYMENT_OVERDUE", "NOT_ATTENDED",
+        "REJECTED",
+        "MOHE_REJECTED",
+        "CANCELLED",
+        "CANCELLED_LOW_ENROLLMENT",
+        "TERMINATED",
+        "VOIDED",
+        "EXPIRED",
+        "BLOCKED",
+        "DISMISSED",
+        "WITHDRAWN",
+        "REF_ERROR",
+        "VALUE_ERROR",
+        "UNIDENTIFIED",
+        "PAYMENT_OVERDUE",
+        "NOT_ATTENDED",
     }
 )
 
 #: Superseded or moved on: not a problem, not an achievement.
 _INFO = frozenset(
     {
-        "ARCHIVED", "SUPERSEDED", "REPLACED", "TRANSFERRED_OUT", "REFUNDED",
-        "WAIVED", "DEFERRED", "RUNNING",
+        "ARCHIVED",
+        "SUPERSEDED",
+        "REPLACED",
+        "TRANSFERRED_OUT",
+        "REFUNDED",
+        "WAIVED",
+        "DEFERRED",
+        "RUNNING",
     }
 )
 

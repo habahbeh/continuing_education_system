@@ -52,7 +52,9 @@ def field_control(field: BoundField) -> str:
     rejected. The ids match the ones ``field_help_id`` and ``field_error_id``
     put on the corresponding elements.
     """
-    attrs: dict[str, str] = {}
+    # `str | bool` is what BoundField.as_widget accepts: Django puts boolean
+    # attributes (required, disabled) through the same dict.
+    attrs: dict[str, str | bool] = {}
     ids = _describedby_ids(field)
     if ids:
         attrs["aria-describedby"] = " ".join(ids)
