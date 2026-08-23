@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block content %}
-<h1>{{ title }} <span dir="ltr">{{ claim.code }}</span></h1>
+<div class="page-head">
+  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ claim.code }}</span></h1>
+</div>
 
 {% if claim.is_frozen %}
   <div class="note ok">
@@ -38,41 +40,45 @@
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "المشاركون" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرقم" %}</th><th>{% translate "الاسم" %}</th><th>{% translate "الحالة" %}</th>
-      <th>{% translate "المقبوض" %}</th><th>{% translate "الوعاء" %}</th><th>{% translate "الحصة" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for line in claim.lines %}
-        <tr>
-          <td dir="ltr">{{ line.participant_number }}</td>
-          <td>{{ line.participant_name }}</td>
-          <td>{{ line.enrollment_status }}</td>
-          <td class="num">{{ line.paid_amount }}</td>
-          <td class="num">{{ line.distribution_base }}</td>
-          <td class="num">{{ line.partner_share }}</td>
-          <td>
-            {% if line.is_included %}<span class="chip ok">{% translate "مستحَق" %}</span>
-            {% else %}<span class="chip danger">{{ line.exclusion_reason }}</span>{% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرقم" %}</th><th>{% translate "الاسم" %}</th><th>{% translate "الحالة" %}</th>
+        <th>{% translate "المقبوض" %}</th><th>{% translate "الوعاء" %}</th><th>{% translate "الحصة" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for line in claim.lines %}
+          <tr>
+            <td dir="ltr">{{ line.participant_number }}</td>
+            <td>{{ line.participant_name }}</td>
+            <td>{{ line.enrollment_status }}</td>
+            <td class="num">{{ line.paid_amount }}</td>
+            <td class="num">{{ line.distribution_base }}</td>
+            <td class="num">{{ line.partner_share }}</td>
+            <td>
+              {% if line.is_included %}<span class="chip ok">{% translate "مستحَق" %}</span>
+              {% else %}<span class="chip danger">{{ line.exclusion_reason }}</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if claim.deductions %}
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الحسومات" %}</h2></div>
-  <table class="tbl">
-    <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "البيان" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
-    <tbody>
-      {% for d in claim.deductions %}
-        <tr><td>{{ d.deduction_type }}</td><td>{{ d.label_ar }}</td><td class="num">{{ d.amount }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "البيان" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <tbody>
+        {% for d in claim.deductions %}
+          <tr><td>{{ d.deduction_type }}</td><td>{{ d.label_ar }}</td><td class="num">{{ d.amount }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 

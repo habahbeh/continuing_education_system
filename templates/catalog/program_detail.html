@@ -6,42 +6,46 @@
   <h1>{{ program.name_ar }}</h1>
   <p class="note" dir="ltr">{{ program.code }} · {{ program.get_program_type_display }}</p>
 
-  <table class="tbl">
-    <tbody>
-      <tr><th>{% translate "المجال" %}</th><td>{{ program.course_category.name_ar|default:"—" }}</td></tr>
-      <tr><th>{% translate "المجال المعرفي" %}</th><td>{{ program.knowledge_field.name_ar|default:"—" }}</td></tr>
-      <tr><th>{% translate "الساعات التدريبية" %}</th><td>{{ program.training_hours }}</td></tr>
-      <tr><th>{% translate "المستهلكات لكل مشارك" %}</th><td>{{ program.consumables_per_student }}</td></tr>
-      {% if program.is_leveled %}
-        <tr><th>{% translate "عدد المستويات" %}</th><td>{{ program.levels_count }}</td></tr>
-      {% endif %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <tbody>
+        <tr><th>{% translate "المجال" %}</th><td>{{ program.course_category.name_ar|default:"—" }}</td></tr>
+        <tr><th>{% translate "المجال المعرفي" %}</th><td>{{ program.knowledge_field.name_ar|default:"—" }}</td></tr>
+        <tr><th>{% translate "الساعات التدريبية" %}</th><td>{{ program.training_hours }}</td></tr>
+        <tr><th>{% translate "المستهلكات لكل مشارك" %}</th><td>{{ program.consumables_per_student }}</td></tr>
+        {% if program.is_leveled %}
+          <tr><th>{% translate "عدد المستويات" %}</th><td>{{ program.levels_count }}</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
 
   {% if subjects %}
     <h2>{% translate "المواد" %}</h2>
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>#</th><th>{% translate "المادة" %}</th>
-          <th>{% translate "الساعات" %}</th><th>{% translate "السعر" %}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in subjects %}
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
           <tr>
-            <td>{{ s.sequence }}</td><td>{{ s.name_ar }}</td>
-            <td>{{ s.training_hours }}</td><td>{{ s.price }}</td>
+            <th>#</th><th>{% translate "المادة" %}</th>
+            <th>{% translate "الساعات" %}</th><th>{% translate "السعر" %}</th>
           </tr>
-        {% endfor %}
-      </tbody>
-      <tfoot>
-        <tr>
-          <th colspan="3">{% translate "مجموع أسعار المواد" %}</th>
-          <th>{{ subject_total }}</th>
-        </tr>
-      </tfoot>
-    </table>
+        </thead>
+        <tbody>
+          {% for s in subjects %}
+            <tr>
+              <td>{{ s.sequence }}</td><td>{{ s.name_ar }}</td>
+              <td>{{ s.training_hours }}</td><td>{{ s.price }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="3">{% translate "مجموع أسعار المواد" %}</th>
+            <th>{{ subject_total }}</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
     <p class="note">
       {% translate "BR-006: مجموع أسعار المواد يجب أن يساوي رسوم الدورة ناقص المستهلكات قبل الاعتماد." %}
     </p>

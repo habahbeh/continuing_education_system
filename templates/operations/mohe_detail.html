@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
 <h1>{{ title }} — <span dir="ltr">{{ submission.cohort_code }}</span></h1>
 
@@ -9,7 +9,7 @@
     <dd dir="ltr">{{ submission.cohort_code }} — <span dir="rtl">{{ submission.cohort_name_ar }}</span></dd>
     <dt>{% translate "البرنامج" %}</dt><dd>{{ submission.program_name_ar }}</dd>
     <dt>{% translate "بداية الدفعة" %}</dt><dd class="num">{{ submission.starts_on }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ submission.status_display }}</span></dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip {{ submission.status|status_tone }}">{{ submission.status_display }}</span></dd>
     <dt>{% translate "فتح الملف" %}</dt><dd>{{ submission.created_by }}</dd>
     {% if submission.submitted_on %}
       <dt>{% translate "أُرسل في" %}</dt><dd class="num">{{ submission.submitted_on }}</dd>
@@ -72,25 +72,27 @@
 <div class="card2">
   <div class="card2-head"><h2>{% translate "المرفقات الإلزامية" %}</h2></div>
   <div class="card2-body">
-    <table class="tbl">
-      <thead><tr>
-        <th>{% translate "المستند" %}</th><th>{% translate "الملف" %}</th>
-        <th>{% translate "الحجم" %}</th><th>{% translate "البصمة" %}</th><th>{% translate "رُفع" %}</th>
-      </tr></thead>
-      <tbody>
-        {% for a in submission.attachments %}
-          <tr>
-            <td>{{ a.purpose_display }}</td>
-            <td dir="ltr">{{ a.original_filename }}</td>
-            <td class="num">{{ a.size_bytes }}</td>
-            <td dir="ltr"><small class="muted">{{ a.sha256|slice:":12" }}…</small></td>
-            <td class="num">{{ a.uploaded_at|date:"Y-m-d" }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="5" class="empty">{% translate "لا مرفقات بعد" %}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr>
+          <th>{% translate "المستند" %}</th><th>{% translate "الملف" %}</th>
+          <th>{% translate "الحجم" %}</th><th>{% translate "البصمة" %}</th><th>{% translate "رُفع" %}</th>
+        </tr></thead>
+        <tbody>
+          {% for a in submission.attachments %}
+            <tr>
+              <td>{{ a.purpose_display }}</td>
+              <td dir="ltr">{{ a.original_filename }}</td>
+              <td class="num">{{ a.size_bytes }}</td>
+              <td dir="ltr"><small class="muted">{{ a.sha256|slice:":12" }}…</small></td>
+              <td class="num">{{ a.uploaded_at|date:"Y-m-d" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="empty">{% translate "لا مرفقات بعد" %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
 
     {% if submission.missing_attachments %}
       <div class="note warn">

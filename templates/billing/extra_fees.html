@@ -1,35 +1,39 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note info">
   {% translate "رسم إعادة المادة 75 ديناراً يقتسمه الطرفان عبر وعاء الشريك · بدل فاقد الشهادة 15 ديناراً للمركز · الامتحانات الدولية خارج الرسوم ولا تُحمَّل بلا اتفاق مسبق مع المشارك." %}
 </div>
 
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
-      <th>{% translate "النوع" %}</th><th>{% translate "المادة" %}</th>
-      <th>{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th>
-      <th>{% translate "قابل للقسمة" %}</th><th>{% translate "بند الرسوم" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for f in fees %}
-        <tr>
-          <td dir="ltr">{{ f.enrollment_code }}</td>
-          <td>{{ f.participant_name }}</td>
-          <td>{{ f.fee_type_display }}</td>
-          <td>{{ f.subject_name|default:"—" }}</td>
-          <td class="num">{{ f.amount }}</td>
-          <td class="num">{{ f.charged_on }}</td>
-          <td>{% if f.is_partner_shareable %}<span class="chip ok">{% translate "نعم" %}</span>
-              {% else %}<span class="chip">{% translate "لا" %}</span>{% endif %}</td>
-          <td>{{ f.charge_line_description|default:"—" }}</td>
-        </tr>
-      {% empty %}<tr><td colspan="8" class="empty">{% translate "لا رسوم إضافية" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
+        <th>{% translate "النوع" %}</th><th>{% translate "المادة" %}</th>
+        <th>{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th>
+        <th>{% translate "قابل للقسمة" %}</th><th>{% translate "بند الرسوم" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for f in fees %}
+          <tr>
+            <td dir="ltr">{{ f.enrollment_code }}</td>
+            <td>{{ f.participant_name }}</td>
+            <td>{{ f.fee_type_display }}</td>
+            <td>{{ f.subject_name|default:"—" }}</td>
+            <td class="num">{{ f.amount }}</td>
+            <td class="num">{{ f.charged_on }}</td>
+            <td>{% if f.is_partner_shareable %}<span class="chip ok">{% translate "نعم" %}</span>
+                {% else %}<span class="chip">{% translate "لا" %}</span>{% endif %}</td>
+            <td>{{ f.charge_line_description|default:"—" }}</td>
+          </tr>
+        {% empty %}<tr><td colspan="8" class="empty">{% translate "لا رسوم إضافية" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if can_create %}

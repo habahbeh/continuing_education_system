@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }} <span dir="ltr">{{ receipt.internal_receipt_number }}</span></h1>
+<div class="page-head">
+  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ receipt.internal_receipt_number }}</span></h1>
+</div>
 <div class="card2"><div class="card2-body">
   <dl class="dl">
     <dt>{% translate "المشارك" %}</dt><dd>{{ receipt.participant_name }} <span dir="ltr">({{ receipt.participant_number }})</span></dd>
@@ -9,7 +11,7 @@
     <dt>{% translate "المبلغ" %}</dt><dd class="num">{{ receipt.amount }}</dd>
     <dt>{% translate "الطريقة" %}</dt><dd>{{ receipt.payment_method }}</dd>
     <dt>{% translate "الصندوق" %}</dt><dd>{{ receipt.cashier }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ receipt.status_display }}</span></dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip {{ receipt.status|status_tone }}">{{ receipt.status_display }}</span></dd>
     {% if receipt.external_receipt_ref %}
       <dt>{% translate "سند الدائرة المالية" %}</dt><dd dir="ltr">{{ receipt.external_receipt_ref }}</dd>
     {% endif %}
@@ -18,14 +20,16 @@
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "التخصيصات" %}</h2></div>
-  <table class="tbl">
-    <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "مقابل" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
-    <tbody>
-      {% for a in receipt.allocations %}
-        <tr><td dir="ltr">{{ a.enrollment_code }}</td><td>{{ a.against }}</td><td class="num">{{ a.amount }}</td></tr>
-      {% empty %}<tr><td colspan="3" class="empty">{% translate "لا تخصيصات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "مقابل" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <tbody>
+        {% for a in receipt.allocations %}
+          <tr><td dir="ltr">{{ a.enrollment_code }}</td><td>{{ a.against }}</td><td class="num">{{ a.amount }}</td></tr>
+        {% empty %}<tr><td colspan="3" class="empty">{% translate "لا تخصيصات" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if receipt.void_id %}

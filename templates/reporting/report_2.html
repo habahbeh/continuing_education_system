@@ -14,10 +14,12 @@
 {% if report.by_partner %}
 <div class="card2">
   <div class="card2-head"><h2>{% translate "حسب الشريك" %}</h2></div>
-  <table class="tbl">
-    <thead><tr><th>{% translate "الشريك" %}</th><th>{% translate "المستحق" %}</th></tr></thead>
-    <tbody>{% for name, amount in report.by_partner %}<tr><td>{{ name }}</td><td class="num">{{ amount }}</td></tr>{% endfor %}</tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "الشريك" %}</th><th>{% translate "المستحق" %}</th></tr></thead>
+      <tbody>{% for name, amount in report.by_partner %}<tr><td>{{ name }}</td><td class="num">{{ amount }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 {% endblock %}

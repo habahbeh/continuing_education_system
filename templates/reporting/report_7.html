@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
 {% include "reporting/_shell.html" %}
 <div class="note info">
@@ -15,17 +15,19 @@
     <div class="muted">{% translate "لا يُطرح بعد" %}</div></div>
 </div>
 <div class="card2">
-  <table class="tbl">
-    <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "التصنيف" %}</th>
-      <th>{% translate "البيان" %}</th><th>{% translate "الدفعة" %}</th><th>{% translate "المبلغ" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
-    <tbody>
-      {% for e in report.rows %}
-        <tr><td dir="ltr">{{ e.code }}</td><td class="num">{{ e.incurred_on }}</td>
-            <td>{{ e.category_label }}</td><td>{{ e.description_ar }}</td>
-            <td dir="ltr">{{ e.cohort_code|default:"—" }}</td><td class="num">{{ e.amount }}</td>
-            <td><span class="chip">{{ e.status_display }}</span></td></tr>
-      {% empty %}<tr><td colspan="7" class="empty">{% translate "لا مصروفات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "التصنيف" %}</th>
+        <th>{% translate "البيان" %}</th><th>{% translate "الدفعة" %}</th><th>{% translate "المبلغ" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+      <tbody>
+        {% for e in report.rows %}
+          <tr><td dir="ltr">{{ e.code }}</td><td class="num">{{ e.incurred_on }}</td>
+              <td>{{ e.category_label }}</td><td>{{ e.description_ar }}</td>
+              <td dir="ltr">{{ e.cohort_code|default:"—" }}</td><td class="num">{{ e.amount }}</td>
+              <td><span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span></td></tr>
+        {% empty %}<tr><td colspan="7" class="empty">{% translate "لا مصروفات" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

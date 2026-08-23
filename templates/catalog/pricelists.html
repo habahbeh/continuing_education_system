@@ -8,29 +8,31 @@
     {% translate "القائمة المعتمدة غير قابلة للتعديل — التغيير بإصدار قائمة جديدة (BR-008 · D-14). والاعتماد من رئيس الجامعة خارج النظام." %}
   </p>
 
-  <table class="tbl">
-    <thead>
-      <tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th>
-        <th>{% translate "الفصل" %}</th><th>{% translate "السريان" %}</th>
-        <th>{% translate "الحالة" %}</th><th>{% translate "مرجع القرار" %}</th><th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for pl in price_lists %}
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
         <tr>
-          <td dir="ltr">{{ pl.code }}</td>
-          <td>{{ pl.name_ar }}</td>
-          <td>{{ pl.semester.name_ar }}</td>
-          <td dir="ltr">{{ pl.effective_from|date:"Y/m/d" }}</td>
-          <td><span class="chip">{{ pl.get_status_display }}</span></td>
-          <td dir="ltr">{{ pl.decision_reference|default:"—" }}</td>
-          <td><a href="{% url 'catalog:pricelist-detail' pl.code %}">{% translate "عرض" %}</a></td>
+          <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th>
+          <th>{% translate "الفصل" %}</th><th>{% translate "السريان" %}</th>
+          <th>{% translate "الحالة" %}</th><th>{% translate "مرجع القرار" %}</th><th></th>
         </tr>
-      {% empty %}
-        <tr><td colspan="7">{% translate "لا توجد قوائم أسعار" %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for pl in price_lists %}
+          <tr>
+            <td dir="ltr">{{ pl.code }}</td>
+            <td>{{ pl.name_ar }}</td>
+            <td>{{ pl.semester.name_ar }}</td>
+            <td dir="ltr">{{ pl.effective_from|date:"Y/m/d" }}</td>
+            <td><span class="chip">{{ pl.get_status_display }}</span></td>
+            <td dir="ltr">{{ pl.decision_reference|default:"—" }}</td>
+            <td><a href="{% url 'catalog:pricelist-detail' pl.code %}">{% translate "عرض" %}</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">{% translate "لا توجد قوائم أسعار" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

@@ -1,58 +1,94 @@
 {% extends "base.html" %}
 {% load i18n %}
 
-{% block content %}
-<div class="card2">
-  <h1>{% translate "المشاركون" %}</h1>
+{% block title %}{% translate "المشاركون — مركز التعليم المستمر" %}{% endblock %}
 
-  <form method="get" class="calc-row">
-    <input type="search" name="q" value="{{ query }}"
-           placeholder="{% translate 'بحث بالاسم أو الرقم الجامعي' %}">
-    <select name="category">
+{% comment %}
+  الأعمدة تُقرَّر في الخدمة لا هنا: `columns` تحمل ما يجوز لهذا الدور رؤيته،
+  والحقل المحجوب غائب عن الاستجابة أصلاً (BR-101 · T-283). لم يتغيّر شيء من
+  ذلك — تغيّر أن شريط البحث كان مبنياً على `.calc-row` فتفرّقت حقوله على
+  عرض الصفحة، وأن عدد النتائج كان تنبيهاً أسفل الجدول لا معلومة بجانب مرشّحه.
+{% endcomment %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
+    <h1>{% translate "المشاركون" %}</h1>
+  </div>
+  {% if can_create %}
+    <div class="acts">
+      <a class="btn2 primary" href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
+    </div>
+  {% endif %}
+</div>
+
+<form method="get" class="filterbar" role="search">
+  <div class="fld">
+    <label for="q">{% translate "بحث" %}</label>
+    <input type="search" id="q" name="q" value="{{ query }}"
+           placeholder="{% translate 'بالاسم أو الرقم الجامعي…' %}" spellcheck="false">
+  </div>
+  <div class="fld">
+    <label for="category">{% translate "الفئة" %}</label>
+    <select name="category" id="category">
       <option value="">{% translate "كل الفئات" %}</option>
       {% for value, label in categories %}
         <option value="{{ value }}" {% if value == selected_category %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
-    <button type="submit" class="btn2">{% translate "بحث" %}</button>
-    {% if can_create %}
-      <a class="btn2" href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
-    {% endif %}
-  </form>
+  </div>
+  <button type="submit" class="btn2">{% translate "بحث" %}</button>
+  {% if query or selected_category %}
+    <a class="btn2 ghost" href="{% url 'people:participants' %}">{% translate "إلغاء التصفية" %}</a>
+  {% endif %}
+  <span class="count">
+    {% blocktranslate count total=participants|length %}مشارك واحد{% plural %}{{ total }} مشاركين{% endblocktranslate %}
+  </span>
+</form>
 
-  <table class="tbl">
-    <thead>
-      <tr>
-        <th>{% translate "الرقم الجامعي" %}</th>
-        <th>{% translate "الاسم" %}</th>
-        {% if "category" in columns %}<th>{% translate "الفئة" %}</th>{% endif %}
-        {% if "phone" in columns %}<th>{% translate "الهاتف" %}</th>{% endif %}
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for p in participants %}
+<div class="card2">
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
         <tr>
-          <td dir="ltr">{{ p.participant_number }}</td>
-          <td>{{ p.name_ar }}</td>
-          {% if "category" in columns %}<td>{{ p.category }}</td>{% endif %}
-          {% if "phone" in columns %}<td dir="ltr">{{ p.phone|default:"—" }}</td>{% endif %}
-          <td>
-            <a href="{% url 'people:participant-detail' p.participant_number %}">
-              {% translate "عرض" %}
-            </a>
-          </td>
+          <th>{% translate "الرقم الجامعي" %}</th>
+          <th>{% translate "الاسم" %}</th>
+          {% if "category" in columns %}<th>{% translate "الفئة" %}</th>{% endif %}
+          {% if "phone" in columns %}<th>{% translate "الهاتف" %}</th>{% endif %}
+          <th><span class="sr-only">{% translate "إجراءات" %}</span></th>
         </tr>
-      {% empty %}
-        <tr><td colspan="5">{% translate "لا يوجد مشاركون" %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-
-  <p class="note">
-    {% blocktranslate count total=participants|length %}
-      مشارك واحد{% plural %}{{ total }} مشاركين
-    {% endblocktranslate %}
-  </p>
+      </thead>
+      <tbody>
+        {% for p in participants %}
+          <tr>
+            <td dir="ltr" translate="no">{{ p.participant_number }}</td>
+            <td>{{ p.name_ar }}</td>
+            {% if "category" in columns %}<td>{{ p.category }}</td>{% endif %}
+            {% if "phone" in columns %}<td dir="ltr">{{ p.phone|default:"—" }}</td>{% endif %}
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'people:participant-detail' p.participant_number %}">
+                {% translate "عرض" %}
+              </a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="empty">
+            {% if query or selected_category %}
+              <span class="empty-title">{% translate "لا مشارك يطابق البحث" %}</span>
+              <span class="empty-body">{% translate "جرّب الرقم الجامعي كاملاً، أو وسّع الفئة إلى «كل الفئات»." %}</span>
+              <a class="btn2 empty-act" href="{% url 'people:participants' %}">{% translate "عرض كل المشاركين" %}</a>
+            {% else %}
+              <span class="empty-title">{% translate "لا مشاركون بعد" %}</span>
+              <span class="empty-body">{% translate "الرقم الجامعي يُولَّد آلياً عند الحفظ من الفصل الدراسي النشط (BR-001)." %}</span>
+              {% if can_create %}
+                <a class="btn2 primary empty-act" href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
+              {% endif %}
+            {% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

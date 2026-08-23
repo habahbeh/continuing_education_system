@@ -9,9 +9,16 @@
     {% endif %}
     <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
   </div>
-  <form method="get" class="toolbar">
-    <input type="date" name="from" value="{{ date_from }}">
-    <input type="date" name="to" value="{{ date_to }}">
+  <form method="get" class="filterbar" role="search">
+    <div class="fld">
+      <label for="f_from">{% translate "من تاريخ" %}</label>
+      <input type="date" name="from" value="{{ date_from }}" id="f_from">
+    </div>
+
+    <div class="fld">
+      <label for="f_to">{% translate "إلى تاريخ" %}</label>
+      <input type="date" name="to" value="{{ date_to }}" id="f_to">
+    </div>
     <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
   </form>
 </div>

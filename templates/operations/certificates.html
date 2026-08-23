@@ -1,66 +1,76 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note info">
   {% translate "تصدرها الجامعة لا الشريك · بلا رسوم · بدل الفاقد 15 ديناراً ولا يصدر قبل قبضه · رقم تلقائي من عشر خانات · التقدير يُكتب يدوياً فالنظام لا يحتسبه · إعادة الطباعة لا تُغيّر الرقم." %}
 </div>
-<form method="get" class="toolbar">
-  <input name="q" value="{{ query }}" placeholder="{% translate 'رقم الشهادة أو اسم المشارك' %}">
+<form method="get" class="filterbar" role="search">
+  <div class="fld">
+    <label for="f_q">{% translate "بحث" %}</label>
+    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رقم الشهادة أو اسم المشارك…' %}" spellcheck="false" id="f_q">
+  </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
 </form>
 
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرقم" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "البرنامج" %}</th>
-      <th>{% translate "المدة" %}</th><th>{% translate "الساعات" %}</th><th>{% translate "التقدير" %}</th>
-      <th>{% translate "الإصدار" %}</th><th>{% translate "الحالة" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for c in certificates %}
-        <tr>
-          <td dir="ltr">{{ c.certificate_number }}
-            {% if c.is_replacement %}<br><span class="chip warn">{% translate "بدل" %} <span dir="ltr">{{ c.replaces }}</span></span>{% endif %}
-          </td>
-          <td>{{ c.participant_name }}<br><small class="muted" dir="ltr">{{ c.participant_number }}</small></td>
-          <td>{{ c.program_name }}</td>
-          <td>{{ c.duration_text|default:"—" }}</td>
-          <td class="num">{{ c.training_hours|default:"—" }}</td>
-          <td>{{ c.grade }}</td>
-          <td class="num">{{ c.issued_on }}</td>
-          <td><span class="chip">{{ c.status_display }}</span>
-              {% if c.delivered_on %}<br><small class="muted num">{{ c.delivered_on }}</small>{% endif %}</td>
-          <td>
-            <a class="btn2" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "طباعة" %}</a>
-            {% if can_create and c.status == "ISSUED" %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="deliver">
-                <input type="hidden" name="number" value="{{ c.certificate_number }}">
-                <input type="date" name="on_date" required>
-                <button class="btn2" type="submit">{% translate "تسليم" %}</button>
-              </form>
-            {% endif %}
-            {% if can_create and c.status != "REPLACED" %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="replace">
-                <input type="hidden" name="number" value="{{ c.certificate_number }}">
-                <input type="date" name="on_date" required>
-                <button class="btn2" type="submit">{% translate "بدل فاقد" %}</button>
-              </form>
-            {% endif %}
-            {% if can_print %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="reprint">
-                <input type="hidden" name="number" value="{{ c.certificate_number }}">
-                <button class="btn2" type="submit">{% translate "تسجيل إعادة طباعة" %}</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}<tr><td colspan="9" class="empty">{% translate "لا شهادات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرقم" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "البرنامج" %}</th>
+        <th>{% translate "المدة" %}</th><th>{% translate "الساعات" %}</th><th>{% translate "التقدير" %}</th>
+        <th>{% translate "الإصدار" %}</th><th>{% translate "الحالة" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for c in certificates %}
+          <tr>
+            <td dir="ltr">{{ c.certificate_number }}
+              {% if c.is_replacement %}<br><span class="chip warn">{% translate "بدل" %} <span dir="ltr">{{ c.replaces }}</span></span>{% endif %}
+            </td>
+            <td>{{ c.participant_name }}<br><small class="muted" dir="ltr">{{ c.participant_number }}</small></td>
+            <td>{{ c.program_name }}</td>
+            <td>{{ c.duration_text|default:"—" }}</td>
+            <td class="num">{{ c.training_hours|default:"—" }}</td>
+            <td>{{ c.grade }}</td>
+            <td class="num">{{ c.issued_on }}</td>
+            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span>
+                {% if c.delivered_on %}<br><small class="muted num">{{ c.delivered_on }}</small>{% endif %}</td>
+            <td>
+              <a class="btn2" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "طباعة" %}</a>
+              {% if can_create and c.status == "ISSUED" %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="deliver">
+                  <input type="hidden" name="number" value="{{ c.certificate_number }}">
+                  <input type="date" name="on_date" required>
+                  <button class="btn2" type="submit">{% translate "تسليم" %}</button>
+                </form>
+              {% endif %}
+              {% if can_create and c.status != "REPLACED" %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="replace">
+                  <input type="hidden" name="number" value="{{ c.certificate_number }}">
+                  <input type="date" name="on_date" required>
+                  <button class="btn2" type="submit">{% translate "بدل فاقد" %}</button>
+                </form>
+              {% endif %}
+              {% if can_print %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="reprint">
+                  <input type="hidden" name="number" value="{{ c.certificate_number }}">
+                  <button class="btn2" type="submit">{% translate "تسجيل إعادة طباعة" %}</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}<tr><td colspan="9" class="empty">
+              <span class="empty-title">{% translate "لا شهادات" %}</span>
+              <span class="empty-body">{% translate "الشهادة تصدر بعد إغلاق براءة الذمة، لا قبله (BR-075)." %}</span>
+            </td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if can_create %}

@@ -15,18 +15,20 @@
     visible page text — a developer note about BR-101 printed above the
     participant's details. Found in the Sprint 8I browser pass.
   {% endcomment %}
-  <table class="tbl">
-    <tbody>
-      {% for key, label, value in rows %}
-        {% if key != "name_ar" and key != "participant_number" %}
-          <tr>
-            <th>{{ label }}</th>
-            <td>{{ value|default:"—" }}</td>
-          </tr>
-        {% endif %}
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <tbody>
+        {% for key, label, value in rows %}
+          {% if key != "name_ar" and key != "participant_number" %}
+            <tr>
+              <th>{{ label }}</th>
+              <td>{{ value|default:"—" }}</td>
+            </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
   {% if can_edit %}
     <a class="btn2" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a>

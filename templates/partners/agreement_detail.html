@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block content %}
-<h1>{{ title }} <span dir="ltr">{{ agreement.agreement_number }}</span></h1>
+<div class="page-head">
+  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ agreement.agreement_number }}</span></h1>
+</div>
 {% if agreement.is_expired %}
   <div class="note warn">
     {% translate "انقضت مدة سريان هذه الاتفاقية — تبقى مقروءة ومرجعاً لما بُني عليها من مطالبات، ولا تُعرض على الدفعات الجديدة ولا تُعتمد. التعاقد المستمر يكون بملحق بمدة سريان جديدة." %}

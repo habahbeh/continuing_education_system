@@ -277,6 +277,11 @@
   /* بطاقة قابلة للنقر تصل بالرقم إلى الشاشة التي تفسّره. */
   a.kpi         { @apply block transition-colors duration-150; }
   a.kpi:hover   { @apply border-brand-300; }
+  a.kpi:hover .value { @apply text-brand-700; }
+  a.kpi.primary:hover { @apply border-brand-700; }
+  a.kpi.primary:hover .value { @apply text-brand-900; }
+  /* شبكة العدّادات: كانت `.grid2` فتُصفّ أربعة أرقام في عمودين. */
+  .kpi-grid     { @apply grid gap-3 mb-4 sm:grid-cols-2 xl:grid-cols-4; }
 
   /* --- قوائم التفاصيل -------------------------------------------------- */
   .dl           { @apply grid gap-x-4 gap-y-0 text-sm; grid-template-columns: max-content 1fr; }
@@ -311,6 +316,9 @@
   .filterbar input, .filterbar select {
                   @apply rounded-lg border border-line bg-white px-3 py-2 text-sm; }
   .filterbar .count { @apply text-xs text-ink-3 font-bold; margin-inline-start: auto; }
+  /* فعل الإنشاء يقف في آخر الشريط لا بين المرشّحات. */
+  .filterbar > a.btn2.primary { margin-inline-start: auto; }
+  .filterbar > a.btn2.primary ~ .count { margin-inline-start: 0; }
 
   /* --- الحقول ---------------------------------------------------------- */
   .fld          { @apply flex flex-col gap-1 mb-3 min-w-0; }
@@ -413,6 +421,8 @@
     .topbar, .sidebar, .footer, .no-print, .messages,
     .skip-link, .nav-scrim, .nav-toggle { display: none !important; }
     .layout, .content { display: block !important; padding: 0 !important; margin: 0 !important; max-width: none !important; }
+    /* غلاف التمرير الأفقي يقصّ الجدول على الورق. الورق لا يُمرَّر. */
+    .tbl-wrap { overflow: visible !important; }
     body { background: #fff !important; }
     .doc { max-width: none; }
     .doc-section, .sign-row, tr { break-inside: avoid; }

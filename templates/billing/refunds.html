@@ -1,74 +1,80 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note warn">
   {% translate "الأصل لا استرداد. الاستثناء بكتاب رسمي وموافقة رئيس الجامعة معاً، ويُنفَّذ بعد الاعتماد من شخص آخر. أما ردّ الرصيد الدائن فحركة مستقلة لا استرداد ولا يحتاج موافقة الرئيس." %}
 </div>
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الاستردادات" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
-      <th>{% translate "المبلغ" %}</th><th>{% translate "الكتاب" %}</th><th>{% translate "موافقة الرئيس" %}</th>
-      <th>{% translate "استرجاع الشريك" %}</th><th>{% translate "الحالة" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for r in refunds %}
-        <tr>
-          <td dir="ltr">{{ r.code }}</td>
-          <td dir="ltr">{{ r.enrollment_code }}</td>
-          <td>{{ r.participant_name }}</td>
-          <td class="num">{{ r.amount }}</td>
-          <td dir="ltr">{{ r.official_letter_ref }}</td>
-          <td dir="ltr">{{ r.president_approval_ref }}</td>
-          <td class="num">{{ r.partner_recovery_amount }}</td>
-          <td><span class="chip">{{ r.status_display }}</span></td>
-          <td>
-            {% if r.status == "REQUESTED" and can_approve and r.requested_by_id != current_user_id %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="approve">
-                <input type="hidden" name="code" value="{{ r.code }}">
-                <button class="btn2" type="submit">{% translate "اعتماد" %}</button>
-              </form>
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="reject">
-                <input type="hidden" name="code" value="{{ r.code }}">
-                <input name="reason_ar" placeholder="{% translate 'سبب الرفض' %}">
-                <button class="btn2" type="submit">{% translate "رفض" %}</button>
-              </form>
-            {% elif r.status == "APPROVED" and can_execute %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="execute">
-                <input type="hidden" name="code" value="{{ r.code }}">
-                <button class="btn2 primary" type="submit">{% translate "تنفيذ" %}</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}<tr><td colspan="9" class="empty">{% translate "لا استردادات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
+        <th>{% translate "المبلغ" %}</th><th>{% translate "الكتاب" %}</th><th>{% translate "موافقة الرئيس" %}</th>
+        <th>{% translate "استرجاع الشريك" %}</th><th>{% translate "الحالة" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for r in refunds %}
+          <tr>
+            <td dir="ltr">{{ r.code }}</td>
+            <td dir="ltr">{{ r.enrollment_code }}</td>
+            <td>{{ r.participant_name }}</td>
+            <td class="num">{{ r.amount }}</td>
+            <td dir="ltr">{{ r.official_letter_ref }}</td>
+            <td dir="ltr">{{ r.president_approval_ref }}</td>
+            <td class="num">{{ r.partner_recovery_amount }}</td>
+            <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span></td>
+            <td>
+              {% if r.status == "REQUESTED" and can_approve and r.requested_by_id != current_user_id %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="approve">
+                  <input type="hidden" name="code" value="{{ r.code }}">
+                  <button class="btn2" type="submit">{% translate "اعتماد" %}</button>
+                </form>
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="reject">
+                  <input type="hidden" name="code" value="{{ r.code }}">
+                  <input name="reason_ar" placeholder="{% translate 'سبب الرفض…' %}">
+                  <button class="btn2" type="submit">{% translate "رفض" %}</button>
+                </form>
+              {% elif r.status == "APPROVED" and can_execute %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="execute">
+                  <input type="hidden" name="code" value="{{ r.code }}">
+                  <button class="btn2 primary" type="submit">{% translate "تنفيذ" %}</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}<tr><td colspan="9" class="empty">{% translate "لا استردادات" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "ردّ الأرصدة الدائنة" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
-      <th>{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "السبب" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for c in credit_returns %}
-        <tr>
-          <td dir="ltr">{{ c.code }}</td><td dir="ltr">{{ c.enrollment_code }}</td>
-          <td>{{ c.participant_name }}</td><td class="num">{{ c.amount }}</td>
-          <td class="num">{{ c.returned_on }}</td><td>{{ c.reason_ar }}</td>
-        </tr>
-      {% empty %}<tr><td colspan="6" class="empty">{% translate "لا حركات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
+        <th>{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "السبب" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for c in credit_returns %}
+          <tr>
+            <td dir="ltr">{{ c.code }}</td><td dir="ltr">{{ c.enrollment_code }}</td>
+            <td>{{ c.participant_name }}</td><td class="num">{{ c.amount }}</td>
+            <td class="num">{{ c.returned_on }}</td><td>{{ c.reason_ar }}</td>
+          </tr>
+        {% empty %}<tr><td colspan="6" class="empty">{% translate "لا حركات" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if can_create %}

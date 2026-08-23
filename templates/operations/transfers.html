@@ -1,55 +1,68 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note info">
   {% translate "النقل للدورات القصيرة فقط (BR-060)، ضمن نفس المجال إلا باستثناء عند إلغاء المركز للدورة (BR-061 · BR-065)، وقبل تجاوز مهلة المحاضرات (BR-062). ثلاث أيدٍ: التسجيل يطلب · المدير ينسّب · المالية تسوّي وتنفّذ (BR-066)." %}
 </div>
 
-<form method="get" class="toolbar">
-  <input name="q" value="{{ query }}" placeholder="{% translate 'رمز النقل أو اسم المشارك' %}">
-  <select name="status">
+<form method="get" class="filterbar" role="search">
+  <div class="fld">
+    <label for="f_q">{% translate "بحث" %}</label>
+    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رمز النقل أو اسم المشارك…' %}" spellcheck="false" id="f_q">
+  </div>
+  <div class="fld">
+    <label for="f_status">{% translate "الحالة" %}</label>
+    <select name="status" id="f_status">
     <option value="">{% translate "كل الحالات" %}</option>
     <option value="PENDING_MANAGER" {% if status == "PENDING_MANAGER" %}selected{% endif %}>{% translate "بانتظار تنسيب المدير" %}</option>
     <option value="PENDING_FINANCE" {% if status == "PENDING_FINANCE" %}selected{% endif %}>{% translate "بانتظار تسوية المالية" %}</option>
     <option value="EXECUTED" {% if status == "EXECUTED" %}selected{% endif %}>{% translate "منفَّذ" %}</option>
     <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
   </select>
+  </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
   {% if can_request %}
-    <a class="btn2" href="{% url 'operations:transfer-new' %}">{% translate "طلب نقل جديد" %}</a>
+    <a class="btn2 primary" href="{% url 'operations:transfer-new' %}">{% translate "طلب نقل جديد" %}</a>
   {% endif %}
 </form>
 
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
-      <th>{% translate "من" %}</th><th>{% translate "إلى" %}</th>
-      <th>{% translate "المحاضرات" %}</th><th>{% translate "المجال" %}</th>
-      <th>{% translate "فرق الرسوم" %}</th><th>{% translate "الحالة" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for t in transfers %}
-        <tr>
-          <td dir="ltr">{{ t.code }}</td>
-          <td>{{ t.participant_name }}<br><small class="muted" dir="ltr">{{ t.participant_number }}</small></td>
-          <td dir="ltr">{{ t.from_cohort_code }}<br><small class="muted">{{ t.from_program_name }}</small></td>
-          <td dir="ltr">{{ t.to_cohort_code }}<br><small class="muted">{{ t.to_program_name }}</small></td>
-          <td class="num">{{ t.lectures_attended_at_request }}</td>
-          <td>
-            {% if t.same_category %}<span class="chip ok">{% translate "نفس المجال" %}</span>
-            {% elif t.category_waiver_granted %}<span class="chip warn">{% translate "باستثناء" %}</span>
-            {% else %}<span class="chip">{% translate "مختلف" %}</span>{% endif %}
-          </td>
-          <td class="num">{{ t.fee_difference }}</td>
-          <td><span class="chip">{{ t.status_display }}</span></td>
-          <td><a class="btn2" href="{% url 'operations:transfer-detail' t.code %}">{% translate "عرض" %}</a></td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="9" class="empty">{% translate "لا طلبات نقل" %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
+        <th>{% translate "من" %}</th><th>{% translate "إلى" %}</th>
+        <th>{% translate "المحاضرات" %}</th><th>{% translate "المجال" %}</th>
+        <th>{% translate "فرق الرسوم" %}</th><th>{% translate "الحالة" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for t in transfers %}
+          <tr>
+            <td dir="ltr">{{ t.code }}</td>
+            <td>{{ t.participant_name }}<br><small class="muted" dir="ltr">{{ t.participant_number }}</small></td>
+            <td dir="ltr">{{ t.from_cohort_code }}<br><small class="muted">{{ t.from_program_name }}</small></td>
+            <td dir="ltr">{{ t.to_cohort_code }}<br><small class="muted">{{ t.to_program_name }}</small></td>
+            <td class="num">{{ t.lectures_attended_at_request }}</td>
+            <td>
+              {% if t.same_category %}<span class="chip ok">{% translate "نفس المجال" %}</span>
+              {% elif t.category_waiver_granted %}<span class="chip warn">{% translate "باستثناء" %}</span>
+              {% else %}<span class="chip">{% translate "مختلف" %}</span>{% endif %}
+            </td>
+            <td class="num">{{ t.fee_difference }}</td>
+            <td><span class="chip {{ t.status|status_tone }}">{{ t.status_display }}</span></td>
+            <td><a class="btn2 ghost" href="{% url 'operations:transfer-detail' t.code %}">{% translate "عرض" %}</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+              <span class="empty-title">{% translate "لا طلبات نقل" %}</span>
+              <span class="empty-body">{% translate "النقل بين الدورات يبدأ بطلب، و«فحص الشروط» يعرض القرار وفرق الرسوم قبل التقديم بلا أي كتابة." %}</span>
+            </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

@@ -1,37 +1,47 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 
-<form method="get" class="toolbar">
-  <input name="q" value="{{ query }}" placeholder="{% translate 'بحث بالرمز أو الاسم' %}">
+<form method="get" class="filterbar" role="search">
+  <div class="fld">
+    <label for="f_q">{% translate "بحث" %}</label>
+    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'بالرمز أو الاسم…' %}" spellcheck="false" id="f_q">
+  </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
 </form>
 
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th>
-      <th>{% translate "البرنامج" %}</th><th>{% translate "الفترة" %}</th>
-      <th>{% translate "المسجّلون" %}</th><th>{% translate "الشريك" %}</th>
-      <th>{% translate "الحالة" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for c in cohorts %}
-        <tr>
-          <td dir="ltr">{{ c.code }}</td>
-          <td>{{ c.name_ar }}{% if c.level %} — {% translate "مستوى" %} {{ c.level }}{% endif %}</td>
-          <td>{{ c.program_name }}</td>
-          <td class="num">{{ c.starts_on }} — {{ c.ends_on }}</td>
-          <td class="num">{{ c.enrolled_count }} / {{ c.capacity }}</td>
-          <td>{{ c.partner_name|default:"—" }}</td>
-          <td><span class="chip">{{ c.status_display }}</span></td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="7" class="empty">{% translate "لا توجد دفعات" %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th>
+        <th>{% translate "البرنامج" %}</th><th>{% translate "الفترة" %}</th>
+        <th>{% translate "المسجّلون" %}</th><th>{% translate "الشريك" %}</th>
+        <th>{% translate "الحالة" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for c in cohorts %}
+          <tr>
+            <td dir="ltr">{{ c.code }}</td>
+            <td>{{ c.name_ar }}{% if c.level %} — {% translate "مستوى" %} {{ c.level }}{% endif %}</td>
+            <td>{{ c.program_name }}</td>
+            <td class="num">{{ c.starts_on }} — {{ c.ends_on }}</td>
+            <td class="num">{{ c.enrolled_count }} / {{ c.capacity }}</td>
+            <td>{{ c.partner_name|default:"—" }}</td>
+            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty">
+              <span class="empty-title">{% translate "لا دفعات مُشغّلة" %}</span>
+              <span class="empty-body">{% translate "الدفعة تُشغَّل على برنامج من الكتالوج، ولا تُعرض للتسجيل قبل اعتمادها وزارياً." %}</span>
+            </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if can_create %}

@@ -12,11 +12,13 @@
 </div>
 <div class="card2">
   <div class="card2-head"><h2>{% translate "حسب نوع البند" %}</h2></div>
-  <table class="tbl">
-    <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "المقبوض" %}</th></tr></thead>
-    <tbody>
-      {% for kind, amount in report.by_type %}<tr><td>{{ kind }}</td><td class="num">{{ amount }}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "المقبوض" %}</th></tr></thead>
+      <tbody>
+        {% for kind, amount in report.by_type %}<tr><td>{{ kind }}</td><td class="num">{{ amount }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

@@ -1,8 +1,10 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }} <span dir="ltr">{{ clearance.code }}</span></h1>
-<div class="toolbar">
+<div class="page-head">
+  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ clearance.code }}</span></h1>
+</div>
+<div class="action-bar">
   <a class="btn2" href="{% url 'operations:clearance-print' clearance.code %}">{% translate "طباعة النموذج" %}</a>
 </div>
 
@@ -10,7 +12,7 @@
   <dl class="dl">
     <dt>{% translate "المشارك" %}</dt><dd>{{ clearance.participant_name }} <span dir="ltr">({{ clearance.participant_number }})</span></dd>
     <dt>{% translate "التسجيل" %}</dt><dd dir="ltr">{{ clearance.enrollment_code }} — {{ clearance.program_name }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd>{{ clearance.case_type_display }} · <span class="chip">{{ clearance.status_display }}</span></dd>
+    <dt>{% translate "الحالة" %}</dt><dd>{{ clearance.case_type_display }} · <span class="chip {{ clearance.status|status_tone }}">{{ clearance.status_display }}</span></dd>
     <dt>{% translate "فُتحت" %}</dt><dd class="num">{{ clearance.opened_on }} — {{ clearance.opened_by }}</dd>
     {% if clearance.cancellation_reason_ar %}
       <dt>{% translate "سبب الإلغاء" %}</dt><dd>{{ clearance.cancellation_reason_ar }}</dd>
@@ -27,14 +29,20 @@
 {% endif %}
 
 {% for step in clearance.steps %}
-  <div class="card2">
-    <div class="card2-head">
-      <h2>{{ step.step_number }} — {{ step.name_ar }}</h2>
-      <span class="chip {% if step.is_done %}ok{% endif %}">
+  {% comment %}
+    «حاشية الدفتر»: ممتلئة إذا صودق على الخطوة، شعرة إن كانت قائمة — فيُقرأ
+    تقدّم البراءة من حاشية الصفحة بنظرة واحدة. Django's hash comment is
+    SINGLE-LINE; a two-line one renders its second line as page text.
+  {% endcomment %}
+  <div class="step{% if step.is_done %} is-done{% endif %}">
+    <div class="step-head">
+      <span class="step-num" aria-hidden="true">{{ step.step_number }}</span>
+      <h2>{{ step.name_ar }}</h2>
+      <span class="chip {% if step.is_done %}ok{% else %}warn{% endif %} dot">
         {% if step.is_done %}{% translate "مكتملة" %}{% else %}{% translate "قائمة" %}{% endif %}
       </span>
     </div>
-    <div class="card2-body">
+    <div class="step-body">
       {% if step.step_number == 1 %}
         {% if step.custody_items %}
           <ul>{% for item in step.custody_items %}<li>{{ item.name_ar }}</li>{% endfor %}</ul>
@@ -62,7 +70,7 @@
               <input type="hidden" name="action" value="deposit">
               {% include "partials/_form.html" with form=deposit_form %}
               <button class="btn2" type="submit">{% translate "إعادة التأمين" %}</button>
-              <button class="btn2" type="submit" name="action" value="forfeit">{% translate "مصادرة التأمين" %}</button>
+              <button class="btn2 danger" type="submit" name="action" value="forfeit">{% translate "مصادرة التأمين" %}</button>
             </form>
           {% endif %}
         {% endif %}
@@ -137,7 +145,7 @@
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="cancel">
         {% include "partials/_form.html" with form=cancel_form %}
-        <button class="btn2" type="submit">{% translate "إلغاء" %}</button>
+        <button class="btn2 danger" type="submit">{% translate "إلغاء البراءة" %}</button>
       </form>
     </div>
   </div>

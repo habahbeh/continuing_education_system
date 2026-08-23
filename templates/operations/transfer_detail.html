@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }} <span dir="ltr">{{ transfer.code }}</span></h1>
+<div class="page-head">
+  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ transfer.code }}</span></h1>
+</div>
 
 <div class="card2"><div class="card2-body">
   <dl class="dl">
@@ -17,7 +19,7 @@
     {% endif %}
     <dt>{% translate "السبب" %}</dt><dd>{{ transfer.reason_display }}</dd>
     <dt>{% translate "تاريخ الطلب" %}</dt><dd class="num">{{ transfer.requested_on }} — {{ transfer.requested_by }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ transfer.status_display }}</span></dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip {{ transfer.status|status_tone }}">{{ transfer.status_display }}</span></dd>
   </dl>
 </div></div>
 

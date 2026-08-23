@@ -7,8 +7,11 @@
     <span class="spacer"></span>
     <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
   </div>
-  <form method="get" class="toolbar">
-    <input name="enrollment" value="{{ request.GET.enrollment }}" placeholder="{% translate 'رمز التسجيل' %}">
+  <form method="get" class="filterbar" role="search">
+    <div class="fld">
+      <label for="f_enrollment">{% translate "enrollment" %}</label>
+      <input type="search" name="enrollment" value="{{ request.GET.enrollment }}" placeholder="{% translate 'رمز التسجيل…' %}" spellcheck="false" id="f_enrollment">
+    </div>
     <button class="btn2" type="submit">{% translate "عرض" %}</button>
   </form>
 </div>

@@ -5,36 +5,38 @@
 <div class="card2">
   <h1>{{ title }}</h1>
 
-  <table class="tbl">
-    <thead>
-      <tr>
-        <th>{% translate "الرمز" %}</th>
-        <th>{% translate "الاسم" %}</th>
-        <th>{% translate "المجال" %}</th>
-        <th>{% translate "الساعات" %}</th>
-        <th>{% translate "المستويات" %}</th>
-        <th>{% translate "الحالة" %}</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for p in programs %}
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
         <tr>
-          <td dir="ltr">{{ p.code }}</td>
-          <td>{{ p.name_ar }}</td>
-          <td>{{ p.course_category.name_ar|default:"—" }}</td>
-          <td>{{ p.training_hours }}</td>
-          <td>{% if p.is_leveled %}{{ p.levels_count }}{% else %}—{% endif %}</td>
-          <td>
-            {% if p.is_active %}<span class="chip">{% translate "نشط" %}</span>
-            {% else %}<span class="chip">{% translate "غير نشط" %}</span>{% endif %}
-          </td>
-          <td><a href="{% url 'catalog:program-detail' p.code %}">{% translate "عرض" %}</a></td>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الاسم" %}</th>
+          <th>{% translate "المجال" %}</th>
+          <th>{% translate "الساعات" %}</th>
+          <th>{% translate "المستويات" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th></th>
         </tr>
-      {% empty %}
-        <tr><td colspan="7">{% translate "لا توجد برامج" %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for p in programs %}
+          <tr>
+            <td dir="ltr">{{ p.code }}</td>
+            <td>{{ p.name_ar }}</td>
+            <td>{{ p.course_category.name_ar|default:"—" }}</td>
+            <td>{{ p.training_hours }}</td>
+            <td>{% if p.is_leveled %}{{ p.levels_count }}{% else %}—{% endif %}</td>
+            <td>
+              {% if p.is_active %}<span class="chip">{% translate "نشط" %}</span>
+              {% else %}<span class="chip">{% translate "غير نشط" %}</span>{% endif %}
+            </td>
+            <td><a href="{% url 'catalog:program-detail' p.code %}">{% translate "عرض" %}</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">{% translate "لا توجد برامج" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

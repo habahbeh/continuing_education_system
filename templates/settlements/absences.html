@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note info">
   {% blocktranslate %}غرامة الغياب = {{ multiplier }} أضعاف نفقة المحاضرة عن كل غياب غير معفى. والحالة الطارئة تُعفى بموافقة خطية فلا تُغرَّم ولا تُحتسب. ويحق استبدال المدرب عند تجاوز {{ replace_limit }} غيابات — أي عند الخامس لا الرابع، وفق نصّ الاتفاقية الموقّعة.{% endblocktranslate %}
 </div>
@@ -9,16 +11,18 @@
 {% if alerts %}
   <div class="card2">
     <div class="card2-head"><h2>{% translate "تنبيهات الاستبدال" %}</h2></div>
-    <table class="tbl">
-      <thead><tr><th>{% translate "الدفعة" %}</th><th>{% translate "المدرب" %}</th>
-        <th>{% translate "الغيابات المحتسبة" %}</th><th>{% translate "الحد" %}</th></tr></thead>
-      <tbody>
-        {% for a in alerts %}
-          <tr><td dir="ltr">{{ a.cohort_code }}</td><td>{{ a.trainer_name }}</td>
-              <td class="num">{{ a.absence_count }}</td><td class="num">{{ a.limit }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>{% translate "الدفعة" %}</th><th>{% translate "المدرب" %}</th>
+          <th>{% translate "الغيابات المحتسبة" %}</th><th>{% translate "الحد" %}</th></tr></thead>
+        <tbody>
+          {% for a in alerts %}
+            <tr><td dir="ltr">{{ a.cohort_code }}</td><td>{{ a.trainer_name }}</td>
+                <td class="num">{{ a.absence_count }}</td><td class="num">{{ a.limit }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <div class="card2-body">
       <div class="note warn">
         {% translate "أجر المدرب البديل يُقيَّد التزاماً منفصلاً بمبلغه الفعلي — «بالغاً ما بلغت أجوره» رقم تفاوضي لا صيغة." %}
@@ -28,39 +32,44 @@
 {% endif %}
 
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الدفعة" %}</th><th>{% translate "المدرب" %}</th><th>{% translate "التاريخ" %}</th>
-      <th>{% translate "الحالة" %}</th><th>{% translate "الموافقة الخطية" %}</th>
-      <th>{% translate "الغرامة" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for a in absences %}
-        <tr>
-          <td dir="ltr">{{ a.cohort_code }}</td>
-          <td>{{ a.trainer_name }}</td>
-          <td class="num">{{ a.occurred_on }}</td>
-          <td>
-            {% if a.is_waived %}<span class="chip ok">{% translate "معفى" %}</span>
-            {% else %}<span class="chip danger">{% translate "محتسب" %}</span>{% endif %}
-          </td>
-          <td dir="ltr">{{ a.waiver_approval_ref|default:"—" }}</td>
-          <td dir="ltr">{{ a.obligation_code|default:"—" }}</td>
-          <td>
-            {% if can_create and not a.is_waived and not a.obligation_code %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="waive">
-                <input type="hidden" name="id" value="{{ a.id }}">
-                <input name="approval_ref" placeholder="{% translate 'مرجع الموافقة' %}" required>
-                <input type="date" name="approval_date" required>
-                <button class="btn2" type="submit">{% translate "إعفاء" %}</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}<tr><td colspan="7" class="empty">{% translate "لا غيابات مسجَّلة" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الدفعة" %}</th><th>{% translate "المدرب" %}</th><th>{% translate "التاريخ" %}</th>
+        <th>{% translate "الحالة" %}</th><th>{% translate "الموافقة الخطية" %}</th>
+        <th>{% translate "الغرامة" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for a in absences %}
+          <tr>
+            <td dir="ltr">{{ a.cohort_code }}</td>
+            <td>{{ a.trainer_name }}</td>
+            <td class="num">{{ a.occurred_on }}</td>
+            <td>
+              {% if a.is_waived %}<span class="chip ok">{% translate "معفى" %}</span>
+              {% else %}<span class="chip danger">{% translate "محتسب" %}</span>{% endif %}
+            </td>
+            <td dir="ltr">{{ a.waiver_approval_ref|default:"—" }}</td>
+            <td dir="ltr">{{ a.obligation_code|default:"—" }}</td>
+            <td>
+              {% if can_create and not a.is_waived and not a.obligation_code %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="waive">
+                  <input type="hidden" name="id" value="{{ a.id }}">
+                  <input name="approval_ref" placeholder="{% translate 'مرجع الموافقة…' %}" required>
+                  <input type="date" name="approval_date" required>
+                  <button class="btn2" type="submit">{% translate "إعفاء" %}</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}<tr><td colspan="7" class="empty">
+              <span class="empty-title">{% translate "لا غيابات مسجّلة" %}</span>
+              <span class="empty-body">{% translate "غياب المدرّب يُسجَّل على الدورة، ويُحتسب منه خصم الاتفاقية." %}</span>
+            </td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if can_create %}

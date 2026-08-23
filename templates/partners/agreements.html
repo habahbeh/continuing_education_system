@@ -1,44 +1,52 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note info">
   {% translate "النظام يدعم ثلاثة نماذج تعاقد ولا يثبّت أياً منها في الكود — تُعرض بنود كل اتفاقية كما وُقّعت." %}
 </div>
 {% if can_create %}
   <form class="toolbar">
-    <a class="btn2" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>
+    <a class="btn2 primary" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>
   </form>
 {% endif %}
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرقم" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النموذج" %}</th>
-      <th>{% translate "القيمة" %}</th><th>{% translate "تقاسم الخصم" %}</th>
-      <th>{% translate "دورة المخالصة" %}</th><th>{% translate "الحالة" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for a in agreements %}
-        <tr>
-          <td dir="ltr">{{ a.agreement_number }}</td>
-          <td>{{ a.partner_name }}</td>
-          <td>{{ a.calculation_model_display }}</td>
-          <td class="num">
-            {% if a.percent_rate %}{{ a.percent_rate }}%
-            {% elif a.fixed_amount_per_student %}{{ a.fixed_amount_per_student }}
-            {% elif a.commission_amount %}{{ a.commission_amount }}
-            {% else %}—{% endif %}
-          </td>
-          <td>{{ a.discount_split_mode_display }}</td>
-          <td>{{ a.settlement_cycle_display }}</td>
-          <td>
-            <span class="chip">{{ a.status_display }}</span>
-            {% if a.is_expired %}<span class="chip warn">{% translate "منقضية" %}</span>{% endif %}
-          </td>
-          <td><a class="btn2" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
-        </tr>
-      {% empty %}<tr><td colspan="8" class="empty">{% translate "لا اتفاقيات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرقم" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النموذج" %}</th>
+        <th>{% translate "القيمة" %}</th><th>{% translate "تقاسم الخصم" %}</th>
+        <th>{% translate "دورة المخالصة" %}</th><th>{% translate "الحالة" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for a in agreements %}
+          <tr>
+            <td dir="ltr">{{ a.agreement_number }}</td>
+            <td>{{ a.partner_name }}</td>
+            <td>{{ a.calculation_model_display }}</td>
+            <td class="num">
+              {% if a.percent_rate %}{{ a.percent_rate }}%
+              {% elif a.fixed_amount_per_student %}{{ a.fixed_amount_per_student }}
+              {% elif a.commission_amount %}{{ a.commission_amount }}
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ a.discount_split_mode_display }}</td>
+            <td>{{ a.settlement_cycle_display }}</td>
+            <td>
+              <span class="chip {{ a.status|status_tone }}">{{ a.status_display }}</span>
+              {% if a.is_expired %}<span class="chip warn">{% translate "منقضية" %}</span>{% endif %}
+            </td>
+            <td><a class="btn2 ghost" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
+          </tr>
+        {% empty %}<tr><td colspan="8" class="empty">
+              <span class="empty-title">{% translate "لا اتفاقيات بعد" %}</span>
+              <span class="empty-body">{% translate "الاتفاقية تُوقَّع على الورق ثم تُسجَّل هنا كما وردت، وتسري باعتماد منفصل من صفحتها." %}</span>
+              {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>{% endif %}
+            </td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

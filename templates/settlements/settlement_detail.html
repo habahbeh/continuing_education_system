@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }} <span dir="ltr">{{ settlement.code }}</span></h1>
+<div class="page-head">
+  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ settlement.code }}</span></h1>
+</div>
 
 <div class="card2"><div class="card2-body">
   <dl class="dl">
@@ -9,7 +11,7 @@
     <dt>{% translate "الاتفاقية" %}</dt><dd dir="ltr">{{ settlement.agreement_number }}</dd>
     <dt>{% translate "دورة المخالصة" %}</dt><dd dir="ltr">{{ settlement.cycle_type }}</dd>
     <dt>{% translate "الفترة" %}</dt><dd class="num">{{ settlement.period_from }} — {{ settlement.period_to }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd><span class="chip">{{ settlement.status_display }}</span></dd>
+    <dt>{% translate "الحالة" %}</dt><dd><span class="chip {{ settlement.status|status_tone }}">{{ settlement.status_display }}</span></dd>
     {% if settlement.signed_on %}<dt>{% translate "تاريخ التوقيع" %}</dt><dd class="num">{{ settlement.signed_on }}</dd>{% endif %}
   </dl>
 </div></div>
@@ -22,28 +24,32 @@
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "المطالبات المضمومة" %}</h2></div>
-  <table class="tbl">
-    <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الفترة" %}</th><th>{% translate "الصافي" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
-    <tbody>
-      {% for c in settlement.claims %}
-        <tr><td dir="ltr">{{ c.code }}</td><td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
-            <td class="num">{{ c.net_payable }}</td><td>{{ c.status }}</td></tr>
-      {% empty %}<tr><td colspan="4" class="empty">{% translate "لم تُضمّ مطالبات بعد" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الفترة" %}</th><th>{% translate "الصافي" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+      <tbody>
+        {% for c in settlement.claims %}
+          <tr><td dir="ltr">{{ c.code }}</td><td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
+              <td class="num">{{ c.net_payable }}</td><td>{{ c.status }}</td></tr>
+        {% empty %}<tr><td colspan="4" class="empty">{% translate "لم تُضمّ مطالبات بعد" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if settlement.attachable and can_edit %}
   <div class="card2">
     <div class="card2-head"><h2>{% translate "مطالبات قابلة للضمّ" %}</h2></div>
-    <table class="tbl">
-      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "حتى" %}</th><th>{% translate "الصافي" %}</th></tr></thead>
-      <tbody>
-        {% for c in settlement.attachable %}
-          <tr><td dir="ltr">{{ c.code }}</td><td class="num">{{ c.period_to }}</td><td class="num">{{ c.net_payable }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "حتى" %}</th><th>{% translate "الصافي" %}</th></tr></thead>
+        <tbody>
+          {% for c in settlement.attachable %}
+            <tr><td dir="ltr">{{ c.code }}</td><td class="num">{{ c.period_to }}</td><td class="num">{{ c.net_payable }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <div class="card2-body">
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="attach">

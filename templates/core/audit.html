@@ -16,47 +16,49 @@
       {% endfor %}
     </select>
     <input type="search" name="actor" value="{{ filters.actor }}"
-           placeholder="{% translate 'المستخدم' %}">
+           placeholder="{% translate 'المستخدم…' %}">
     <input type="search" name="entity" value="{{ filters.entity }}"
-           placeholder="{% translate 'الكيان' %}">
+           placeholder="{% translate 'الكيان…' %}">
     <button type="submit" class="btn2">{% translate "تصفية" %}</button>
   </form>
 
-  <table class="tbl">
-    <thead>
-      <tr>
-        <th>{% translate "الوقت" %}</th>
-        <th>{% translate "المستخدم" %}</th>
-        <th>{% translate "الدور وقت الحدث" %}</th>
-        <th>{% translate "الإجراء" %}</th>
-        <th>{% translate "الكيان" %}</th>
-        <th>{% translate "المرجع" %}</th>
-        <th>{% translate "الوصف" %}</th>
-        <th>{% translate "قاعدة الرفض" %}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for e in events %}
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
         <tr>
-          <td dir="ltr">{{ e.occurred_at|date:"Y/m/d H:i" }}</td>
-          {% comment %}
-            A system event has no actor, and `default:` resolves its ARGUMENT
-            eagerly — `e.actor.username` on a null actor raises
-            VariableDoesNotExist instead of being silenced, which took the
-            whole audit screen down with a 500. Sprint 8I browser pass.
-          {% endcomment %}
-          <td>{% if e.actor %}{{ e.actor.full_name_ar|default:e.actor.username }}{% else %}<span class="muted">{% translate "النظام" %}</span>{% endif %}</td>
-          <td>{{ e.actor_role|default:"—" }}</td>
-          <td>{{ e.action }}</td>
-          <td>{{ e.entity_type }}</td>
-          <td dir="ltr">{{ e.reference|default:"—" }}</td>
-          <td>{{ e.summary_ar }}</td>
-          <td>{{ e.denial_rule|default:"—" }}</td>
+          <th>{% translate "الوقت" %}</th>
+          <th>{% translate "المستخدم" %}</th>
+          <th>{% translate "الدور وقت الحدث" %}</th>
+          <th>{% translate "الإجراء" %}</th>
+          <th>{% translate "الكيان" %}</th>
+          <th>{% translate "المرجع" %}</th>
+          <th>{% translate "الوصف" %}</th>
+          <th>{% translate "قاعدة الرفض" %}</th>
         </tr>
-      {% empty %}
-        <tr><td colspan="8">{% translate "لا توجد قيود مطابقة" %}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for e in events %}
+          <tr>
+            <td dir="ltr">{{ e.occurred_at|date:"Y/m/d H:i" }}</td>
+            {% comment %}
+              A system event has no actor, and `default:` resolves its ARGUMENT
+              eagerly — `e.actor.username` on a null actor raises
+              VariableDoesNotExist instead of being silenced, which took the
+              whole audit screen down with a 500. Sprint 8I browser pass.
+            {% endcomment %}
+            <td>{% if e.actor %}{{ e.actor.full_name_ar|default:e.actor.username }}{% else %}<span class="muted">{% translate "النظام" %}</span>{% endif %}</td>
+            <td>{{ e.actor_role|default:"—" }}</td>
+            <td>{{ e.action }}</td>
+            <td>{{ e.entity_type }}</td>
+            <td dir="ltr">{{ e.reference|default:"—" }}</td>
+            <td>{{ e.summary_ar }}</td>
+            <td>{{ e.denial_rule|default:"—" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8">{% translate "لا توجد قيود مطابقة" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

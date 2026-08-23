@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 {% include "operations/_statement.html" with statement=statement only %}
 {% endblock %}

@@ -36,95 +36,103 @@ Takes one variable: ``statement``.
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "بنود الرسوم" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "التاريخ" %}</th><th>{% translate "البيان" %}</th><th>{% translate "النوع" %}</th>
-      <th>{% translate "الصافي" %}</th><th>{% translate "الضريبة" %}</th><th>{% translate "الإجمالي" %}</th>
-      <th>{% translate "المتبقّي" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for c in statement.charges %}
-        <tr>
-          <td class="num">{{ c.charged_on }}</td>
-          <td>{{ c.description_ar }}{% if c.voided %} <span class="chip danger">{% translate "ملغى" %}</span>{% endif %}</td>
-          <td>{{ c.charge_type_display }}</td>
-          <td class="num">{{ c.net_amount }}</td>
-          <td class="num">{{ c.tax_amount }}</td>
-          <td class="num">{{ c.gross_amount }}</td>
-          <td class="num">{{ c.outstanding }}</td>
-        </tr>
-      {% empty %}<tr><td colspan="7" class="empty">{% translate "لا بنود" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "التاريخ" %}</th><th>{% translate "البيان" %}</th><th>{% translate "النوع" %}</th>
+        <th>{% translate "الصافي" %}</th><th>{% translate "الضريبة" %}</th><th>{% translate "الإجمالي" %}</th>
+        <th>{% translate "المتبقّي" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for c in statement.charges %}
+          <tr>
+            <td class="num">{{ c.charged_on }}</td>
+            <td>{{ c.description_ar }}{% if c.voided %} <span class="chip danger">{% translate "ملغى" %}</span>{% endif %}</td>
+            <td>{{ c.charge_type_display }}</td>
+            <td class="num">{{ c.net_amount }}</td>
+            <td class="num">{{ c.tax_amount }}</td>
+            <td class="num">{{ c.gross_amount }}</td>
+            <td class="num">{{ c.outstanding }}</td>
+          </tr>
+        {% empty %}<tr><td colspan="7" class="empty">{% translate "لا بنود" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if statement.discounts %}
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الخصومات" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "المبلغ" %}</th><th>{% translate "الوعاء" %}</th><th>{% translate "السبب" %}</th>
-      <th>{% translate "موافقة الرئيس" %}</th><th>{% translate "حصة الجامعة" %}</th><th>{% translate "حصة الشريك" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for d in statement.discounts %}
-        <tr>
-          <td class="num">{{ d.amount }}</td>
-          <td class="num">{{ d.base_amount }}</td>
-          <td>{{ d.reason_ar }}</td>
-          <td dir="ltr">{{ d.president_approval_ref }} · {{ d.president_approval_date }}</td>
-          <td class="num">{{ d.university_burden }}</td>
-          <td class="num">{{ d.partner_burden }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "المبلغ" %}</th><th>{% translate "الوعاء" %}</th><th>{% translate "السبب" %}</th>
+        <th>{% translate "موافقة الرئيس" %}</th><th>{% translate "حصة الجامعة" %}</th><th>{% translate "حصة الشريك" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for d in statement.discounts %}
+          <tr>
+            <td class="num">{{ d.amount }}</td>
+            <td class="num">{{ d.base_amount }}</td>
+            <td>{{ d.reason_ar }}</td>
+            <td dir="ltr">{{ d.president_approval_ref }} · {{ d.president_approval_date }}</td>
+            <td class="num">{{ d.university_burden }}</td>
+            <td class="num">{{ d.partner_burden }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الدفعات والتخصيصات" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "التاريخ" %}</th><th>{% translate "السند" %}</th>
-      <th>{% translate "مقابل" %}</th><th>{% translate "المبلغ" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for p in statement.payments %}
-        <tr>
-          <td class="num">{{ p.received_on }}</td>
-          <td dir="ltr">{{ p.receipt_number }}{% if p.voided %} <span class="chip danger">{% translate "ملغى" %}</span>{% endif %}</td>
-          <td>{{ p.against }}{% if p.is_reversal %} <span class="chip warn">{% translate "عكس" %}</span>{% endif %}</td>
-          <td class="num">{{ p.amount }}</td>
-        </tr>
-      {% empty %}<tr><td colspan="4" class="empty">{% translate "لا دفعات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "التاريخ" %}</th><th>{% translate "السند" %}</th>
+        <th>{% translate "مقابل" %}</th><th>{% translate "المبلغ" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for p in statement.payments %}
+          <tr>
+            <td class="num">{{ p.received_on }}</td>
+            <td dir="ltr">{{ p.receipt_number }}{% if p.voided %} <span class="chip danger">{% translate "ملغى" %}</span>{% endif %}</td>
+            <td>{{ p.against }}{% if p.is_reversal %} <span class="chip warn">{% translate "عكس" %}</span>{% endif %}</td>
+            <td class="num">{{ p.amount }}</td>
+          </tr>
+        {% empty %}<tr><td colspan="4" class="empty">{% translate "لا دفعات" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 {% if statement.refunds or statement.credit_returns %}
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الاستردادات وردّ الأرصدة" %}</h2></div>
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرمز" %}</th><th>{% translate "النوع" %}</th><th>{% translate "المبلغ" %}</th>
-      <th>{% translate "الحالة" %}</th><th>{% translate "استرجاع الشريك" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for r in statement.refunds %}
-        <tr>
-          <td dir="ltr">{{ r.code }}</td><td>{% translate "استرداد" %}</td>
-          <td class="num">{{ r.amount }}</td><td>{{ r.status_display }}</td>
-          <td class="num">{{ r.partner_recovery_amount }}</td>
-        </tr>
-      {% endfor %}
-      {% for c in statement.credit_returns %}
-        <tr>
-          <td dir="ltr">{{ c.code }}</td><td>{% translate "ردّ رصيد دائن" %}</td>
-          <td class="num">{{ c.amount }}</td><td>{{ c.returned_on }}</td><td>—</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "النوع" %}</th><th>{% translate "المبلغ" %}</th>
+        <th>{% translate "الحالة" %}</th><th>{% translate "استرجاع الشريك" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for r in statement.refunds %}
+          <tr>
+            <td dir="ltr">{{ r.code }}</td><td>{% translate "استرداد" %}</td>
+            <td class="num">{{ r.amount }}</td><td>{{ r.status_display }}</td>
+            <td class="num">{{ r.partner_recovery_amount }}</td>
+          </tr>
+        {% endfor %}
+        {% for c in statement.credit_returns %}
+          <tr>
+            <td dir="ltr">{{ c.code }}</td><td>{% translate "ردّ رصيد دائن" %}</td>
+            <td class="num">{{ c.amount }}</td><td>{{ c.returned_on }}</td><td>—</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}

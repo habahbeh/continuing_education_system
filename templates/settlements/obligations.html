@@ -1,33 +1,40 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note info">
   {% translate "التزامات الشريك تجاه الجامعة — تُستوفى بالحسم من مطالباته لا نقداً. رواتب المدربين ومصاريف التدريب العملي وإعادة ما قُبض عن أجزاء لم تُنفَّذ تُقيَّد هنا. أما غرامة غياب المدرب فتُحتسب من سجل الغيابات لأنها صيغة بمدخلات، واسترجاع الصرف المقدّم واسترجاع الاسترداد يرفعهما النظام آلياً." %}
 </div>
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النوع" %}</th>
-      <th>{% translate "المبلغ" %}</th><th>{% translate "المُستوفى" %}</th><th>{% translate "المتبقّي" %}</th>
-      <th>{% translate "مقيَّد باتفاقية" %}</th><th>{% translate "البيان" %}</th><th>{% translate "الحالة" %}</th>
-    </tr></thead>
-    <tbody>
-      {% for o in obligations %}
-        <tr>
-          <td dir="ltr">{{ o.code }}</td>
-          <td>{{ o.partner_name }}</td>
-          <td>{{ o.obligation_type_display }}</td>
-          <td class="num">{{ o.amount }}</td>
-          <td class="num">{{ o.recovered_amount }}</td>
-          <td class="num">{{ o.outstanding }}</td>
-          <td dir="ltr">{{ o.restricted_to|default:"—" }}</td>
-          <td>{{ o.statement_reference }}</td>
-          <td><span class="chip">{{ o.status_display }}</span></td>
-        </tr>
-      {% empty %}<tr><td colspan="9" class="empty">{% translate "لا التزامات" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النوع" %}</th>
+        <th>{% translate "المبلغ" %}</th><th>{% translate "المُستوفى" %}</th><th>{% translate "المتبقّي" %}</th>
+        <th>{% translate "مقيَّد باتفاقية" %}</th><th>{% translate "البيان" %}</th><th>{% translate "الحالة" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for o in obligations %}
+          <tr>
+            <td dir="ltr">{{ o.code }}</td>
+            <td>{{ o.partner_name }}</td>
+            <td>{{ o.obligation_type_display }}</td>
+            <td class="num">{{ o.amount }}</td>
+            <td class="num">{{ o.recovered_amount }}</td>
+            <td class="num">{{ o.outstanding }}</td>
+            <td dir="ltr">{{ o.restricted_to|default:"—" }}</td>
+            <td>{{ o.statement_reference }}</td>
+            <td><span class="chip {{ o.status|status_tone }}">{{ o.status_display }}</span></td>
+          </tr>
+        {% empty %}<tr><td colspan="9" class="empty">
+              <span class="empty-title">{% translate "لا التزامات" %}</span>
+              <span class="empty-body">{% translate "الالتزام يُحتسب من التسجيلات المشمولة باتفاقية الشريك." %}</span>
+            </td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% if can_create %}
   <div class="card2">

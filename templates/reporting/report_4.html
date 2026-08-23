@@ -10,20 +10,22 @@
   <div class="kpi"><div class="label">{% translate "إجمالي المتأخر" %}</div><div class="value num">{{ report.total_outstanding }}</div></div>
 </div>
 <div class="card2">
-  <table class="tbl">
-    <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "الدفعة" %}</th>
-      <th>{% translate "المستحق" %}</th><th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th>
-      <th>{% translate "الحالة" %}</th><th>{% translate "يُسقط استحقاق الشريك" %}</th></tr></thead>
-    <tbody>
-      {% for r in report.rows %}
-        <tr><td dir="ltr">{{ r.code }}</td>
-            <td>{{ r.participant_name }}<br><small class="muted" dir="ltr">{{ r.participant_number }}</small></td>
-            <td dir="ltr">{{ r.cohort_code }}</td>
-            <td class="num">{{ r.total_due }}</td><td class="num">{{ r.total_paid }}</td>
-            <td class="num">{{ r.balance }}</td><td>{{ r.status_display }}</td>
-            <td>{% if r.voids_partner_entitlement %}<span class="chip danger">{% translate "نعم" %}</span>{% else %}—{% endif %}</td></tr>
-      {% empty %}<tr><td colspan="8" class="empty">{% translate "لا متأخرين" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "الدفعة" %}</th>
+        <th>{% translate "المستحق" %}</th><th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th>
+        <th>{% translate "الحالة" %}</th><th>{% translate "يُسقط استحقاق الشريك" %}</th></tr></thead>
+      <tbody>
+        {% for r in report.rows %}
+          <tr><td dir="ltr">{{ r.code }}</td>
+              <td>{{ r.participant_name }}<br><small class="muted" dir="ltr">{{ r.participant_number }}</small></td>
+              <td dir="ltr">{{ r.cohort_code }}</td>
+              <td class="num">{{ r.total_due }}</td><td class="num">{{ r.total_paid }}</td>
+              <td class="num">{{ r.balance }}</td><td>{{ r.status_display }}</td>
+              <td>{% if r.voids_partner_entitlement %}<span class="chip danger">{% translate "نعم" %}</span>{% else %}—{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="8" class="empty">{% translate "لا متأخرين" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

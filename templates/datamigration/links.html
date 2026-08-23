@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
 <div class="note warn">
   {% translate "الربط قرار هوية لا نقل بيانات. لا يُنسخ رقم ولا مبلغ ولا تسجيل — يُسجَّل فقط أن هذا السجل التاريخي وهذا المشارك شخص واحد. ولا رَبط آلي: ثمانية أرقام في هذه الملفات تحمل اسمين مختلفين، ومطابِق آلي كان سيدمج شخصين بصمت." %}
 </div>
@@ -12,21 +14,26 @@
 </div>
 
 {% if can_link %}
-  <form method="get" class="toolbar">
-    <input name="q" value="{{ query }}" placeholder="{% translate 'ابحث باسم المشارك الحالي' %}">
+  <form method="get" class="filterbar" role="search">
+    <div class="fld">
+      <label for="f_q">{% translate "بحث" %}</label>
+      <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'ابحث باسم المشارك الحالي…' %}" spellcheck="false" id="f_q">
+    </div>
     <button class="btn2" type="submit">{% translate "بحث" %}</button>
   </form>
   {% if candidates %}
     <div class="card2">
       <div class="card2-head"><h2>{% translate "مرشّحون بحسب ما كتبتَه" %}</h2></div>
-      <table class="tbl">
-        <thead><tr><th>{% translate "الرقم الجامعي" %}</th><th>{% translate "الاسم" %}</th></tr></thead>
-        <tbody>
-          {% for number, label in candidates %}
-            <tr><td dir="ltr">{{ number }}</td><td>{{ label }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>{% translate "الرقم الجامعي" %}</th><th>{% translate "الاسم" %}</th></tr></thead>
+          <tbody>
+            {% for number, label in candidates %}
+              <tr><td dir="ltr">{{ number }}</td><td>{{ label }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
       <div class="card2-body"><small class="muted">
         {% translate "المرشّحون يأتون من بحثك أنت لا من الصف التاريخي — فلا يُقترح «أفضل تطابق» يُقبل بلا قراءة." %}
       </small></div>
@@ -35,49 +42,51 @@
 {% endif %}
 
 <div class="card2">
-  <table class="tbl">
-    <thead><tr>
-      <th>{% translate "الدفعة" %}</th><th>{% translate "الرقم القديم" %}</th><th>{% translate "الاسم كما ورد" %}</th>
-      <th>{% translate "المصدر" %}</th><th>{% translate "تنبيهات" %}</th><th>{% translate "المشارك المرتبط" %}</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for r in rows %}
-        <tr>
-          <td dir="ltr">{{ r.batch_code }}</td>
-          <td dir="ltr">{{ r.legacy_number }}{% if r.legacy_alt_number %}<br><small class="muted">+ {{ r.legacy_alt_number }}</small>{% endif %}</td>
-          <td>{{ r.name_ar|default:"—" }}</td>
-          <td><small class="muted">{{ r.sheet_name }} · {{ r.source_row }}</small></td>
-          <td>
-            {% if r.name_conflict %}<span class="chip danger">{% translate "الرقم نفسه باسمين" %}</span>{% endif %}
-            {% if r.composite %}<span class="chip warn">{% translate "رقمان في خلية" %}</span>{% endif %}
-          </td>
-          <td>
-            {% if r.linked_number %}
-              <span dir="ltr">{{ r.linked_number }}</span> — {{ r.linked_name }}
-              <br><small class="muted">{{ r.linked_by }} · {{ r.link_note_ar }}</small>
-            {% else %}—{% endif %}
-          </td>
-          <td>
-            {% if can_link and not r.linked_number %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="link">
-                <input type="hidden" name="historical_id" value="{{ r.id }}">
-                <input name="participant_number" maxlength="9" placeholder="{% translate 'الرقم الحالي' %}" required>
-                <input name="note_ar" placeholder="{% translate 'مسوّغ الربط' %}" required>
-                <button class="btn2 primary" type="submit">{% translate "ربط" %}</button>
-              </form>
-            {% elif can_link %}
-              <form method="post">{% csrf_token %}
-                <input type="hidden" name="action" value="unlink">
-                <input type="hidden" name="historical_id" value="{{ r.id }}">
-                <input name="note_ar" placeholder="{% translate 'سبب فكّ الربط' %}" required>
-                <button class="btn2" type="submit">{% translate "فكّ الربط" %}</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}<tr><td colspan="7" class="empty">{% translate "لا سجلات في الطابور" %}</td></tr>{% endfor %}
-    </tbody>
-  </table>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الدفعة" %}</th><th>{% translate "الرقم القديم" %}</th><th>{% translate "الاسم كما ورد" %}</th>
+        <th>{% translate "المصدر" %}</th><th>{% translate "تنبيهات" %}</th><th>{% translate "المشارك المرتبط" %}</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td dir="ltr">{{ r.batch_code }}</td>
+            <td dir="ltr">{{ r.legacy_number }}{% if r.legacy_alt_number %}<br><small class="muted">+ {{ r.legacy_alt_number }}</small>{% endif %}</td>
+            <td>{{ r.name_ar|default:"—" }}</td>
+            <td><small class="muted">{{ r.sheet_name }} · {{ r.source_row }}</small></td>
+            <td>
+              {% if r.name_conflict %}<span class="chip danger">{% translate "الرقم نفسه باسمين" %}</span>{% endif %}
+              {% if r.composite %}<span class="chip warn">{% translate "رقمان في خلية" %}</span>{% endif %}
+            </td>
+            <td>
+              {% if r.linked_number %}
+                <span dir="ltr">{{ r.linked_number }}</span> — {{ r.linked_name }}
+                <br><small class="muted">{{ r.linked_by }} · {{ r.link_note_ar }}</small>
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if can_link and not r.linked_number %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="link">
+                  <input type="hidden" name="historical_id" value="{{ r.id }}">
+                  <input name="participant_number" maxlength="9" placeholder="{% translate 'الرقم الحالي…' %}" required>
+                  <input name="note_ar" placeholder="{% translate 'مسوّغ الربط…' %}" required>
+                  <button class="btn2 primary" type="submit">{% translate "ربط" %}</button>
+                </form>
+              {% elif can_link %}
+                <form method="post">{% csrf_token %}
+                  <input type="hidden" name="action" value="unlink">
+                  <input type="hidden" name="historical_id" value="{{ r.id }}">
+                  <input name="note_ar" placeholder="{% translate 'سبب فكّ الربط…' %}" required>
+                  <button class="btn2" type="submit">{% translate "فكّ الربط" %}</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}<tr><td colspan="7" class="empty">{% translate "لا سجلات في الطابور" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
