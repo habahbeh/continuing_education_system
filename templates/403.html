@@ -18,21 +18,33 @@
   Found in the Sprint 8I browser pass.
 {% endcomment %}
 
+{% block title %}{% translate "لا صلاحية للوصول — مركز التعليم المستمر" %}{% endblock %}
+
 {% block content %}
-<div class="card2">
-  <div class="card2-head"><h1>{% translate "لا صلاحية للوصول" %}</h1></div>
-  <div class="card2-body">
-    {% if user.is_authenticated %}
-      <div class="note warn">
+<div class="auth-wrap">
+  <div class="auth-card wide">
+    <div class="card2">
+      <div class="card2-head">
+        <h1>{% translate "لا صلاحية للوصول" %}</h1>
+      </div>
+      <div class="card2-body">
+        {% if user.is_authenticated %}
+          <div class="note warn">
         {% translate "هذه الشاشة ليست ضمن صلاحيات دورك. الصلاحيات تُمنح بالدور لا بالطلب — راجع مدير النظام إن كنت تحتاجها." %}
       </div>
-      <a class="btn2" href="{% url 'operations:dashboard' %}">{% translate "العودة إلى لوحة المؤشرات" %}</a>
-    {% else %}
-      <div class="note info">
+          <div class="form-acts">
+          <a class="btn2 primary" href="{% url 'operations:dashboard' %}">{% translate "العودة إلى لوحة المؤشرات" %}</a>
+        </div>
+        {% else %}
+          <div class="note info">
         {% translate "انتهت الجلسة أو لم تسجّل الدخول بعد. تُغلق الجلسة تلقائياً بعد مدة من عدم الاستخدام حمايةً للبيانات." %}
       </div>
-      <a class="btn2 primary" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
-    {% endif %}
+          <div class="form-acts">
+          <a class="btn2 primary" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -16,7 +16,7 @@
   </dl>
 </div></div>
 
-<div class="grid2">
+<div class="kpi-grid">
   <div class="kpi"><div class="label">{% translate "المستحق" %}</div><div class="value num">{{ settlement.total_due }}</div></div>
   <div class="kpi"><div class="label">{% translate "المدفوع" %}</div><div class="value num">{{ settlement.total_paid }}</div></div>
   <div class="kpi"><div class="label">{% translate "الرصيد" %}</div><div class="value num">{{ settlement.balance }}</div></div>
@@ -31,7 +31,7 @@
         {% for c in settlement.claims %}
           <tr><td dir="ltr">{{ c.code }}</td><td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
               <td class="num">{{ c.net_payable }}</td><td>{{ c.status }}</td></tr>
-        {% empty %}<tr><td colspan="4" class="empty">{% translate "لم تُضمّ مطالبات بعد" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="4" class="empty"><span class="empty-title">{% translate "لم تُضمّ مطالبات بعد" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

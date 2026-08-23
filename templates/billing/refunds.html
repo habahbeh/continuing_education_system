@@ -50,7 +50,7 @@
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty">{% translate "لا استردادات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="9" class="empty"><span class="empty-title">{% translate "لا استردادات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -71,7 +71,7 @@
             <td>{{ c.participant_name }}</td><td class="num">{{ c.amount }}</td>
             <td class="num">{{ c.returned_on }}</td><td>{{ c.reason_ar }}</td>
           </tr>
-        {% empty %}<tr><td colspan="6" class="empty">{% translate "لا حركات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا حركات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

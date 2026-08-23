@@ -19,7 +19,7 @@
               <td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
               <td class="num">{{ c.partner_share }}</td><td class="num">{{ c.total_deductions }}</td>
               <td class="num">{{ c.net_payable }}</td><td>{{ c.status_display }}</td></tr>
-        {% empty %}<tr><td colspan="7" class="empty">{% translate "لا مطالبات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا مطالبات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -35,7 +35,7 @@
           <tr><td dir="ltr">{{ s.code }}</td><td class="num">{{ s.period_from }} — {{ s.period_to }}</td>
               <td class="num">{{ s.total_due }}</td><td class="num">{{ s.total_paid }}</td>
               <td class="num">{{ s.balance }}</td><td>{{ s.status_display }}</td></tr>
-        {% empty %}<tr><td colspan="6" class="empty">{% translate "لا مخالصات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا مخالصات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -51,7 +51,7 @@
           <tr><td dir="ltr">{{ o.code }}</td><td>{{ o.obligation_type_display }}</td>
               <td class="num">{{ o.amount }}</td><td class="num">{{ o.recovered_amount }}</td>
               <td class="num">{{ o.outstanding }}</td><td>{{ o.statement_reference }}</td></tr>
-        {% empty %}<tr><td colspan="6" class="empty">{% translate "لا التزامات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا التزامات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

@@ -29,7 +29,7 @@
             <td><span class="chip {{ a.status|status_tone }}">{{ a.status_display }}</span></td>
             <td><a class="btn2 ghost" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
           </tr>
-        {% empty %}<tr><td colspan="6" class="empty">{% translate "لا اتفاقيات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا اتفاقيات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

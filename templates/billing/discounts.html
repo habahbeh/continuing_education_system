@@ -41,7 +41,7 @@
               {% else %}<span class="chip warn">{% translate "بانتظار اعتماد غير المُنشئ" %}</span>{% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="10" class="empty">{% translate "لا خصومات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="10" class="empty"><span class="empty-title">{% translate "لا خصومات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

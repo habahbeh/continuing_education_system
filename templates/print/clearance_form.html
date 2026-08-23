@@ -8,8 +8,12 @@
 {% endcomment %}
 {% block content %}
 <div class="no-print">
-  <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
-  <a class="btn2" href="{% url 'operations:clearance-detail' clearance.code %}">{% translate "رجوع" %}</a>
+  <div class="action-bar">
+    <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+    <a class="btn2 ghost" href="{% url 'operations:clearance-detail' clearance.code %}">{% translate "العودة إلى براءة الذمة" %}</a>
+    <span class="spacer"></span>
+    <span class="muted">{% translate "التوقيع والأختام تُطبَّق باليد على الورقة." %}</span>
+  </div>
 </div>
 
 <div class="doc">

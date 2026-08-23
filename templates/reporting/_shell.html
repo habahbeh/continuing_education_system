@@ -1,25 +1,43 @@
 {% load i18n %}
-{% comment %}Shared chrome for every report: filters, export, print.{% endcomment %}
-<div class="no-print">
-  <div class="toolbar">
-    <a class="btn2" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
-    <span class="spacer"></span>
+{% comment %}
+  Shared chrome for every report: filters, export, print.
+
+  Sprint 8J — العنوان كان يأتي بعد شريط الأدوات والمرشّحات، فأول ما تقرؤه في
+  تقرير مالي زرّ «تطبيق» لا اسمَ التقرير ولا المدى الذي يغطّيه. رُتّب: العنوان
+  والفترة أولاً، ثم الإجراءات، ثم المرشّحات. الإجراءات والمرشّحات تختفي عند
+  الطباعة؛ العنوان والفترة يبقيان، لأن ورقةً بلا اسم تقريرها ولا مداها ورقة
+  لا تصلح للحفظ.
+
+  `print:hidden` لا `.no-print` على هذين العنصرين: `.no-print` يحمل `mb-4`
+  أيضاً منذ 8C-1، وهو هامش خاطئ على سطر إجراءات داخل ترويسة.
+{% endcomment %}
+
+<div class="page-head">
+  <div>
+    <span class="eyebrow print:hidden">{% translate "التقارير" %}</span>
+    <h1>{{ report.title }}</h1>
+    <p class="sub">
+      {% translate "الفترة" %}:
+      <span dir="ltr" translate="no">{{ date_from }} — {{ date_to }}</span>
+    </p>
+  </div>
+  <div class="acts print:hidden">
+    <a class="btn2 ghost" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
     {% if exportable %}
       <a class="btn2" href="{% url 'reporting:report-export' report.number %}?from={{ date_from }}&to={{ date_to }}">{% translate "تصدير CSV" %}</a>
     {% endif %}
-    <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+    <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
   </div>
-  <form method="get" class="filterbar" role="search">
-    <div class="fld">
-      <label for="f_from">{% translate "من تاريخ" %}</label>
-      <input type="date" name="from" value="{{ date_from }}" id="f_from">
-    </div>
-
-    <div class="fld">
-      <label for="f_to">{% translate "إلى تاريخ" %}</label>
-      <input type="date" name="to" value="{{ date_to }}" id="f_to">
-    </div>
-    <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
-  </form>
 </div>
-<h1>{{ report.title }}</h1>
+
+<form method="get" class="filterbar print:hidden">
+  <div class="fld">
+    <label for="f_from">{% translate "من تاريخ" %}</label>
+    <input type="date" name="from" value="{{ date_from }}" id="f_from">
+  </div>
+  <div class="fld">
+    <label for="f_to">{% translate "إلى تاريخ" %}</label>
+    <input type="date" name="to" value="{{ date_to }}" id="f_to">
+  </div>
+  <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
+</form>

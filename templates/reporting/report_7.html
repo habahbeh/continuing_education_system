@@ -25,7 +25,7 @@
               <td>{{ e.category_label }}</td><td>{{ e.description_ar }}</td>
               <td dir="ltr">{{ e.cohort_code|default:"—" }}</td><td class="num">{{ e.amount }}</td>
               <td><span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span></td></tr>
-        {% empty %}<tr><td colspan="7" class="empty">{% translate "لا مصروفات" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا مصروفات" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

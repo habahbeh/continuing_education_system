@@ -184,6 +184,9 @@
   .tbl td > a + form
                 { @apply ms-1; }
   .tbl td .btn2 { @apply px-2 py-1 text-xs; }
+  /* زرّ يُرسل POST يحتاج نموذجه وبطاقة CSRF الخاصة به، والنموذج عنصر كتلة —
+     فيهبط الزرّ سطراً. كان يُعالَج بـ `style="display:inline"` سطرياً. */
+  .inline-form  { @apply inline-block align-middle; }
   /* خلية الإجراءات لا تلتفّ ولا تُمطّ. */
   .tbl td.acts  { @apply whitespace-nowrap text-end; }
 
@@ -347,6 +350,7 @@
   /* شاشة دخول: بطاقة واحدة في وسط الصفحة. كانت ثلاث شاشات مصادقة تحمل
      `style="max-width:..."` سطرياً لأن الصنف لم يكن موجوداً. */
   .auth-card    { @apply w-full mx-auto; max-width: 26rem; }
+  .auth-card.wide { max-width: 34rem; }
   .auth-wrap    { @apply flex items-start justify-center py-6 sm:py-12; }
   .fld-group    { @apply mb-5; }
   .fld-group > legend, .fld-group > .legend {
@@ -416,6 +420,8 @@
   .doc-note     { @apply text-xs text-ink-3 border-t border-line pt-3 mt-6; }
   .doc-warn     { @apply text-xs border border-warn-line bg-warn-soft text-warn rounded-lg px-3 py-2 mb-4; }
   .no-print     { @apply mb-4; }
+  /* `.no-print` يحمل هامشه، فلا يزدوج مع هامش شريط الإجراءات داخله. */
+  .no-print > .action-bar:last-child { @apply mb-0; }
 
   @media print {
     .topbar, .sidebar, .footer, .no-print, .messages,

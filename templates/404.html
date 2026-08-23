@@ -7,18 +7,28 @@
   browser pass so a wrong URL still leaves the user inside the system.
 {% endcomment %}
 
+{% block title %}{% translate "الصفحة غير موجودة — مركز التعليم المستمر" %}{% endblock %}
+
 {% block content %}
-<div class="card2">
-  <div class="card2-head"><h1>{% translate "الصفحة غير موجودة" %}</h1></div>
-  <div class="card2-body">
-    <div class="note">
-      {% translate "الرابط غير صحيح أو أن السجل المطلوب لم يعد موجوداً." %}
+<div class="auth-wrap">
+  <div class="auth-card wide">
+    <div class="card2">
+      <div class="card2-head">
+        <h1>{% translate "الصفحة غير موجودة" %}</h1>
+      </div>
+      <div class="card2-body">
+        <div class="note info">
+          {% translate "الرابط غير صحيح، أو أن السجل المطلوب لم يعد موجوداً. لا يُحذف في هذا النظام إلا نادراً — فالأرجح أن الرابط قديم أو أن الرمز كُتب ناقصاً." %}
+        </div>
+        <div class="form-acts">
+          {% if user.is_authenticated %}
+            <a class="btn2 primary" href="{% url 'operations:dashboard' %}">{% translate "العودة إلى لوحة المؤشرات" %}</a>
+          {% else %}
+            <a class="btn2 primary" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
+          {% endif %}
+        </div>
+      </div>
     </div>
-    {% if user.is_authenticated %}
-      <a class="btn2" href="{% url 'operations:dashboard' %}">{% translate "العودة إلى لوحة المؤشرات" %}</a>
-    {% else %}
-      <a class="btn2" href="{% url 'people:login' %}">{% translate "تسجيل الدخول" %}</a>
-    {% endif %}
   </div>
 </div>
 {% endblock %}

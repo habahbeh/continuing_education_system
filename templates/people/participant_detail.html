@@ -2,9 +2,24 @@
 {% load i18n %}
 
 {% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
+    <h1>{{ name_ar }}</h1>
+    <p class="sub">
+      {% translate "الرقم الجامعي" %}:
+      <span dir="ltr" translate="no">{{ number }}</span>
+    </p>
+  </div>
+  <div class="acts">
+    {% if can_edit %}
+      <a class="btn2 primary" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a>
+    {% endif %}
+    <a class="btn2 ghost" href="{% url 'people:participants' %}">{% translate "عودة للقائمة" %}</a>
+  </div>
+</div>
+
 <div class="card2">
-  <h1>{{ name_ar }}</h1>
-  <p class="note" dir="ltr">{{ number }}</p>
 
   {% comment %}
     Only the fields the service projected reach this template. A field the
@@ -30,9 +45,5 @@
     </table>
   </div>
 
-  {% if can_edit %}
-    <a class="btn2" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a>
-  {% endif %}
-  <a href="{% url 'people:participants' %}">{% translate "عودة للقائمة" %}</a>
 </div>
 {% endblock %}

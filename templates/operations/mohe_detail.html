@@ -88,7 +88,7 @@
               <td class="num">{{ a.uploaded_at|date:"Y-m-d" }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="5" class="empty">{% translate "لا مرفقات بعد" %}</td></tr>
+            <tr><td colspan="5" class="empty"><span class="empty-title">{% translate "لا مرفقات بعد" %}</span></td></tr>
           {% endfor %}
         </tbody>
       </table>

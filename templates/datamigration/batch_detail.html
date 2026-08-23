@@ -1,26 +1,34 @@
 {% extends "base.html" %}
 {% load i18n status_ui %}
 {% block content %}
-<div class="toolbar no-print">
-  <a class="btn2" href="{% url 'datamigration:batches' %}">{% translate "كل الدفعات" %}</a>
+<div class="action-bar no-print">
+  <a class="btn2 ghost" href="{% url 'datamigration:batches' %}">{% translate "كل الدفعات" %}</a>
   <span class="spacer"></span>
   {% if can_validate and batch.can_validate %}
-    <form method="post" style="display:inline">{% csrf_token %}
+    <form method="post" class="inline-form">{% csrf_token %}
       <input type="hidden" name="action" value="validate">
       <button class="btn2" type="submit">{% translate "تشغيل تجريبي" %}</button>
     </form>
   {% endif %}
   {% if can_commit and batch.can_commit %}
-    <form method="post" style="display:inline">{% csrf_token %}
+    <form method="post" class="inline-form">{% csrf_token %}
       <input type="hidden" name="action" value="commit">
       <button class="btn2 primary" type="submit">{% translate "أرشفة" %}</button>
     </form>
   {% endif %}
 </div>
 
-<h1>{{ batch.source_filename }} <span class="chip {{ batch.status|status_tone }}">{{ batch.status_display }}</span></h1>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "ترحيل الأرشيف" %}</span>
+    <h1>{{ batch.source_filename }}</h1>
+  </div>
+  <div class="acts">
+    <span class="chip {{ batch.status|status_tone }} dot">{{ batch.status_display }}</span>
+  </div>
+</div>
 
-<div class="grid2">
+<div class="kpi-grid">
   {% for s in batch.states %}
     <div class="kpi"><div class="label">{{ s.label }}</div><div class="value num">{{ s.count }}</div></div>
   {% endfor %}
@@ -47,7 +55,7 @@
       <tbody>
         {% for f in report.findings %}
           <tr><td>{{ f.label }}</td><td dir="ltr"><small class="muted">{{ f.code }}</small></td><td class="num">{{ f.count }}</td></tr>
-        {% empty %}<tr><td colspan="3" class="empty">{% translate "لم يُشغَّل التدقيق بعد" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="3" class="empty"><span class="empty-title">{% translate "لم يُشغَّل التدقيق بعد" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -65,7 +73,7 @@
               <td>{{ c.term_label|default:"—" }}</td><td>{{ c.partner_label_ar|default:"—" }}</td>
               <td>{{ c.delivery_label|default:"—" }}</td><td class="num">{{ c.subject_count }}</td>
               <td class="num">{{ c.enrollment_count }}</td></tr>
-        {% empty %}<tr><td colspan="7" class="empty">{% translate "لم تُؤرشف بعد" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لم تُؤرشف بعد" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -97,7 +105,7 @@
             </td>
             <td>{% for f in r.findings %}<span class="chip warn">{{ f.label }}</span> {% endfor %}</td>
           </tr>
-        {% empty %}<tr><td colspan="6" class="empty">{% translate "لا صفوف مطابقة" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا صفوف مطابقة" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

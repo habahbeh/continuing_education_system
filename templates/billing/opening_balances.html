@@ -11,7 +11,7 @@
   {% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً. والرصيد الدائن يُرحَّل لتسجيل لاحق إن وُجد، وإلا فهو مستحق الردّ نقداً — وفي الحالتين بلا سند قبض عن مالٍ لم يستلمه النظام. والذمة القديمة غير المسدَّدة تمنع براءة الذمة والشهادة." %}
 </div>
 
-<div class="grid2">
+<div class="kpi-grid">
   <div class="kpi"><div class="label">{% translate "مسودات" %}</div><div class="value num">{{ totals.draft }}</div>
     <div class="muted">{% translate "لا أثر مالي" %}</div></div>
   <div class="kpi"><div class="label">{% translate "مُراجَعة" %}</div><div class="value num">{{ totals.reviewed }}</div>
@@ -39,7 +39,7 @@
   </select>
   </div>
   <div class="fld">
-    <label for="f_direction">{% translate "direction" %}</label>
+    <label for="f_direction">{% translate "الاتجاه" %}</label>
     <select name="direction" id="f_direction">
     <option value="">{% translate "كل الاتجاهات" %}</option>
     {% for code, label in directions %}<option value="{{ code }}"{% if code == request.GET.direction %} selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -178,7 +178,7 @@
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="10" class="empty">{% translate "لا أرصدة افتتاحية" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="10" class="empty"><span class="empty-title">{% translate "لا أرصدة افتتاحية" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

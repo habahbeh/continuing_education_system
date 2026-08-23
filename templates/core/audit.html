@@ -2,25 +2,41 @@
 {% load i18n %}
 
 {% block content %}
-<div class="card2">
-  <h1>{% translate "سجل التدقيق" %}</h1>
-  <p class="note">
-    {% translate "السجل غير قابل للتعديل ولا الحذف لأي دور — بلا استثناء (BR-084 · D-11)." %}
-  </p>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "الرقابة" %}</span>
+    <h1>{% translate "سجل التدقيق" %}</h1>
+    <p class="sub">
+      {% translate "السجل غير قابل للتعديل ولا الحذف لأي دور — بلا استثناء (BR-084 · D-11)." %}
+    </p>
+  </div>
+</div>
 
-  <form method="get" class="calc-row">
-    <select name="action">
+<form method="get" class="filterbar" role="search">
+  <div class="fld">
+    <label for="f_action">{% translate "الإجراء" %}</label>
+    <select name="action" id="f_action">
       <option value="">{% translate "كل الإجراءات" %}</option>
       {% for a in actions %}
         <option value="{{ a }}" {% if a == filters.action %}selected{% endif %}>{{ a }}</option>
       {% endfor %}
     </select>
-    <input type="search" name="actor" value="{{ filters.actor }}"
-           placeholder="{% translate 'المستخدم…' %}">
-    <input type="search" name="entity" value="{{ filters.entity }}"
-           placeholder="{% translate 'الكيان…' %}">
-    <button type="submit" class="btn2">{% translate "تصفية" %}</button>
-  </form>
+  </div>
+  <div class="fld">
+    <label for="f_actor">{% translate "المستخدم" %}</label>
+    <input type="search" name="actor" id="f_actor" value="{{ filters.actor }}"
+           placeholder="{% translate 'اسم المستخدم…' %}" spellcheck="false">
+  </div>
+  <div class="fld">
+    <label for="f_entity">{% translate "الكيان" %}</label>
+    <input type="search" name="entity" id="f_entity" value="{{ filters.entity }}"
+           placeholder="{% translate 'نوع الكيان…' %}" spellcheck="false">
+  </div>
+  <button type="submit" class="btn2">{% translate "تصفية" %}</button>
+  <span class="count">{% blocktranslate count n=events|length %}قيد واحد{% plural %}{{ n }} قيداً{% endblocktranslate %}</span>
+</form>
+
+<div class="card2">
 
   <div class="tbl-wrap">
     <table class="tbl">
@@ -48,14 +64,18 @@
             {% endcomment %}
             <td>{% if e.actor %}{{ e.actor.full_name_ar|default:e.actor.username }}{% else %}<span class="muted">{% translate "النظام" %}</span>{% endif %}</td>
             <td>{{ e.actor_role|default:"—" }}</td>
-            <td>{{ e.action }}</td>
-            <td>{{ e.entity_type }}</td>
-            <td dir="ltr">{{ e.reference|default:"—" }}</td>
+            <td translate="no">{{ e.action }}</td>
+            <td translate="no">{{ e.entity_type }}</td>
+            <td dir="ltr" translate="no">{{ e.reference|default:"—" }}</td>
             <td>{{ e.summary_ar }}</td>
-            <td>{{ e.denial_rule|default:"—" }}</td>
+            <td>{% if e.denial_rule %}<span class="chip danger" translate="no">{{ e.denial_rule }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="8">{% translate "لا توجد قيود مطابقة" %}</td></tr>
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا قيود تطابق المرشّحات" %}</span>
+            <span class="empty-body">{% translate "السجل يُكتب ولا يُحذف — الفراغ هنا يعني أن المرشّحات لم تطابق، لا أن قيداً أُزيل. وسّع المدى أو أفرغ حقلاً." %}</span>
+            <a class="btn2 empty-act" href="{% url 'people:audit' %}">{% translate "إزالة كل المرشّحات" %}</a>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>

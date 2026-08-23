@@ -23,7 +23,7 @@
               <td class="num">{{ r.total_due }}</td><td class="num">{{ r.total_paid }}</td>
               <td class="num">{{ r.balance }}</td><td>{{ r.status_display }}</td>
               <td>{% if r.voids_partner_entitlement %}<span class="chip danger">{% translate "نعم" %}</span>{% else %}—{% endif %}</td></tr>
-        {% empty %}<tr><td colspan="8" class="empty">{% translate "لا متأخرين" %}</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="8" class="empty"><span class="empty-title">{% translate "لا متأخرين" %}</span></td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

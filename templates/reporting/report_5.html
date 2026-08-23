@@ -3,19 +3,21 @@
 {% block content %}
 <div class="no-print">
   <div class="toolbar">
-    <a class="btn2" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
+    <a class="btn2 ghost" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
     <span class="spacer"></span>
-    <button class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+    <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
   </div>
   <form method="get" class="filterbar" role="search">
     <div class="fld">
-      <label for="f_enrollment">{% translate "enrollment" %}</label>
+      <label for="f_enrollment">{% translate "رمز التسجيل" %}</label>
       <input type="search" name="enrollment" value="{{ request.GET.enrollment }}" placeholder="{% translate 'رمز التسجيل…' %}" spellcheck="false" id="f_enrollment">
     </div>
     <button class="btn2" type="submit">{% translate "عرض" %}</button>
   </form>
 </div>
-<h1>{{ report.title }}</h1>
+<div class="page-head">
+  <h1>{{ report.title }}</h1>
+</div>
 {% if report.statement %}
   {% include "operations/_statement.html" with statement=report.statement only %}
 {% else %}
