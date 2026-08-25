@@ -80,23 +80,143 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
     Deliberately NOT a report: §9's seven reports are Sprint 8C, and a
     dashboard that started answering "net income after partner shares" would
-    be one of them wearing a different name.
+    be one of them wearing a different name. Every number here is a count of
+    rows the reader may already open, and clicking it goes to those rows.
+
+    **Role-aware without a single role test.** The cashier gets a till screen
+    and the registrar gets a registration screen because ``is_allowed`` filters
+    the candidates, not because anything here asks who they are — the same
+    principle the sidebar is built on. A permission change therefore moves this
+    screen too, and a dashboard that disagreed with the matrix is not
+    expressible.
+
+    **Reads only.** Every service called is a list-and-count on the allowed
+    path; each one calls ``policy.require``, which is why the ``is_allowed``
+    check comes first — an unguarded call would write a DENIED_ATTEMPT row
+    (BR-085) for a screen the reader never asked to open.
     """
     policy.require(request.user, Screen.DASHBOARD, Action.VIEW, request=request)
 
-    counts: dict[str, int] = {}
-    if policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.VIEW):
-        rows = enrollment_service.list_enrollments(actor=request.user, request=request)
-        counts["enrollments"] = len(rows)
-        counts["unsettled"] = sum(1 for r in rows if not r["is_settled"])
-        counts["awaiting_voucher"] = sum(1 for r in rows if not r["voucher_received"])
-    if policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW):
-        counts["cohorts"] = len(cohort_service.list_cohorts(actor=request.user, request=request))
+    def _may(screen: str) -> bool:
+        return policy.is_allowed(request.user, screen, Action.VIEW)
+
+    actor = request.user
+    today = timezone.localdate()
+    kpis: list[dict[str, Any]] = []
+    waiting: list[dict[str, Any]] = []
+
+    def _kpi(label: Any, value: int, foot: Any, route: str, *, lead: bool = False) -> None:
+        kpis.append(
+            {"label": label, "value": value, "foot": foot, "url": reverse(route), "lead": lead}
+        )
+
+    def _waiting(label: Any, value: int, foot: Any, route: str) -> None:
+        """A queue only earns a line while something is actually in it."""
+        if value:
+            waiting.append({"label": label, "value": value, "foot": foot, "url": reverse(route)})
+
+    if _may(Screen.ENROLLMENTS):
+        rows = enrollment_service.list_enrollments(actor=actor, request=request)
+        _kpi(
+            _("أرصدة غير مسوّاة"),
+            sum(1 for r in rows if not r["is_settled"]),
+            _("تسجيل لم يُغلق حسابه بعد"),
+            "operations:enrollments",
+            lead=True,
+        )
+        _kpi(_("التسجيلات"), len(rows), _("الإجمالي القائم"), "operations:enrollments")
+        _waiting(
+            _("بانتظار الوصل"),
+            sum(1 for r in rows if not r["voucher_received"]),
+            _("لا يُعتمد التسجيل قبل تسجيل الوصل (BR-018)"),
+            "operations:enrollments",
+        )
+
+    if _may(Screen.COHORTS):
+        cohorts = cohort_service.list_cohorts(actor=actor, request=request)
+        _kpi(_("الدفعات المُشغّلة"), len(cohorts), _("دفعة قائمة"), "operations:cohorts")
+
+    if _may(Screen.PAYMENTS):
+        from apps.cashbox.services import payment_service
+
+        receipts = payment_service.list_receipts(actor=actor, on_date=today, request=request)
+        issued = [r for r in receipts if r["status"] == "ISSUED"]
+        _kpi(_("سندات اليوم"), len(issued), _("سند قبض صادر اليوم"), "cashbox:payments")
+        _waiting(
+            _("سندات لم تدخل إقفالاً"),
+            sum(1 for r in issued if not r["is_closed"]),
+            _("من سندات اليوم، بانتظار إقفال الصندوق"),
+            "cashbox:payments",
+        )
+
+    if _may(Screen.CLOSING):
+        from apps.cashbox.services import closing_service
+
+        closings = closing_service.list_closings(actor=actor, request=request)
+        _waiting(
+            _("إقفالات لم تُعتمد"),
+            sum(1 for c in closings if c["status"] in {"OPEN", "VARIANCE_PENDING"}),
+            _("من قبض المال لا يوقّع على عدّه (BR-028)"),
+            "cashbox:closing",
+        )
+
+    if _may(Screen.TRANSFERS):
+        transfers = transfer_service.list_transfers(actor=actor, request=request)
+        _waiting(
+            _("طلبات نقل قائمة"),
+            sum(
+                1
+                for t in transfers
+                if t["status"] in {"DRAFT", "PENDING_MANAGER", "PENDING_FINANCE"}
+            ),
+            _("لم تُنفَّذ ولم تُرفض بعد"),
+            "operations:transfers",
+        )
+
+    if _may(Screen.CLEARANCE):
+        clearances = clearance_service.list_clearances(actor=actor, request=request)
+        _waiting(
+            _("براءات ذمة قائمة"),
+            sum(1 for c in clearances if not c["is_completed"]),
+            _("لا شهادة بلا براءة مكتملة (BR-075)"),
+            "operations:clearances",
+        )
+
+    if _may(Screen.CLAIMS):
+        from apps.settlements.services import claim_service
+
+        claims = claim_service.list_claims(actor=actor, status="SUBMITTED", request=request)
+        _waiting(
+            _("مطالبات بانتظار الاعتماد"),
+            len(claims),
+            _("مرفوعة ولم يُبتّ فيها"),
+            "settlements:claims",
+        )
+
+    # The two or three things this reader is most likely to have come to do.
+    # ``ENROLL_FLOW`` is absent on purpose: the guided-help block above already
+    # offers it, and offering it twice on one screen is noise, not emphasis.
+    actions = [
+        {"url": reverse(route), "label": label}
+        for screen, route, label in (
+            (Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق جديد")),
+            (Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة")),
+            (Screen.TRANSFER_NEW, "operations:transfer-new", _("طلب نقل جديد")),
+        )
+        if _may(screen)
+    ]
 
     return render(
         request,
         "operations/dashboard.html",
-        {"title": _("لوحة المؤشرات"), "active_screen": Screen.DASHBOARD, "counts": counts},
+        {
+            "title": _("لوحة المؤشرات"),
+            "active_screen": Screen.DASHBOARD,
+            "today": today,
+            "kpis": kpis[:4],
+            "waiting": waiting,
+            "actions": actions,
+        },
     )
 
 

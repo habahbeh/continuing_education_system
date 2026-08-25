@@ -4,19 +4,15 @@
 {% block title %}{% translate "لوحة المؤشرات — مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  العدّادات نفسها ونفس مصدرها. `dashboard_view` يبني `counts` بشرط الصلاحية —
-  مفتاح لا يظهر إلا إذا كان الدور يرى الشاشة التي يعدّها — وهذا القالب لا
-  يضيف رقماً ولا يحسب واحداً. الشاشة عدّادات تشغيلية لا تقارير مالية، وتقارير
-  §9 السبعة لها شاشتها.
+  الأرقام كلها من `dashboard_view`، وكلها عدّ صفوف يستطيع القارئ فتحها بنفسه.
+  لا رقم يُحسب هنا، ولا رقم يظهر لدور لا يملك شاشته — العرض يُبنى من الصلاحية
+  لا من اسم الدور، فأمين الصندوق يحصل على شاشة صندوق وموظف التسجيل على شاشة
+  تسجيل دون أن يسأل هذا القالب من هو أحدهما.
 
-  المتغيّر ثلاثة أشياء في العرض:
-
-  * كانت البطاقات الأربع متساوية الوزن تماماً، فلا شيء يقول أيّها يستدعي
-    عملاً. «أرصدة غير مسوّاة» هو الرقم الذي يُفتح النظام من أجله، فأخذ
-    `.kpi.primary` وحده — التسلسل يأتي من إبراز واحد لا من أربعة.
-  * كل بطاقة صارت رابطاً إلى الشاشة التي تفسّرها. الرقم بلا طريق إلى صفوفه
-    نصف إجابة. الربط آمن: البطاقة لا تُعرض أصلاً إلا وصلاحية شاشتها متحققة.
-  * دور لا يرى أياً من الشاشتين كان يحصل على صفحة فارغة تحتها ملاحظة.
+  ثلاث طبقات بترتيب ما يفعله القارئ:
+  1. «ابدأ من هنا» — الأفعال التي جاء ليقوم بها، بالصلاحية.
+  2. العدّادات — حالة العمل الآن، وأولها واحد بارز لا أربعة متساوية.
+  3. «ما ينتظر قراراً» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
 {% endcomment %}
 
 {% block content %}
@@ -24,45 +20,68 @@
   <div>
     <span class="eyebrow">{% translate "الرئيسية" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "عدّادات تشغيلية لحالة العمل الآن — ليست تقريراً مالياً." %}</p>
+    <p class="sub">
+      {% translate "عدّادات تشغيلية لحالة العمل الآن — ليست تقريراً مالياً." %}
+      <span class="num">{{ today }}</span>
+    </p>
   </div>
 </div>
 
 {% guided_help "dashboard" %}
 
-{% if counts.enrollments is not None or counts.cohorts is not None %}
-  <div class="kpi-grid">
-    {% if counts.enrollments is not None %}
-      <a class="kpi primary" href="{% url 'operations:enrollments' %}">
-        <div class="label">{% translate "أرصدة غير مسوّاة" %}</div>
-        <div class="value num">{{ counts.unsettled }}</div>
-        <div class="foot">{% translate "تسجيل لم يُغلق حسابه بعد" %}</div>
-      </a>
-      <a class="kpi" href="{% url 'operations:enrollments' %}">
-        <div class="label">{% translate "بانتظار الوصل" %}</div>
-        <div class="value num">{{ counts.awaiting_voucher }}</div>
-        <div class="foot">{% translate "لم يُستلم وصل الدفع" %}</div>
-      </a>
-      <a class="kpi" href="{% url 'operations:enrollments' %}">
-        <div class="label">{% translate "التسجيلات" %}</div>
-        <div class="value num">{{ counts.enrollments }}</div>
-        <div class="foot">{% translate "الإجمالي القائم" %}</div>
-      </a>
-    {% endif %}
-    {% if counts.cohorts is not None %}
-      <a class="kpi" href="{% url 'operations:cohorts' %}">
-        <div class="label">{% translate "الدفعات المُشغّلة" %}</div>
-        <div class="value num">{{ counts.cohorts }}</div>
-        <div class="foot">{% translate "دفعة قائمة" %}</div>
-      </a>
-    {% endif %}
+{% if actions %}
+  <div class="action-bar">
+    <span class="hint">{% translate "ابدأ من هنا" %}</span>
+    {% for action in actions %}
+      <a class="btn2 {% if forloop.first %}primary{% endif %}" href="{{ action.url }}">{{ action.label }}</a>
+    {% endfor %}
   </div>
-{% else %}
+{% endif %}
+
+{% if kpis %}
+  <div class="kpi-grid">
+    {% for kpi in kpis %}
+      <a class="kpi {% if kpi.lead %}primary{% endif %}" href="{{ kpi.url }}">
+        <div class="label">{{ kpi.label }}</div>
+        <div class="value num">{{ kpi.value }}</div>
+        <div class="foot">{{ kpi.foot }}</div>
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if waiting %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "ما ينتظر قراراً" %}</h2></div>
+    <div class="card2-body">
+      {% for row in waiting %}
+        <div class="calc-row">
+          <span>
+            <a href="{{ row.url }}">{{ row.label }}</a>
+            <span class="hint">{{ row.foot }}</span>
+          </span>
+          <span class="val num">{{ row.value }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% elif kpis %}
+  <div class="card2">
+    <div class="empty">
+      <span class="empty-title">{% translate "لا شيء ينتظر قراراً" %}</span>
+      <span class="empty-body">
+        {% translate "لا طابور مفتوح ضمن شاشاتك: لا وصولات ناقصة، ولا طلبات معلّقة، ولا إقفال بانتظار اعتماد. الطوابير تظهر هنا وحدها متى امتلأت." %}
+      </span>
+    </div>
+  </div>
+{% endif %}
+
+{% if not kpis and not waiting and not actions %}
   <div class="card2">
     <div class="empty">
       <span class="empty-title">{% translate "لا عدّادات ضمن صلاحيات دورك" %}</span>
       <span class="empty-body">
-        {% translate "هذه اللوحة تعدّ التسجيلات والدفعات، وكلتاهما خارج شاشات دورك. اختر من القائمة الجانبية الشاشة التي تعمل عليها." %}
+        {% translate "هذه اللوحة تعدّ صفوفاً في شاشات لا يفتحها دورك، فلا رقم هنا يخصّك. اختر من القائمة الجانبية الشاشة التي تعمل عليها." %}
       </span>
     </div>
   </div>

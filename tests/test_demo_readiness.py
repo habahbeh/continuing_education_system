@@ -1015,3 +1015,183 @@ def test_the_readme_no_longer_calls_the_built_screens_missing() -> None:
     assert "لا إدخال منها" in readme
     assert "لا تحتسب مبلغاً" in readme
     assert "لا تعديل" in readme
+
+
+# ---------------------------------------------------------------------------
+# The dashboard — page polish phase
+# ---------------------------------------------------------------------------
+#: Every counter the dashboard can draw, and the screen whose permission earns
+#: it. A number appears when its screen does, and never otherwise.
+DASHBOARD_METRICS = [
+    ("أرصدة غير مسوّاة", "enrollments"),
+    ("التسجيلات", "enrollments"),
+    ("بانتظار الوصل", "enrollments"),
+    ("الدفعات المُشغّلة", "cohorts"),
+    ("سندات اليوم", "payments"),
+    ("سندات لم تدخل إقفالاً", "payments"),
+    ("إقفالات لم تُعتمد", "closing"),
+    ("طلبات نقل قائمة", "transfers"),
+    ("براءات ذمة قائمة", "clearance"),
+    ("مطالبات بانتظار الاعتماد", "claims"),
+]
+
+#: The "start here" buttons, and the screen each opens.
+DASHBOARD_ACTIONS = [
+    ("people:participant-new", "student-new"),
+    ("cashbox:payment-new", "payment-new"),
+    ("operations:transfer-new", "transfer-new"),
+]
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_dashboard_opens_for_every_business_role(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """§3.1/1 grants VIEW to all six. It is the screen every login lands on."""
+    client.force_login(_user(role, f"dash.open.{role.lower()}"))
+
+    assert client.get(reverse("operations:dashboard")).status_code == 200
+
+
+def test_the_dashboard_refuses_the_system_administrator_on_purpose(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Δ-02 — the system administrator is a technical role outside the business
+    matrix: users and the audit trail, nothing financial and nothing
+    operational. So the dashboard refuses them, and ``is_superuser`` does not
+    change that. The role is the authority, not the Django flag (T-165).
+
+    Pinned because it reads like a bug the first time somebody meets it.
+    """
+    from apps.people.models import Role
+
+    admin = _user(Role.SYSTEM_ADMINISTRATOR, "dash.sysadmin")
+    admin.is_superuser = True
+    admin.save(update_fields=["is_superuser"])
+    client.force_login(admin)
+
+    assert client.get(reverse("operations:dashboard")).status_code == 403
+
+
+def test_the_dashboard_refuses_an_anonymous_visitor(client: Client, seeded_settings: None) -> None:
+    """Fail-closed on the first screen after login, like every other."""
+    assert client.get(reverse("operations:dashboard")).status_code == 403
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_dashboard_counts_only_screens_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    A counter is a promise that the rows behind it can be reached — every card
+    is a link to them. Showing one for a screen the reader may not open both
+    leaks a number and sends them into a refusal (BR-085).
+
+    Asserted in both directions: absent when forbidden, and the reader's own
+    screens still counted when allowed.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"dash.metrics.{role.lower()}"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    for label, screen in DASHBOARD_METRICS:
+        if Action.VIEW in allowed_actions(role, screen):
+            continue
+        assert label not in body, f"{role} may not open {screen} but is shown «{label}»"
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_dashboard_offers_no_action_the_reader_may_not_take(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    «ابدأ من هنا» is the one place on the screen that starts work rather than
+    reporting it. D-01 keeps the manager out of «استيفاء دفعة» — BR-081 is an
+    explicit deny, not a missing grant — so the manager's dashboard must not
+    offer it however senior the account is.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"dash.acts.{role.lower()}"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    for route, screen in DASHBOARD_ACTIONS:
+        may = Action.VIEW in allowed_actions(role, screen)
+        offered = f'href="{reverse(route)}"' in body
+        assert offered is may, (
+            f"{role} {'may' if may else 'may NOT'} open {screen}, "
+            f"but the dashboard {'offers' if offered else 'omits'} its button"
+        )
+
+
+def test_the_dashboard_shows_the_manager_no_till_button(
+    client: Client, seeded_settings: None
+) -> None:
+    """BR-081 · D-01 spelled out, because it is the one that surprises people."""
+    client.force_login(_user(Role.CENTER_MANAGER, "dash.mgr.notill"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    assert f'href="{reverse("people:participant-new")}"' in body
+    assert f'href="{reverse("cashbox:payment-new")}"' not in body
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_dashboard_renders_on_a_database_with_no_work_in_it(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Seeded settings and nothing else — no enrolment, no receipt, no cohort.
+    Every counter is zero and every queue is empty, and the screen still has to
+    say something useful rather than fall over or show a wall of noughts.
+    """
+    client.force_login(_user(role, f"dash.empty.{role.lower()}"))
+
+    response = client.get(reverse("operations:dashboard"))
+    body = response.content.decode("utf-8")
+
+    assert response.status_code == 200
+    # A queue with nothing in it draws no line at all.
+    for label, _screen in DASHBOARD_METRICS:
+        if label in ("أرصدة غير مسوّاة", "التسجيلات", "الدفعات المُشغّلة", "سندات اليوم"):
+            continue
+        assert label not in body, f"empty queue «{label}» drew a line anyway"
+    assert "لا شيء ينتظر قراراً" in body or "لا عدّادات ضمن صلاحيات دورك" in body
+
+
+def test_the_dashboard_keeps_its_responsive_scaffolding() -> None:
+    """
+    The grid is what makes this readable on a phone: one column, two on a
+    tablet, four on a desktop. It is defined once in ``.kpi-grid``, so the
+    template must keep using it rather than hand-rolling columns.
+    """
+    from pathlib import Path
+
+    source = Path("templates/operations/dashboard.html").read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    assert 'class="kpi-grid"' in source
+    assert "sm:grid-cols-2" in css.split(".kpi-grid")[1].split("}")[0]
+    assert "xl:grid-cols-4" in css.split(".kpi-grid")[1].split("}")[0]
+    # …and the wrapping bar, so buttons stack instead of overflowing.
+    assert 'class="action-bar"' in source
+    assert "flex-wrap" in css.split(".action-bar")[1].split("}")[0]
+
+
+def test_the_dashboard_uses_no_class_this_project_never_defined() -> None:
+    """The polish phase may not reintroduce the demo's stylesheet."""
+    from pathlib import Path
+
+    source = Path("templates/operations/dashboard.html").read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    for dead in [*DEAD_DEMO_CLASSES, "compact", "mono"]:
+        assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
+        assert dead not in source, f"dashboard.html uses the demo-only class «{dead}»"
+    assert "style=" not in source, "inline styles were removed in 8J-5 and do not come back"
