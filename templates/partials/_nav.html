@@ -13,6 +13,10 @@
   تبتلع 256px من عرض الشاشة وتسحق عمود المحتوى. الحالة في Alpine على
   `<body>`، والدرج مغلق افتراضياً وظاهر ثابتاً من `md` فصاعداً.
 
+  الرموز: لوحة SVG محلية واحدة في `_nav_icons.html` تُدرَج مرة، وكل مدخل
+  يشير إليها بـ `<use>`. لا CDN ولا خطّ رموز. الرمز `aria-hidden` لأنه زينة —
+  الاسم المقروء يبقى النصّ، ولا تعتمد الحالة المفتوحة على وجود رمز.
+
   تحسين الشريط الجانبي: البنية صارت قائمةً معنونة لا سلسلة روابط. أربعون
   مدخلاً في سبع مجموعات: `<ul>` تجعل قارئ الشاشة يعلن «قائمة من ٨»، و`<h2>`
   مع `aria-labelledby` تجعل التنقّل بالعناوين ممكناً بدل المرور على الأربعين
@@ -21,6 +25,8 @@
 {% if nav_groups %}
   <nav class="sidebar" id="sidebar" aria-label="{% translate 'التنقّل الرئيسي' %}"
        :class="{ 'is-open': nav }">
+
+    {% include "partials/_nav_icons.html" %}
 
     {# زرّ الإغلاق للهاتف وحده: على الشاشة الكبيرة القائمة ليست درجاً. #}
     <div class="nav-close-row">
@@ -39,7 +45,14 @@
                  href="{{ item.url }}"
                  @click="nav = false"
                  {% if item.is_active %}aria-current="page"{% endif %}>
-                {{ item.label }}
+                {% comment %}
+                  سماكة الخط وأطرافه هنا لا على كل رمز: مكانٌ واحد يحكم الشكل
+                  كله. و`aria-hidden` لأن الرمز زينة — الاسم المقروء هو النصّ.
+                {% endcomment %}
+                <svg class="nav-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                     stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true" focusable="false"><use href="#i-{{ item.icon }}"/></svg>
+                <span>{{ item.label }}</span>
               </a>
             </li>
           {% endfor %}

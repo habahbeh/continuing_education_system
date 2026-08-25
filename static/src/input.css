@@ -555,6 +555,10 @@
    */
   .nav-group    { @apply mb-1 pb-1; }
   .nav-group ul { @apply m-0 p-0; list-style: none; }
+  /* لوحة الرموز تُعرَّف ولا تُرسم؛ `<symbol>` يبقى مرجعاً بعدها. */
+  .nav-sprite   { display: none; }
+  /* الرمز يرث لون النصّ، فيتبع المرور والحالة المفتوحة بلا قاعدة ثانية. */
+  .nav-ico      { @apply w-4 h-4 shrink-0; }
   .nav-group + .nav-group { @apply mt-1 pt-3 border-t border-line-2; }
   /*
    * العنوان يلتصق بأعلى القائمة أثناء التمرير: في قائمة بأربعين مدخلاً يضيع

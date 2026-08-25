@@ -460,3 +460,130 @@ def test_the_sidebar_reads_as_sections_not_as_one_long_column() -> None:
     # section scrolls under it.
     assert "border-t" in declarations(".nav-group + .nav-group")
     assert "sticky" in declarations(".nav-group-title")
+
+
+# ---------------------------------------------------------------------------
+# The sidebar's icons — navigation polish
+# ---------------------------------------------------------------------------
+NAV_SPRITE = Path("templates/partials/_nav_icons.html")
+
+
+def _symbols() -> set[str]:
+    import re
+
+    return set(re.findall(r'id="i-([a-z-]+)"', NAV_SPRITE.read_text(encoding="utf-8")))
+
+
+def test_every_nav_entry_names_a_symbol_the_sprite_actually_defines() -> None:
+    """
+    A ``<use>`` pointing at a symbol that is not there renders nothing at all —
+    silently, with no error anywhere. So the two lists are compared directly:
+    every icon the tree names must exist, and the fallback must exist too.
+    """
+    from apps.people.nav import NAV, NavItem
+
+    defined = _symbols()
+    named = {item.icon for group in NAV for item in group.items}
+    fallback = NavItem.__dataclass_fields__["icon"].default
+
+    assert not (named - defined), f"nav names symbols the sprite lacks: {sorted(named - defined)}"
+    assert fallback in defined, "the fallback icon is not in the sprite"
+    assert not (defined - named - {fallback}), (
+        f"sprite carries symbols nothing uses: {sorted(defined - named - {fallback})}"
+    )
+
+
+def test_an_entry_added_without_an_icon_still_draws_one() -> None:
+    """
+    The field defaults to a real symbol rather than to an empty string, so a
+    future entry that forgets one gets a neutral mark instead of a hole in a
+    column where every sibling has a glyph.
+    """
+    from apps.people.constants import Screen
+    from apps.people.nav import NavItem
+
+    item = NavItem(Screen.DASHBOARD, "operations:dashboard", "بلا رمز")
+
+    assert item.icon in _symbols()
+
+
+def test_the_icons_are_decorative_and_the_label_is_still_the_name(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The glyph is ``aria-hidden`` and the text stays: a screen reader announces
+    «التسجيلات», never «التسجيلات صورة». Nothing about the open screen depends
+    on an icon either — colour, ground, rule, weight and ``aria-current`` all
+    still carry it, so the sidebar works identically with images off.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "nav.icons.a11y"))
+
+    body = client.get(reverse("operations:enrollments")).content.decode("utf-8")
+    nav = body.split('<nav class="sidebar"', 1)[1].split("</nav>", 1)[0]
+
+    items = re.findall(r'<a class="nav-item[^>]*>(.*?)</a>', nav, re.S)
+    assert items
+    for entry in items:
+        assert 'class="nav-ico"' in entry
+        assert 'aria-hidden="true"' in entry
+        assert re.search(r"<span>[^<]+</span>", entry), "an entry lost its text label"
+    # Every reference resolves against the sprite drawn just above them.
+    for name in re.findall(r'<use href="#i-([a-z-]+)"/>', nav):
+        assert f'id="i-{name}"' in nav, f"«{name}» is referenced and never defined"
+
+
+def test_the_sprite_is_defined_once_not_once_per_entry(
+    client: Client, seeded_settings: None
+) -> None:
+    """Forty definitions per render would be the cost the sprite exists to avoid."""
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "nav.icons.once"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    assert len(re.findall(r'<svg class="nav-sprite"', body)) == 1
+    assert len(re.findall(r"<symbol id=", body)) == len(_symbols())
+
+
+def test_the_icons_brought_in_no_font_no_package_and_no_cdn() -> None:
+    """
+    A-07 refuses an external resource outright, and an icon font would have
+    been a second one: a webfont request, a ligature vocabulary and a glyph
+    that reads as a letter to anything not styling it. Local SVG has none of
+    those problems.
+    """
+    sprite = NAV_SPRITE.read_text(encoding="utf-8")
+    partial = NAV_PARTIAL.read_text(encoding="utf-8")
+
+    for source in (sprite, partial):
+        assert "http://" not in source and "https://" not in source
+        assert "<script" not in source
+        assert "font-awesome" not in source.lower()
+        assert "bootstrap-icons" not in source.lower()
+    # No emoji standing in for a glyph.
+    assert not any(ord(ch) > 0x2100 for ch in partial), "a non-Arabic symbol crept into the nav"
+
+
+def test_the_icon_set_speaks_one_visual_language() -> None:
+    """
+    One stroke width, one cap, one join, one box — set on the wrapping ``svg``
+    in the template so a symbol cannot quietly disagree with its siblings. And
+    every symbol is drawn in strokes, so it takes the colour of the row it sits
+    in rather than carrying its own.
+    """
+    import re
+
+    sprite = NAV_SPRITE.read_text(encoding="utf-8")
+    partial = NAV_PARTIAL.read_text(encoding="utf-8")
+
+    assert 'stroke-width="1.6"' in partial
+    assert 'stroke="currentColor"' in partial
+    assert 'stroke-linecap="round"' in partial and 'stroke-linejoin="round"' in partial
+
+    boxes = set(re.findall(r'<symbol id="i-[a-z-]+" viewBox="([^"]+)"', sprite))
+    assert boxes == {"0 0 20 20"}, f"symbols disagree about their box: {boxes}"
+    # A filled shape would ignore currentColor and stay dark on the open row.
+    assert 'fill="' not in sprite, "a symbol carries its own fill"

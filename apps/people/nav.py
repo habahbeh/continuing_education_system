@@ -51,6 +51,11 @@ class NavItem:
     route: str
     label: Any
     action: str = Action.VIEW
+    #: Name of a symbol in the sidebar's inline sprite, minus the ``i-``.
+    #: Presentation only — it earns no permission and decides no order. The
+    #: default is a real symbol, so an entry added without one gets a neutral
+    #: mark rather than an empty gap where every sibling has a glyph.
+    icon: str = "dot"
 
 
 @dataclass(frozen=True)
@@ -69,76 +74,119 @@ NAV: tuple[NavGroup, ...] = (
     NavGroup(
         _("الرئيسية"),
         (
-            NavItem(Screen.DASHBOARD, "operations:dashboard", _("لوحة المؤشرات")),
-            NavItem(Screen.ENROLL_FLOW, "operations:enroll-flow", _("مسار التسجيل والدفع")),
+            NavItem(Screen.DASHBOARD, "operations:dashboard", _("لوحة المؤشرات"), icon="gauge"),
+            NavItem(
+                Screen.ENROLL_FLOW, "operations:enroll-flow", _("مسار التسجيل والدفع"), icon="route"
+            ),
         ),
     ),
     NavGroup(
         _("المشاركون والتسجيل"),
         (
-            NavItem(Screen.STUDENTS, "people:participants", _("المشاركون")),
-            NavItem(Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق جديد")),
-            NavItem(Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
-            NavItem(Screen.TRANSFERS, "operations:transfers", _("النقل بين الدورات")),
-            NavItem(Screen.SPECIAL_CASES, "operations:special-cases", _("الحالات الخاصة")),
+            NavItem(Screen.STUDENTS, "people:participants", _("المشاركون"), icon="users"),
+            NavItem(
+                Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق جديد"), icon="user-plus"
+            ),
+            NavItem(Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات"), icon="list"),
+            NavItem(Screen.TRANSFERS, "operations:transfers", _("النقل بين الدورات"), icon="swap"),
+            NavItem(
+                Screen.SPECIAL_CASES, "operations:special-cases", _("الحالات الخاصة"), icon="branch"
+            ),
         ),
     ),
     NavGroup(
         _("البرامج والأسعار"),
         (
-            NavItem(Screen.PROGRAMS, "catalog:programs", _("الدبلومات التدريبية")),
-            NavItem(Screen.SHORT_COURSES, "catalog:short-courses", _("الدورات القصيرة")),
-            NavItem(Screen.ONLINE_COURSES, "catalog:online-courses", _("الدورات الأونلاين")),
-            NavItem(Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
-            NavItem(Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
-            NavItem(Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
-            NavItem(Screen.MOHE_SUBMIT, "operations:mohe-submit", _("نموذج الإرسال للوزارة")),
+            NavItem(Screen.PROGRAMS, "catalog:programs", _("الدبلومات التدريبية"), icon="cap"),
+            NavItem(
+                Screen.SHORT_COURSES, "catalog:short-courses", _("الدورات القصيرة"), icon="book"
+            ),
+            NavItem(
+                Screen.ONLINE_COURSES,
+                "catalog:online-courses",
+                _("الدورات الأونلاين"),
+                icon="globe",
+            ),
+            NavItem(Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة"), icon="calendar"),
+            NavItem(
+                Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة"), icon="tag"
+            ),
+            NavItem(Screen.MOHE, "operations:mohe", _("اعتماد الوزارة"), icon="stamp"),
+            NavItem(
+                Screen.MOHE_SUBMIT,
+                "operations:mohe-submit",
+                _("نموذج الإرسال للوزارة"),
+                icon="upload",
+            ),
         ),
     ),
     NavGroup(
         _("الشؤون المالية"),
         (
-            NavItem(Screen.PAYMENTS, "cashbox:payments", _("الدفعات وسندات القبض")),
-            NavItem(Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة")),
-            NavItem(Screen.CLOSING, "cashbox:closing", _("الإقفال اليومي")),
-            NavItem(Screen.DISCOUNTS, "billing:discounts", _("الخصومات")),
-            NavItem(Screen.REFUNDS, "billing:refunds", _("الاستردادات")),
-            NavItem(Screen.EXTRA_FEES, "billing:extra-fees", _("الرسوم الإضافية")),
-            NavItem(Screen.EXPENSES, "expenses:expenses", _("المصروفات")),
-            NavItem(Screen.OPENING_BALANCES, "billing:opening-balances", _("الأرصدة الافتتاحية")),
+            NavItem(Screen.PAYMENTS, "cashbox:payments", _("الدفعات وسندات القبض"), icon="receipt"),
+            NavItem(Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة"), icon="coins"),
+            NavItem(Screen.CLOSING, "cashbox:closing", _("الإقفال اليومي"), icon="vault"),
+            NavItem(Screen.DISCOUNTS, "billing:discounts", _("الخصومات"), icon="percent"),
+            NavItem(Screen.REFUNDS, "billing:refunds", _("الاستردادات"), icon="undo"),
+            NavItem(
+                Screen.EXTRA_FEES, "billing:extra-fees", _("الرسوم الإضافية"), icon="plus-square"
+            ),
+            NavItem(Screen.EXPENSES, "expenses:expenses", _("المصروفات"), icon="wallet"),
+            NavItem(
+                Screen.OPENING_BALANCES,
+                "billing:opening-balances",
+                _("الأرصدة الافتتاحية"),
+                icon="scale",
+            ),
         ),
     ),
     NavGroup(
         _("الشركاء والمخالصات"),
         (
-            NavItem(Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),
-            NavItem(Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
-            NavItem(Screen.AGREEMENT_NEW, "partners:agreement-new", _("محرّر اتفاقية")),
-            NavItem(Screen.ENTITLEMENT, "settlements:entitlement", _("استحقاق الشركاء")),
-            NavItem(Screen.CLAIMS, "settlements:claims", _("المطالبات")),
-            NavItem(Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
-            NavItem(Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
-            NavItem(Screen.OBLIGATIONS, "settlements:absences", _("غيابات المدربين")),
+            NavItem(Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون"), icon="building"),
+            NavItem(Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات"), icon="doc"),
+            NavItem(
+                Screen.AGREEMENT_NEW, "partners:agreement-new", _("محرّر اتفاقية"), icon="doc-plus"
+            ),
+            NavItem(
+                Screen.ENTITLEMENT, "settlements:entitlement", _("استحقاق الشركاء"), icon="checks"
+            ),
+            NavItem(Screen.CLAIMS, "settlements:claims", _("المطالبات"), icon="coins"),
+            NavItem(
+                Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات"), icon="doc-check"
+            ),
+            NavItem(
+                Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء"), icon="alert"
+            ),
+            NavItem(
+                Screen.OBLIGATIONS, "settlements:absences", _("غيابات المدربين"), icon="user-off"
+            ),
         ),
     ),
     NavGroup(
         _("الإنهاء والشهادات"),
         (
-            NavItem(Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
-            NavItem(Screen.CERTIFICATES, "operations:certificates", _("الشهادات")),
+            NavItem(
+                Screen.CLEARANCE, "operations:clearances", _("براءة الذمة"), icon="shield-check"
+            ),
+            NavItem(Screen.CERTIFICATES, "operations:certificates", _("الشهادات"), icon="award"),
         ),
     ),
     NavGroup(
         _("النظام"),
         (
-            NavItem(Screen.REPORTS, "reporting:reports", _("التقارير")),
-            NavItem(Screen.USERS, "people:users", _("المستخدمون والصلاحيات")),
-            NavItem(Screen.AUDIT, "people:audit", _("سجل التدقيق")),
-            NavItem(Screen.SETTINGS, "people:settings", _("الإعدادات")),
-            NavItem(Screen.MIGRATION, "datamigration:batches", _("ترحيل البيانات")),
-            NavItem(Screen.MIGRATION, "datamigration:links", _("ربط السجلات التاريخية")),
-            NavItem(Screen.SETTINGS, "people:coverage", _("مصفوفة تغطية المتطلبات")),
-            NavItem(Screen.SETTINGS, "people:future", _("النطاق المستقبلي")),
+            NavItem(Screen.REPORTS, "reporting:reports", _("التقارير"), icon="chart"),
+            NavItem(Screen.USERS, "people:users", _("المستخدمون والصلاحيات"), icon="key"),
+            NavItem(Screen.AUDIT, "people:audit", _("سجل التدقيق"), icon="clock"),
+            NavItem(Screen.SETTINGS, "people:settings", _("الإعدادات"), icon="cog"),
+            NavItem(
+                Screen.MIGRATION, "datamigration:batches", _("ترحيل البيانات"), icon="database"
+            ),
+            NavItem(
+                Screen.MIGRATION, "datamigration:links", _("ربط السجلات التاريخية"), icon="link"
+            ),
+            NavItem(Screen.SETTINGS, "people:coverage", _("مصفوفة تغطية المتطلبات"), icon="grid"),
+            NavItem(Screen.SETTINGS, "people:future", _("النطاق المستقبلي"), icon="flag"),
         ),
     ),
 )
@@ -165,7 +213,9 @@ def nav_for(user: Any) -> list[dict[str, Any]]:
                 url = reverse(item.route)
             except NoReverseMatch:  # pragma: no cover - a route removed upstream
                 continue
-            items.append({"screen": item.screen, "label": item.label, "url": url})
+            items.append(
+                {"screen": item.screen, "label": item.label, "url": url, "icon": item.icon}
+            )
         if items:
             groups.append({"title": group.title, "items": items})
     return groups
