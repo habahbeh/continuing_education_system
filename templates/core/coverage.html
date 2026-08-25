@@ -10,6 +10,14 @@
     <h1>{{ title }}</h1>
     <p class="sub">{% translate "كل بند من القائمة الجانبية في الديمو، مقابل عنوانه في النظام الحقيقي وحالته ونوعه — بترتيب الديمو نفسه." %}</p>
   </div>
+  {% comment %}
+    صفحة اعتماد تُوقَّع على ورق، فلها زرّ الطباعة نفسه الذي للتقارير والشهادة.
+    ورقة الطباعة مضبوطة أصلاً في `@media print`: القائمة والترويسة تختفيان،
+    و`.tbl-wrap` يفقد تمريره الأفقي فلا يُقصّ الجدول على A4.
+  {% endcomment %}
+  <div class="acts print:hidden">
+    <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة للاعتماد" %}</button>
+  </div>
 </div>
 
 {% guided_help "coverage" %}

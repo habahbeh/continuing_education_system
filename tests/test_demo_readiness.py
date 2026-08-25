@@ -865,3 +865,153 @@ def test_the_guided_help_stays_calm() -> None:
 
     assert "note warn" not in source
     assert "note danger" not in source
+
+
+# ---------------------------------------------------------------------------
+# Delivery gate — Sprint 8K-6
+# ---------------------------------------------------------------------------
+#: Every screen a client demo actually walks through, and the screen permission
+#: that guards it. One table, checked against every role and against nobody at
+#: all, so «it worked when I clicked it» is not the evidence we ship on.
+DELIVERY_ROUTES = [
+    ("operations:dashboard", "dashboard"),
+    ("operations:enroll-flow", "enroll-flow"),
+    ("people:participants", "students"),
+    ("people:participant-new", "student-new"),
+    ("operations:enrollments", "enrollments"),
+    ("operations:transfers", "transfers"),
+    ("operations:special-cases", "special-cases"),
+    ("catalog:programs", "programs"),
+    ("catalog:pricelists", "pricelists"),
+    ("operations:mohe", "mohe"),
+    ("cashbox:payments", "payments"),
+    ("cashbox:payment-new", "payment-new"),
+    ("cashbox:closing", "closing"),
+    ("partners:partners", "partners"),
+    ("partners:agreements", "agreements"),
+    ("settlements:entitlement", "entitlement"),
+    ("settlements:claims", "claims"),
+    ("settlements:settlements", "settlements"),
+    ("settlements:obligations", "obligations"),
+    ("operations:clearances", "clearance"),
+    ("operations:certificates", "certificates"),
+    ("reporting:reports", "reports"),
+    ("people:settings", "settings"),
+    ("people:coverage", "settings"),
+    ("people:future", "settings"),
+]
+
+
+@pytest.mark.parametrize(("route", "screen"), DELIVERY_ROUTES)
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_every_demo_screen_answers_exactly_the_roles_the_matrix_allows(
+    client: Client, seeded_settings: None, route: str, screen: str, role: str
+) -> None:
+    """
+    The whole delivery, one assertion: 200 where the matrix grants VIEW and 403
+    where it does not — on a database seeded with settings and nothing else, so
+    an empty screen still has to render rather than fall over on no rows.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_view = Action.VIEW in allowed_actions(role, screen)
+    client.force_login(_user(role, f"gate.{role.lower()}.{route.replace(':', '.')}"))
+
+    response = client.get(reverse(route))
+
+    assert response.status_code == (200 if may_view else 403), (
+        f"{role} on {route}: matrix says VIEW={may_view}, screen said {response.status_code}"
+    )
+
+
+@pytest.mark.parametrize(("route", "screen"), DELIVERY_ROUTES)
+def test_no_demo_screen_opens_for_a_visitor_who_never_signed_in(
+    client: Client, seeded_settings: None, route: str, screen: str
+) -> None:
+    """Fail-closed, on every screen the demo shows — Q-12, and no exceptions."""
+    assert client.get(reverse(route)).status_code == 403
+
+
+def test_the_project_adds_screens_the_demo_never_had_and_says_so(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Parity is not the whole delivery: four screens exist that the demo never
+    showed. They are real, they are reachable, and the coverage matrix lists
+    them apart from the parity table so the 36 cannot be quietly inflated.
+    """
+    from apps.people.views import _COVERAGE_ROWS, _EXTRA_ROWS
+
+    demo_labels = {row[0] for row in _COVERAGE_ROWS}
+    additions = {row[0] for row in _EXTRA_ROWS if "إضافة" in str(row[2])}
+
+    assert additions == {
+        "نموذج الإرسال للوزارة",
+        "الأرصدة الافتتاحية",
+        "غيابات المدربين",
+        "ربط السجلات التاريخية",
+    }
+    assert not (additions & demo_labels), "an addition is being counted as demo parity"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "gate.additions"))
+    body = client.get(reverse("people:coverage")).content.decode("utf-8")
+    for addition in additions:
+        assert addition in body
+
+
+def test_the_project_navigation_still_carries_every_demo_sidebar_item() -> None:
+    """
+    The sidebar is what the client recognises. Checked against the same list
+    the coverage matrix is checked against, so nav and matrix cannot drift
+    apart without one of them failing.
+    """
+    from apps.people import nav
+
+    labels = [str(item.label) for group in nav.NAV for item in group.items]
+
+    for demo_item in DEMO_SIDEBAR_ORDER:
+        assert demo_item in labels, f"«{demo_item}» left the sidebar"
+    assert [label for label in labels if label in DEMO_SIDEBAR_ORDER] == DEMO_SIDEBAR_ORDER, (
+        "the sidebar no longer follows the demo's order"
+    )
+
+
+def test_the_readme_names_no_screen_the_system_does_not_have() -> None:
+    """
+    The runbook is read aloud in front of a client, so a renamed screen there
+    is a stumble in the demo itself. Sprint 8K-1 renamed «تسجيل اتفاقية موقّعة»
+    to «محرّر اتفاقية» and took «شريك جديد» and «طلب نقل جديد» out of the
+    sidebar, and the runbook went on naming all three for five commits.
+
+    Every Arabic name the README quotes in backticks must be a live menu entry.
+    """
+    from pathlib import Path
+
+    from apps.people import nav
+
+    labels = {str(item.label) for group in nav.NAV for item in group.items}
+    readme = Path("README.md").read_text(encoding="utf-8")
+    quoted = set(re.findall(r"`([؀-ۿ][^`]*)`", readme))
+
+    unknown = sorted(name for name in quoted if name not in labels)
+    assert not unknown, f"README names screens that are not in the menu: {unknown}"
+
+
+def test_the_readme_no_longer_calls_the_built_screens_missing() -> None:
+    """
+    §2.4 listed «الحالات الخاصة · شاشة الإعدادات · شاشة الاستحقاق» as
+    «غير منفَّذة». All three were built in 8K-3, and a README that still calls
+    them absent talks the delivery down in front of the client.
+    """
+    from pathlib import Path
+
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "غير منفَّذة" not in readme
+    for built in ("الحالات الخاصة", "استحقاق الشركاء", "الإعدادات"):
+        assert built in readme, f"«{built}» is built and the README should say what it is"
+    # …and it must not oversell them either.
+    assert "لا إدخال منها" in readme
+    assert "لا تحتسب مبلغاً" in readme
+    assert "لا تعديل" in readme
