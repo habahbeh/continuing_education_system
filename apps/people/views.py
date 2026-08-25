@@ -15,6 +15,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
@@ -414,53 +415,350 @@ def settings_view(request: HttpRequest) -> HttpResponse:
     )
 
 
+#: The four ways a demo promise can be kept, and the chip each earns. Kept as
+#: data so the legend on the page and the rows in it cannot drift apart.
+_DONE = ("منفذ", "ok")
+_GUIDED = ("إرشادي", "brand")
+_READONLY = ("قراءة فقط", "info")
+_PENDING = ("بانتظار قرار", "warn")
+_FUTURE = ("نطاق مستقبلي", "")
+
+_OPERATIONAL = "تشغيلية"
+_INFORMATIONAL = "إرشادية"
+_READ = "قراءة فقط"
+
+#: (demo sidebar label, route, kind, status, note) — in the demo's own order,
+#: js/app.js ``const NAV`` flattened. All 36, none omitted and none invented.
+_COVERAGE_ROWS: tuple[tuple[str, str, str, tuple[str, str], str], ...] = (
+    (
+        "لوحة المؤشرات",
+        "operations:dashboard",
+        _OPERATIONAL,
+        _DONE,
+        "مؤشرات تُقرأ من الحركة الفعلية، ولكل دور منها ما تسمح به صلاحيته.",
+    ),
+    (
+        "مسار التسجيل والدفع",
+        "operations:enroll-flow",
+        _INFORMATIONAL,
+        _GUIDED,
+        "ثماني مراحل تشرح الرحلة وتربط بالشاشات التي تنفّذها؛ لا يُنفَّذ من الصفحة شيء.",
+    ),
+    (
+        "المشاركون",
+        "people:participants",
+        _OPERATIONAL,
+        _DONE,
+        "بحث وإضافة وتعديل، والرقم الجامعي يُولَّد بقاعدته ولا يُصحَّح لاحقاً (BR-001).",
+    ),
+    (
+        "طلب التحاق جديد",
+        "people:participant-new",
+        _OPERATIONAL,
+        _DONE,
+        "نموذج الالتحاق بفئات المشاركين الثلاث.",
+    ),
+    (
+        "التسجيلات",
+        "operations:enrollments",
+        _OPERATIONAL,
+        _DONE,
+        "إنشاء واعتماد، خلف بوابتَي اعتماد الوزارة وتسجيل الوصل (BR-013 · BR-018).",
+    ),
+    (
+        "النقل بين الدورات",
+        "operations:transfers",
+        _OPERATIONAL,
+        _DONE,
+        "طلب وفحص شروط وتنفيذ؛ المال ينتقل بقيد عكسي لا بتعديل (BR-060 … BR-066).",
+    ),
+    (
+        "الحالات الخاصة",
+        "operations:special-cases",
+        _INFORMATIONAL,
+        _GUIDED,
+        "القواعد والخدمات منفّذة (BR-067 … BR-071)، والصفحة تشرح الأنواع الستة. "
+        "شاشة الإدخال التفصيلية غير مبنية بعد.",
+    ),
+    (
+        "الدبلومات التدريبية",
+        "catalog:programs",
+        _OPERATIONAL,
+        _DONE,
+        "بناء الدبلومات وموادها وربطها بأسعارها.",
+    ),
+    (
+        "الدورات القصيرة",
+        "catalog:short-courses",
+        _OPERATIONAL,
+        _DONE,
+        "كتالوج الدورات القصيرة وأسعارها.",
+    ),
+    (
+        "الدورات الأونلاين",
+        "catalog:online-courses",
+        _OPERATIONAL,
+        _DONE,
+        "كتالوج الدورات الأونلاين وأسعارها.",
+    ),
+    (
+        "الدفعات المُشغّلة",
+        "operations:cohorts",
+        _OPERATIONAL,
+        _DONE,
+        "فتح الدفعات وربطها بالبرنامج والفصل.",
+    ),
+    (
+        "قوائم الأسعار المؤرّخة",
+        "catalog:pricelists",
+        _OPERATIONAL,
+        _DONE,
+        "قوائم بتواريخ سريان؛ والمعتمدة منها لا تُعدَّل (BR-008).",
+    ),
+    (
+        "اعتماد الوزارة",
+        "operations:mohe",
+        _OPERATIONAL,
+        _DONE,
+        "ملف الوزارة، وهو البوابة التي لا يمر التسجيل قبلها (BR-013 … BR-016).",
+    ),
+    (
+        "الدفعات وسندات القبض",
+        "cashbox:payments",
+        _OPERATIONAL,
+        _DONE,
+        "السندات وتخصيصاتها؛ والإلغاء يكتب قيداً عكسياً ولا يحذف (BR-025).",
+    ),
+    (
+        "استيفاء دفعة",
+        "cashbox:payment-new",
+        _OPERATIONAL,
+        _DONE,
+        "القبض والتوزيع المخزَّن، وحدّ الدفعة الأولى للدبلوم (BR-020 · BR-022).",
+    ),
+    (
+        "الإقفال اليومي",
+        "cashbox:closing",
+        _OPERATIONAL,
+        _DONE,
+        "العدّ والتسوية، ومن قبض لا يعتمد العدّ (BR-027 · BR-028).",
+    ),
+    (
+        "الخصومات",
+        "billing:discounts",
+        _OPERATIONAL,
+        _DONE,
+        "إنشاء واعتماد بمرجع موافقة مسجَّل (BR-030).",
+    ),
+    (
+        "الاستردادات",
+        "billing:refunds",
+        _OPERATIONAL,
+        _DONE,
+        "طلب وتنفيذ، ومن ينفّذ الاسترداد لا يعتمده (BR-034).",
+    ),
+    (
+        "الرسوم الإضافية",
+        "billing:extra-fees",
+        _OPERATIONAL,
+        _DONE,
+        "رسم إعادة المادة وبدل فاقد الشهادة وما شابههما (BR-037 · BR-038).",
+    ),
+    ("المصروفات", "expenses:expenses", _OPERATIONAL, _DONE, "تسجيل المصروفات واعتمادها."),
+    (
+        "الشركاء المتعاقدون",
+        "partners:partners",
+        _OPERATIONAL,
+        _DONE,
+        "سجل الشركاء؛ و«شريك جديد» زرّ على الشاشة نفسها.",
+    ),
+    (
+        "الاتفاقيات",
+        "partners:agreements",
+        _OPERATIONAL,
+        _DONE,
+        "الاتفاقيات ولقطات أسعارها؛ والموقّعة منها لا تُعدَّل (BR-042).",
+    ),
+    (
+        "محرّر اتفاقية",
+        "partners:agreement-new",
+        _OPERATIONAL,
+        _DONE,
+        "تسجيل اتفاقية موقّعة بنموذج احتسابها واستثناءاتها.",
+    ),
+    (
+        "استحقاق الشركاء",
+        "settlements:entitlement",
+        _INFORMATIONAL,
+        _GUIDED,
+        "صفحة دليل تشرح السلسلة كاملة؛ والحساب الفعلي يجري على شاشة المطالبات. "
+        "أساس الاحتساب — قبل الضريبة أم بعدها — فرضية مسجَّلة (Q-28).",
+    ),
+    (
+        "المطالبات",
+        "settlements:claims",
+        _OPERATIONAL,
+        _DONE,
+        "بناء المطالبة واعتمادها؛ والمعتمدة لا يعدّلها أحد (BR-051).",
+    ),
+    (
+        "المخالصات",
+        "settlements:settlements",
+        _OPERATIONAL,
+        _DONE,
+        "المخالصة والتوقيع النهائي على الفترة.",
+    ),
+    (
+        "التزامات الشركاء",
+        "settlements:obligations",
+        _OPERATIONAL,
+        _PENDING,
+        "الشاشة تعمل وتخصم من مطالبة لاحقة (BR-036). نطاق الخصم — على مستوى الشريك "
+        "أم الاتفاقية — فرضية مسجَّلة بانتظار قرار العميل (Q-08).",
+    ),
+    (
+        "براءة الذمة",
+        "operations:clearances",
+        _OPERATIONAL,
+        _DONE,
+        "ثلاث خطوات وتوقيعان، والرصيد صفر في الاتجاهين (BR-073 · BR-074).",
+    ),
+    (
+        "الشهادات",
+        "operations:certificates",
+        _OPERATIONAL,
+        _DONE,
+        "لا شهادة بلا براءة ذمة مكتملة (BR-075)، والتقدير من قائمة معتمدة (BR-078).",
+    ),
+    ("التقارير", "reporting:reports", _READ, _DONE, "سبعة تقارير، ولكل دور ما يُسمح له منها."),
+    ("المستخدمون والصلاحيات", "people:users", _OPERATIONAL, _DONE, "إدارة الحسابات والأدوار."),
+    (
+        "سجل التدقيق",
+        "people:audit",
+        _READ,
+        _DONE,
+        "مكتمل، وقراءةٌ فقط بحكم القاعدة: لا يعدّله أحد ولا يحذفه (BR-084).",
+    ),
+    (
+        "الإعدادات",
+        "people:settings",
+        _READ,
+        _READONLY,
+        "تعرض المفاتيح والقرارات المفتوحة. التعديل يعني كتابة قيمة جديدة بتاريخ "
+        "سريان (BR-086)، وشاشته لم تُبنَ في هذه المرحلة.",
+    ),
+    (
+        "ترحيل البيانات",
+        "datamigration:batches",
+        _OPERATIONAL,
+        _DONE,
+        "استيراد وتدقيق وأرشفة، معزولة عن الدفتر المالي بحكم معماري (A-04).",
+    ),
+    ("مصفوفة تغطية المتطلبات", "people:coverage", _READ, _DONE, "هذه الصفحة."),
+    (
+        "النطاق المستقبلي",
+        "people:future",
+        _READ,
+        _DONE,
+        "تُوثّق البنود خارج النطاق الحالي وسبب تأجيل كل واحد منها.",
+    ),
+)
+
+#: Screens this system has and the demo's sidebar never showed. Kept apart from
+#: the parity table on purpose: mixing them in would inflate the coverage count
+#: with things nobody asked to see covered.
+_EXTRA_ROWS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "نموذج الإرسال للوزارة",
+        "operations:mohe-submit",
+        "إضافة في النظام الحقيقي",
+        "موظف التسجيل يجهّز الملف ومدير المركز يرسله (§3.3/15).",
+    ),
+    (
+        "الأرصدة الافتتاحية",
+        "billing:opening-balances",
+        "إضافة في النظام الحقيقي",
+        "أرصدة ما قبل النظام: إنشاء ثم مراجعة من شخص آخر ثم اعتماد (BR-094).",
+    ),
+    (
+        "غيابات المدربين",
+        "settlements:absences",
+        "إضافة في النظام الحقيقي",
+        "غرامة غياب المدرّس واستثناؤها الخطي (BR-057 · BR-058).",
+    ),
+    (
+        "ربط السجلات التاريخية",
+        "datamigration:links",
+        "إضافة في النظام الحقيقي",
+        "ربط اسم مؤرشف بمشارك قائم — حكم هوية بيد موظف التسجيل.",
+    ),
+    (
+        "طلب نقل جديد",
+        "operations:transfer-new",
+        "تُفتح من شاشتها الأم",
+        "خارج القائمة الجانبية مطابقةً للديمو؛ تُفتح بزرّ على شاشة النقل.",
+    ),
+    (
+        "شريك جديد",
+        "partners:partner-new",
+        "تُفتح من شاشتها الأم",
+        "خارج القائمة الجانبية مطابقةً للديمو؛ تُفتح بزرّ على شاشة الشركاء.",
+    ),
+)
+
+
 def coverage_view(request: HttpRequest) -> HttpResponse:
-    """Requirement coverage matrix; informational, no business mutation."""
+    """
+    The delivery-review page: every demo sidebar promise against its real address.
+
+    All 36 entries of the demo's own ``NAV`` are listed in the demo's own order,
+    and each names the route that answers it. ``reverse()`` runs on every one of
+    them, so a renamed or deleted route breaks this page loudly instead of
+    leaving a claim on screen that is no longer true.
+
+    **The honest headline is that nothing is missing.** No sidebar item resolves
+    to a future-scope placeholder — three resolve to guided pages rather than
+    data-entry forms, and those three say so in their own words and here. What
+    IS deferred is features inside screens, and that belongs on النطاق المستقبلي,
+    not to be smuggled into this count.
+    """
     policy.require(request.user, Screen.SETTINGS, Action.VIEW, request=request)
+
+    # The constants above are data; ``_`` here is the non-lazy gettext this
+    # module imports, so the wording is resolved per request rather than frozen
+    # at import time.
     rows = [
-        ("§3.1/1", _("لوحة المؤشرات"), _("لوحة المؤشرات"), _("منفذ")),
-        ("§3.1/2", _("مسار التسجيل والدفع"), _("مسار التسجيل والدفع"), _("إرشادي")),
-        (
-            "§3.2/3-8",
-            _("المشاركون والتسجيل والحالات الخاصة"),
-            _("المشاركون، التسجيلات، النقل، الحالات الخاصة"),
-            _("منفذ/إرشادي"),
-        ),
-        (
-            "§3.3/9-15",
-            _("البرامج والأسعار واعتماد الوزارة"),
-            _("البرامج، القوائم، الدفعات، اعتماد الوزارة"),
-            _("منفذ"),
-        ),
-        (
-            "§3.4/16-22",
-            _("الدفع والإقفال والحركات المالية"),
-            _("الدفعات، الإقفال، الخصومات، الاستردادات، الرسوم، المصروفات"),
-            _("منفذ"),
-        ),
-        (
-            "§3.5/23-29",
-            _("الشركاء والاتفاقيات والاستحقاقات"),
-            _("الشركاء، الاتفاقيات، الاستحقاق، المطالبات، المخالصات، الالتزامات"),
-            _("منفذ/إرشادي"),
-        ),
-        (
-            "§3.6/30-31",
-            _("براءة الذمة والشهادات"),
-            _("براءة الذمة، الشهادات، نماذج الطباعة"),
-            _("منفذ"),
-        ),
-        (
-            "§3.7/32-38",
-            _("التقارير والنظام والتغطية والنطاق المستقبلي"),
-            _("التقارير، المستخدمون، التدقيق، الإعدادات، الترحيل، التغطية، النطاق المستقبلي"),
-            _("منفذ/إرشادي"),
-        ),
+        {
+            "demo": _(demo),
+            "path": reverse(route),
+            "kind": _(kind),
+            "status": _(status[0]),
+            "chip": status[1],
+            "note": _(note),
+        }
+        for demo, route, kind, status, note in _COVERAGE_ROWS
     ]
+    extras = [
+        {"screen": _(screen), "path": reverse(route), "tag": _(tag), "note": _(note)}
+        for screen, route, tag, note in _EXTRA_ROWS
+    ]
+
+    counts = [
+        (_(label), chip, sum(1 for r in rows if r["status"] == _(label)))
+        for label, chip in (_DONE, _GUIDED, _READONLY, _PENDING, _FUTURE)
+    ]
+
     return render(
         request,
         "core/coverage.html",
-        {"title": _("مصفوفة تغطية المتطلبات"), "active_screen": "coverage", "rows": rows},
+        {
+            "title": _("مصفوفة تغطية المتطلبات"),
+            "active_screen": Screen.SETTINGS,
+            "rows": rows,
+            "extras": extras,
+            "counts": counts,
+            "total": len(rows),
+        },
     )
 
 

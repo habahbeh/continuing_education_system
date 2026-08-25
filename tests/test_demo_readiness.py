@@ -12,6 +12,7 @@ chain. This module proves the buttons.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -544,3 +545,177 @@ def test_each_guided_screen_says_out_loud_what_it_is(
     body = client.get(reverse(route)).content.decode("utf-8")
 
     assert phrase in body
+
+
+# ---------------------------------------------------------------------------
+# The delivery-review page — Sprint 8K-4
+# ---------------------------------------------------------------------------
+#: The demo's sidebar, flattened from ``const NAV`` in its own js/app.js and
+#: written out here independently of the view. That independence is the point:
+#: a row reordered, dropped or invented in ``_COVERAGE_ROWS`` fails against
+#: this list rather than against a copy of itself.
+DEMO_SIDEBAR_ORDER = [
+    "لوحة المؤشرات",
+    "مسار التسجيل والدفع",
+    "المشاركون",
+    "طلب التحاق جديد",
+    "التسجيلات",
+    "النقل بين الدورات",
+    "الحالات الخاصة",
+    "الدبلومات التدريبية",
+    "الدورات القصيرة",
+    "الدورات الأونلاين",
+    "الدفعات المُشغّلة",
+    "قوائم الأسعار المؤرّخة",
+    "اعتماد الوزارة",
+    "الدفعات وسندات القبض",
+    "استيفاء دفعة",
+    "الإقفال اليومي",
+    "الخصومات",
+    "الاستردادات",
+    "الرسوم الإضافية",
+    "المصروفات",
+    "الشركاء المتعاقدون",
+    "الاتفاقيات",
+    "محرّر اتفاقية",
+    "استحقاق الشركاء",
+    "المطالبات",
+    "المخالصات",
+    "التزامات الشركاء",
+    "براءة الذمة",
+    "الشهادات",
+    "التقارير",
+    "المستخدمون والصلاحيات",
+    "سجل التدقيق",
+    "الإعدادات",
+    "ترحيل البيانات",
+    "مصفوفة تغطية المتطلبات",
+    "النطاق المستقبلي",
+]
+
+COVERAGE_ROW = re.compile(
+    r'<td class="num">\d+</td>\s*<td>([^<]+)</td>\s*<td dir="ltr">([^<]+)</td>\s*'
+    r"<td>([^<]+)</td>\s*"
+    r'<td><span class="chip ([a-z]*) dot">([^<]+)</span>'
+)
+
+
+def _coverage_rows(client: Client, role: str = Role.CENTER_MANAGER) -> list[tuple[str, ...]]:
+    """The parity table's rows, parsed out of the page the reviewer sees.
+
+    Scoped to the matrix card: the sidebar carries the very same Arabic labels,
+    so a plain ``label in body`` would pass on the menu and prove nothing.
+    """
+    client.force_login(_user(role, f"cov.{role.lower()}"))
+    body = client.get(reverse("people:coverage")).content.decode("utf-8")
+    table = body.split("المصفوفة — بترتيب قائمة الديمو", 1)[1]
+    table = table.split("شاشات في النظام خارج", 1)[0]
+    return COVERAGE_ROW.findall(table)
+
+
+@pytest.mark.parametrize(
+    ("role", "allowed"),
+    [
+        (Role.CENTER_MANAGER, True),
+        (Role.FINANCE_OFFICER, True),
+        (Role.AUDIT_ACCOUNT, True),
+        (Role.REGISTRATION_OFFICER, False),
+        (Role.FINANCE_MANAGER, False),
+        (Role.CASHIER, False),
+    ],
+)
+def test_the_coverage_matrix_opens_for_exactly_the_roles_the_matrix_allows(
+    client: Client, seeded_settings: None, role: str, allowed: bool
+) -> None:
+    """It is guarded by §3.7/35 like the other review screens."""
+    client.force_login(_user(role, f"cov.open.{role.lower()}"))
+
+    response = client.get(reverse("people:coverage"))
+
+    assert response.status_code == (200 if allowed else 403)
+
+
+def test_the_coverage_matrix_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """It names every screen the system has; it is not a public document."""
+    assert client.get(reverse("people:coverage")).status_code == 403
+
+
+def test_the_coverage_matrix_lists_every_demo_sidebar_item_in_the_demo_order(
+    client: Client, seeded_settings: None
+) -> None:
+    """The whole promise of the page: nothing dropped, nothing reordered."""
+    listed = [row[0] for row in _coverage_rows(client)]
+
+    assert listed == DEMO_SIDEBAR_ORDER
+
+
+def test_the_coverage_matrix_separates_project_extras_from_demo_parity(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Screens the demo never showed sit in their own table. Folding them into the
+    parity count would inflate it with things nobody asked to see covered.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "cov.extras"))
+
+    body = client.get(reverse("people:coverage")).content.decode("utf-8")
+    parity, extras = body.split("شاشات في النظام خارج", 1)
+
+    assert "إضافة في النظام الحقيقي" in extras
+    assert "إضافة في النظام الحقيقي" not in parity.split("المصفوفة — بترتيب", 1)[1]
+
+
+def test_the_coverage_matrix_does_not_call_every_row_done(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    A page that marks all 36 «منفذ» is a page nobody can trust. Three rows are
+    guided pages and one waits on a client decision, and the table has to show
+    that difference rather than round it up.
+    """
+    statuses = [row[4] for row in _coverage_rows(client)]
+
+    assert len(set(statuses)) >= 3, f"only {set(statuses)} used — the page rounds up"
+    assert statuses.count("منفذ") < len(statuses)
+    assert "إرشادي" in statuses
+    assert "بانتظار قرار" in statuses
+
+
+def test_the_coverage_matrix_gives_each_status_its_own_chip(
+    client: Client, seeded_settings: None
+) -> None:
+    """Status has to be readable at a glance, not by reading every note."""
+    rows = _coverage_rows(client)
+    pairs = {status: chip for _demo, _path, _kind, chip, status in rows}
+
+    assert len(set(pairs.values())) == len(pairs), f"two statuses share a chip: {pairs}"
+    assert pairs["منفذ"] == "ok"
+    assert pairs["إرشادي"] == "brand"
+    assert pairs["بانتظار قرار"] == "warn"
+
+
+def test_every_route_the_coverage_matrix_names_still_reverses() -> None:
+    """
+    The page prints an address for each row, so a renamed route would leave a
+    claim on screen that no longer resolves. ``reverse`` here names the offender.
+    """
+    from apps.people.views import _COVERAGE_ROWS, _EXTRA_ROWS
+
+    for _demo, route, _kind, _status, _note in _COVERAGE_ROWS:
+        assert reverse(route), route
+    for _screen, route, _tag, _note in _EXTRA_ROWS:
+        assert reverse(route), route
+
+
+def test_the_coverage_matrix_uses_no_class_this_project_never_defined() -> None:
+    """8K-1 built this page with ``tbl compact``, which is defined nowhere here."""
+    from pathlib import Path
+
+    source = Path("templates/core/coverage.html").read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    for dead in [*DEAD_DEMO_CLASSES, "compact", "mono"]:
+        assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
+        assert dead not in source, f"coverage.html still uses the demo-only class «{dead}»"

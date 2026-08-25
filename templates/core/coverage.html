@@ -4,6 +4,113 @@
 {% block title %}{% translate "مصفوفة تغطية المتطلبات — مركز التعليم المستمر" %}{% endblock %}
 
 {% block content %}
-<div class="page-head"><div><span class="eyebrow">{% translate "مراجعة التسليم" %}</span><h1>{{ title }}</h1><p class="sub">{% translate "هذه الصفحة تربط ما رآه العميل في الديمو بما هو موجود في النظام الحقيقي." %}</p></div></div>
-<div class="card2"><div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>{% translate "المرجع" %}</th><th>{% translate "المتطلب" %}</th><th>{% translate "أين يظهر" %}</th><th>{% translate "الحالة" %}</th></tr></thead><tbody>{% for ref, requirement, screen, status in rows %}<tr><td>{{ ref }}</td><td>{{ requirement }}</td><td>{{ screen }}</td><td><span class="chip brand">{{ status }}</span></td></tr>{% endfor %}</tbody></table></div></div>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "مراجعة التسليم" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "كل بند من القائمة الجانبية في الديمو، مقابل عنوانه في النظام الحقيقي وحالته ونوعه — بترتيب الديمو نفسه." %}</p>
+  </div>
+</div>
+
+<div class="note ok">
+  <div>
+    <strong>{% translate "لا يوجد بند ناقص." %}</strong>
+    {% blocktranslate %}كل بنود قائمة الديمو الـ{{ total }} لها شاشات في النظام، ولكل شاشة عنوان حقيقي يفتح.{% endblocktranslate %}
+    {% translate "ثلاثة منها صفحات إرشادية لا نماذج إدخال، وهي تقول ذلك عن نفسها وفي الجدول أدناه. أمّا البنود المؤجَّلة فهي خصائص داخل شاشات، وموضعها صفحة «النطاق المستقبلي» لا هذا العدّ." %}
+  </div>
+</div>
+
+<div class="kpi-grid">
+  {% for label, chip, count in counts %}
+    <div class="kpi">
+      <div class="label">{{ label }}</div>
+      <div class="value">{{ count }}</div>
+      <div class="foot"><span class="chip {{ chip }} dot">{{ label }}</span></div>
+    </div>
+  {% endfor %}
+  <div class="kpi primary">
+    <div class="label">{% translate "إجمالي بنود قائمة الديمو" %}</div>
+    <div class="value">{{ total }}</div>
+    <div class="foot">{% translate "بترتيب الديمو، بلا حذف ولا إضافة" %}</div>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "معنى كل حالة" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt><span class="chip ok dot">{% translate "منفذ" %}</span></dt>
+      <dd>{% translate "الشاشة تعمل بمنطقها الكامل خلفها." %}</dd>
+      <dt><span class="chip brand dot">{% translate "إرشادي" %}</span></dt>
+      <dd>{% translate "صفحة تشرح وتربط بالشاشات المنفِّذة، ولا يُدخَل منها شيء." %}</dd>
+      <dt><span class="chip info dot">{% translate "قراءة فقط" %}</span></dt>
+      <dd>{% translate "تعرض ولا تُعدِّل في هذه المرحلة، والسبب مذكور في سطرها." %}</dd>
+      <dt><span class="chip warn dot">{% translate "بانتظار قرار" %}</span></dt>
+      <dd>{% translate "الشاشة تعمل، وأحد معاييرها فرضية مهنية مسجَّلة تنتظر قرار العميل." %}</dd>
+      <dt><span class="chip dot">{% translate "نطاق مستقبلي" %}</span></dt>
+      <dd>{% translate "خارج المرحلة الحالية. لا يقع فيه أيّ بند من بنود القائمة الجانبية." %}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "المصفوفة — بترتيب قائمة الديمو" %}</h2></div>
+  <div class="card2-body">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>{% translate "الشاشة في الديمو" %}</th>
+            <th>{% translate "عنوانها في النظام" %}</th>
+            <th>{% translate "النوع" %}</th>
+            <th>{% translate "الحالة" %}</th>
+            <th>{% translate "ملاحظة" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td class="num">{{ forloop.counter }}</td>
+              <td>{{ row.demo }}</td>
+              <td dir="ltr">{{ row.path }}</td>
+              <td>{{ row.kind }}</td>
+              <td><span class="chip {{ row.chip }} dot">{{ row.status }}</span></td>
+              <td>{{ row.note }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "شاشات في النظام خارج قائمة الديمو" %}</h2></div>
+  <div class="card2-body">
+    <p class="hint">{% translate "معزولة عن الجدول أعلاه عن قصد: هي زيادة على ما طُلب، ولا يصحّ أن تُضخّم عدّ التغطية." %}</p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>{% translate "الشاشة" %}</th>
+            <th>{% translate "عنوانها في النظام" %}</th>
+            <th>{% translate "الصفة" %}</th>
+            <th>{% translate "ملاحظة" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for extra in extras %}
+            <tr>
+              <td>{{ extra.screen }}</td>
+              <td dir="ltr">{{ extra.path }}</td>
+              <td><span class="chip brand">{{ extra.tag }}</span></td>
+              <td>{{ extra.note }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}
