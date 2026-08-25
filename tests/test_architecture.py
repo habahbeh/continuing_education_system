@@ -328,3 +328,352 @@ def test_retired_setting_keys_absent_from_database() -> None:
         EffectiveSetting.objects.filter(key__in=RETIRED_KEYS).values_list("key", flat=True)
     )
     assert not present, f"Retired setting keys found in the database: {present}"
+
+
+# ---------------------------------------------------------------------------
+# A-10 — a filter may not narrow by a field the reader cannot see
+# ---------------------------------------------------------------------------
+# `402f848` closed one of these. A restricted role could not see a participant's
+# category, and three requests for three categories handed back three different
+# one-row lists — reading the field off the result set without it ever being
+# rendered. A filter reports a field as surely as printing it.
+#
+# Nothing else in the codebase can do that TODAY, and for a structural reason:
+# ``project()``/``visible_fields_for`` exist in one service. Every other list
+# hands back the field it filters on, so narrowing tells the reader nothing the
+# row did not already say.
+#
+# That is the fact this guard protects. The risk is forward, not backward: the
+# first service to gain a per-role projection turns its own filters into
+# oracles in the same commit, and there would be nothing to notice.
+#
+# Two things are asserted rather than one, because a parser over function
+# bodies would be brittle exactly where it needs to be certain:
+#
+#   * every ``list_*`` is discovered by IMPORT and must be declared below, with
+#     its filters matching the real signature. A new list service, or a new
+#     parameter on an old one, fails until somebody classifies it.
+#   * a service declared to project nothing must really have no projection.
+#     Adding one flips the classification, which forces a probe to be written.
+#
+# What is NOT machine-checked: whether a parameter is reachable from a URL.
+# ``list_receipts(cashier_id=…)`` is not, but that is a weaker argument than
+# the two above — where nothing is projected away, reachability does not matter
+# — so it lives in a note instead of pretending to be verified.
+
+#: The service hands every reader the same keys, so no filter can be an oracle.
+NO_PROJECTION = "no-projection"
+#: The service narrows rows per role, so every filter needs its own gate AND a
+#: behavioural probe below.
+FIELD_GATED = "field-gated"
+
+#: dotted path -> (filter parameters, projection class, why it is safe)
+LIST_SERVICE_CONTRACT: dict[str, tuple[tuple[str, ...], str, str]] = {
+    "apps.billing.services.credit_service.list_credit_returns": (
+        ("enrollment_code",),
+        NO_PROJECTION,
+        "enrollment_code is on the row it filters.",
+    ),
+    "apps.billing.services.discount_service.list_discounts": (
+        ("enrollment_code",),
+        NO_PROJECTION,
+        "enrollment_code is on the row it filters.",
+    ),
+    "apps.billing.services.extra_fee_service.list_extra_fees": (
+        ("enrollment_code",),
+        NO_PROJECTION,
+        "enrollment_code is on the row it filters.",
+    ),
+    "apps.billing.services.opening_balance_service.list_balances": (
+        ("status", "direction"),
+        NO_PROJECTION,
+        "status and direction are both on the row.",
+    ),
+    "apps.billing.services.refund_service.list_refunds": (
+        ("enrollment_code", "status"),
+        NO_PROJECTION,
+        "both are on the row.",
+    ),
+    "apps.cashbox.services.closing_service.list_closings": (
+        ("on_date",),
+        NO_PROJECTION,
+        "closing_date is on the row. Whether the cashier should see another "
+        "cashier's day is a scope question (footnote 14), not an oracle.",
+    ),
+    "apps.cashbox.services.payment_service.list_receipts": (
+        ("query", "on_date", "cashier_id"),
+        NO_PROJECTION,
+        "received_on and cashier are on the row. cashier_id is not passed by "
+        "any view, but that is not what makes it safe.",
+    ),
+    "apps.catalog.services.catalog_service.list_programs": (
+        ("program_type",),
+        NO_PROJECTION,
+        "program_type is on the row.",
+    ),
+    "apps.catalog.services.catalog_service.list_price_lists": (
+        (),
+        NO_PROJECTION,
+        "takes no filter at all, so there is nothing to narrow by.",
+    ),
+    "apps.datamigration.services.read_service.list_batches": (
+        (),
+        NO_PROJECTION,
+        "takes no filter at all, so there is nothing to narrow by.",
+    ),
+    "apps.expenses.services.expense_service.list_expenses": (
+        ("category", "status", "cohort_code", "date_from", "date_to"),
+        NO_PROJECTION,
+        "category, status and cohort_code are all on the row.",
+    ),
+    "apps.operations.services.certificate_service.list_certificates": (
+        ("query",),
+        NO_PROJECTION,
+        "search runs over fields the row carries.",
+    ),
+    "apps.operations.services.clearance_service.list_clearances": (
+        ("status", "query"),
+        NO_PROJECTION,
+        "status is on the row.",
+    ),
+    "apps.operations.services.cohort_service.list_cohorts": (
+        ("query", "status", "program_code"),
+        NO_PROJECTION,
+        "status and program_code are on the row.",
+    ),
+    "apps.operations.services.enrollment_service.list_enrollments": (
+        ("query", "cohort_code", "status"),
+        NO_PROJECTION,
+        "cohort_code and status are on the row. If this ever narrows per role "
+        "— the finance manager's cell is a bare V — it becomes FIELD_GATED.",
+    ),
+    "apps.operations.services.mohe_service.list_submissions": (
+        ("status", "query"),
+        NO_PROJECTION,
+        "status is on the row.",
+    ),
+    "apps.operations.services.transfer_service.list_transfers": (
+        ("status", "query"),
+        NO_PROJECTION,
+        "status is on the row.",
+    ),
+    "apps.partners.services.partner_service.list_partners": (
+        ("query",),
+        NO_PROJECTION,
+        "search runs over fields the row carries.",
+    ),
+    "apps.partners.services.partner_service.list_agreements": (
+        ("partner_code",),
+        NO_PROJECTION,
+        "partner is on the row, and BR-083 shuts the cashier out of the screen "
+        "entirely rather than out of a column.",
+    ),
+    "apps.people.services.participant_service.list_participants": (
+        ("query", "category"),
+        FIELD_GATED,
+        "BR-101 narrows the cashier and the finance manager to number and "
+        "name. Both filters are gated; the probe below holds them.",
+    ),
+    "apps.people.services.user_service.list_users": (
+        (),
+        NO_PROJECTION,
+        "takes no filter at all, so there is nothing to narrow by.",
+    ),
+    "apps.settlements.services.absence_service.list_absences": (
+        ("cohort_code",),
+        NO_PROJECTION,
+        "cohort_code is on the row.",
+    ),
+    "apps.settlements.services.claim_service.list_claims": (
+        ("partner_code", "status"),
+        NO_PROJECTION,
+        "partner_name and status are on the row.",
+    ),
+    "apps.settlements.services.clawback_service.list_obligations": (
+        ("partner_code",),
+        NO_PROJECTION,
+        "the row names its partner.",
+    ),
+    "apps.settlements.services.settlement_service.list_settlements": (
+        ("partner_code",),
+        NO_PROJECTION,
+        "partner_name is on the row.",
+    ),
+}
+
+#: Names that mean a module narrows rows per role. Presence of either turns a
+#: service into one whose filters need gating.
+PROJECTION_SYMBOLS = ("project", "visible_fields_for")
+
+
+def _discover_list_services() -> dict[str, object]:
+    """Every ``list_*`` defined in a service module, found by import.
+
+    By import rather than by reading source: a rename, a decorator or a
+    reformat must not be able to hide a service from this guard.
+    """
+    import importlib
+    import inspect
+
+    found: dict[str, object] = {}
+    for path in sorted(APPS_DIR.glob("*/services/*.py")):
+        if path.name == "__init__.py":
+            continue
+        dotted = ".".join(path.relative_to(BASE_DIR).with_suffix("").parts)
+        module = importlib.import_module(dotted)
+        for name, obj in vars(module).items():
+            if not name.startswith("list_") or not inspect.isfunction(obj):
+                continue
+            if obj.__module__ != dotted:  # re-exported from elsewhere
+                continue
+            found[f"{dotted}.{name}"] = obj
+    return found
+
+
+def test_a10_every_list_service_is_declared_in_the_filter_contract() -> None:
+    """
+    A new list service, or a new filter on an old one, has to be classified.
+
+    This is the half of A-10 that reaches into the future: the leak that was
+    fixed could only exist because a filter and a projection met without anyone
+    asking whether they should. Adding either now fails here first.
+    """
+    discovered = _discover_list_services()
+
+    undeclared = sorted(set(discovered) - set(LIST_SERVICE_CONTRACT))
+    stale = sorted(set(LIST_SERVICE_CONTRACT) - set(discovered))
+
+    assert not undeclared, (
+        "A list service is not classified in LIST_SERVICE_CONTRACT. Decide "
+        "whether its filters can report a field its reader cannot see, then "
+        "declare it: " + ", ".join(undeclared)
+    )
+    assert not stale, "LIST_SERVICE_CONTRACT names services that no longer exist: " + ", ".join(
+        stale
+    )
+
+
+def test_a10_the_declared_filters_match_the_real_signatures() -> None:
+    """
+    A contract that drifts from the code protects nothing.
+
+    ``actor`` and ``request`` are not filters; everything else narrows the
+    result set and therefore has to be accounted for.
+    """
+    import inspect
+
+    offenders: list[str] = []
+    for dotted, function in sorted(_discover_list_services().items()):
+        declared, _projection, _why = LIST_SERVICE_CONTRACT[dotted]
+        actual = tuple(
+            name
+            for name in inspect.signature(function).parameters
+            if name not in ("actor", "request")
+        )
+        if actual != declared:
+            offenders.append(f"{dotted}: declared {declared}, signature has {actual}")
+
+    assert not offenders, (
+        "A filter parameter is undeclared or renamed. Every one of them can "
+        "narrow a result set: " + " · ".join(offenders)
+    )
+
+
+def test_a10_a_service_declared_to_project_nothing_really_projects_nothing() -> None:
+    """
+    The classification has to be a fact, not a habit.
+
+    ``project``/``visible_fields_for`` is what makes a row mean different
+    things to different readers, and it is what turns a filter into an oracle.
+    A service that grows one must be re-declared FIELD_GATED — which forces a
+    probe like ``test_a10_the_canonical_field_gated_service_holds`` to be
+    written for it, rather than the change passing quietly.
+    """
+    import importlib
+
+    offenders: list[str] = []
+    for dotted, (_filters, projection, _why) in sorted(LIST_SERVICE_CONTRACT.items()):
+        module = importlib.import_module(dotted.rsplit(".", 1)[0])
+        present = [name for name in PROJECTION_SYMBOLS if hasattr(module, name)]
+        if present and projection == NO_PROJECTION:
+            offenders.append(f"{dotted} declares {NO_PROJECTION} but defines {present}")
+        if not present and projection == FIELD_GATED:
+            offenders.append(f"{dotted} declares {FIELD_GATED} and projects nothing")
+
+    assert not offenders, (
+        "A service's projection classification no longer matches its module. "
+        "If a projection was just added, every filter on it needs a gate and a "
+        "probe: " + " · ".join(offenders)
+    )
+
+
+def test_a10_every_contract_entry_says_why_it_is_safe() -> None:
+    """A classification without a reason is a guess someone will inherit."""
+    for dotted, (_filters, projection, why) in sorted(LIST_SERVICE_CONTRACT.items()):
+        assert projection in (NO_PROJECTION, FIELD_GATED), dotted
+        assert len(why) > 15, f"{dotted} carries no reason"
+
+
+@pytest.mark.django_db
+def test_a10_the_canonical_field_gated_service_holds() -> None:
+    """
+    The behaviour A-10 exists for, exercised rather than asserted about.
+
+    BR-101 keeps ``category`` off the cashier's and the finance manager's row.
+    Before `402f848`, ``?category=`` handed each of them a different one-row
+    list per value — the field, read back from the shape of the answer. The
+    filter is ignored for those readers now, so the answer does not move.
+
+    Deleting that gate fails this test, which is the whole point of it.
+    """
+    from datetime import date
+
+    from apps.people.models import (
+        IdDocumentType,
+        Participant,
+        ParticipantCategory,
+        Role,
+        User,
+    )
+    from apps.people.services import participant_service as svc
+
+    categories = (
+        ParticipantCategory.UNIVERSITY,
+        ParticipantCategory.CENTER,
+        ParticipantCategory.EMPLOYEE,
+    )
+    for index, category in enumerate(categories):
+        Participant.objects.create(
+            participant_number=f"20261100{index}",
+            category=category,
+            name_ar=f"مشارك أ-١٠ {index}",
+            id_document_type=IdDocumentType.NATIONAL_ID,
+            id_document_number=f"7770000{index}",
+            registered_on=date(2026, 1, 1),
+        )
+
+    def numbers(actor: object, **filters: str) -> list[str]:
+        rows = svc.list_participants(actor=actor, **filters)
+        return sorted(row["participant_number"] for row in rows)
+
+    for role in (Role.CASHIER, Role.FINANCE_MANAGER):
+        actor = User.objects.create_user(
+            username=f"a10.{role.lower()}", password="a10-probe-1234", role=role
+        )
+        assert "category" not in svc.visible_fields_for(actor)
+        everything = numbers(actor)
+        assert len(everything) == 3
+        for category in categories:
+            assert numbers(actor, category=category) == everything, (
+                f"?category={category} moved the result set for {role} — the "
+                "filter is reporting a field BR-101 withholds"
+            )
+
+    # …and the gate is on the field, not on the feature: a reader who sees the
+    # column still filters by it.
+    registrar = User.objects.create_user(
+        username="a10.registrar", password="a10-probe-1234", role=Role.REGISTRATION_OFFICER
+    )
+    assert "category" in svc.visible_fields_for(registrar)
+    for category in categories:
+        assert len(numbers(registrar, category=category)) == 1
