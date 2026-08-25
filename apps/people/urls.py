@@ -32,4 +32,9 @@ urlpatterns = [
     ),
     # Audit trail (row 34) — read only, D-11
     path("audit/", views.audit_view, name="audit"),
+    # Sprint 8K — the read-only system screens from the demo sidebar. Their
+    # paths stay at the root; only the app that guards them changed (ADR-008).
+    path("settings/", views.settings_view, name="settings"),
+    path("coverage/", views.coverage_view, name="coverage"),
+    path("future/", views.future_view, name="future"),
 ]

@@ -1198,16 +1198,39 @@ def _run_transfer_action(request: HttpRequest, action: str, transfer: Any) -> No
     )
     messages.success(request, _("نُفِّذ النقل وسُوّيت الرسوم."))
 
+
 # ---------------------------------------------------------------------------
 # Sprint 8K — demo-parity guided screens
 # ---------------------------------------------------------------------------
 def enroll_flow_view(request: HttpRequest) -> HttpResponse:
-    """Read-only workflow map: request → registration → payment → certificate."""
+    """
+    Read-only workflow map: request → registration → payment → certificate.
+
+    Four roles may open this page, and no one of them may open every screen it
+    describes: §3.4/17 keeps the manager, the registrar and the audit account
+    out of cash collection (BR-081 is enforced "on UI and API alike"), and
+    §3.2/4 keeps the finance officer out of the admission form. A step whose
+    screen the reader may not VIEW therefore keeps its explanation and loses
+    its link — offering it would send the reader to a refusal and write a
+    DENIED_ATTEMPT row (BR-085) for following the guide as written.
+    """
     policy.require(request.user, Screen.ENROLL_FLOW, Action.VIEW, request=request)
+    may = {
+        "student_new": policy.is_allowed(request.user, Screen.STUDENT_NEW, Action.VIEW),
+        "enrollments": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.VIEW),
+        "payment_new": policy.is_allowed(request.user, Screen.PAYMENT_NEW, Action.VIEW),
+        "transfers": policy.is_allowed(request.user, Screen.TRANSFERS, Action.VIEW),
+        "clearance": policy.is_allowed(request.user, Screen.CLEARANCE, Action.VIEW),
+        "certificates": policy.is_allowed(request.user, Screen.CERTIFICATES, Action.VIEW),
+    }
     return render(
         request,
         "operations/enroll_flow.html",
-        {"title": _("مسار التسجيل والدفع"), "active_screen": Screen.ENROLL_FLOW},
+        {
+            "title": _("مسار التسجيل والدفع"),
+            "active_screen": Screen.ENROLL_FLOW,
+            "may": may,
+        },
     )
 
 

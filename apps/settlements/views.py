@@ -576,6 +576,7 @@ def _handle_settlement_detail(request: HttpRequest, code: str) -> HttpResponse |
         raise Http404 from exc
     return redirect("settlements:settlement-detail", code=code)
 
+
 # ---------------------------------------------------------------------------
 # Sprint 8K — entitlement landing page from the demo
 # ---------------------------------------------------------------------------

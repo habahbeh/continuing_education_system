@@ -164,22 +164,38 @@ def test_a_refused_request_leaves_a_denied_attempt(
     assert AuditEvent.objects.filter(action="DENIED_ATTEMPT", actor=auditor).exists()
 
 
-def test_the_menu_shows_finance_the_list_but_not_the_request_form(
-    finance: User, priced_catalog: Any
+def test_the_menu_offers_both_roles_the_transfer_list(
+    finance: User, registrar: User, priced_catalog: Any
 ) -> None:
+    """§3.2/6 — finance reads the transfers it settles, the registrar opens them."""
     from apps.people import nav
 
-    urls = {item["url"] for group in nav.nav_for(finance) for item in group["items"]}
-    assert reverse("operations:transfers") in urls
-    assert reverse("operations:transfer-new") not in urls
+    for user in (finance, registrar):
+        urls = {item["url"] for group in nav.nav_for(user) for item in group["items"]}
+        assert reverse("operations:transfers") in urls
 
 
-def test_the_menu_shows_the_registrar_both(registrar: User, priced_catalog: Any) -> None:
-    from apps.people import nav
+@pytest.mark.parametrize(
+    ("role_fixture", "offered"),
+    [("registrar", True), ("finance", False)],
+)
+def test_the_transfers_screen_offers_the_request_form_to_the_registrar_only(
+    client: Client, request: Any, priced_catalog: Any, role_fixture: str, offered: bool
+) -> None:
+    """
+    §3.2/7 — the request form is the registrar's and the manager's; finance
+    settles the fee difference and never opens the request.
 
-    urls = {item["url"] for group in nav.nav_for(registrar) for item in group["items"]}
-    assert reverse("operations:transfers") in urls
-    assert reverse("operations:transfer-new") in urls
+    Sprint 8H proved this on the menu, where «طلب نقل جديد» had an entry of its
+    own. Sprint 8K-1 took that entry out to match the demo sidebar, so the
+    distinction now rests entirely on the button on the transfers screen —
+    which is where this pair has to hold it.
+    """
+    client.force_login(request.getfixturevalue(role_fixture))
+
+    body = client.get(reverse("operations:transfers")).content.decode("utf-8")
+
+    assert (f'href="{reverse("operations:transfer-new")}"' in body) is offered
 
 
 # ---------------------------------------------------------------------------

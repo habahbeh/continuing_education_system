@@ -252,7 +252,10 @@ def test_the_refusal_page_offers_an_anonymous_user_the_way_to_log_in(
     ("path", "expected"),
     [
         ("/partners/", "/partners/"),
-        ("/partners/new/", "/partners/new/"),
+        # Sprint 8K-1 took «شريك جديد» out of the menu for demo parity; the
+        # partners screen still offers it as a guarded button. With no entry of
+        # its own, /partners/new/ now belongs to its parent, like any detail page.
+        ("/partners/new/", "/partners/"),
         ("/partners/PRT-1/", "/partners/"),
         ("/operations/mohe/", "/operations/mohe/"),
         ("/operations/mohe/submit/", "/operations/mohe/submit/"),
@@ -263,11 +266,10 @@ def test_exactly_one_menu_entry_is_marked_for_a_path(
     seeded_settings: None, path: str, expected: str
 ) -> None:
     """
-    ``partners:partners`` and ``partners:partner-new`` share Screen.PARTNERS,
-    because creating a partner is an ACTION on that screen rather than a
-    screen of its own — so marking on the screen alone lit both. Longest
-    matching prefix gives the child its own page and the parent the detail
-    pages beneath it.
+    Marking on the screen alone lit two entries at once: ``operations:mohe``
+    and ``operations:mohe-submit`` sit in one section of the menu, one path
+    beneath the other. Longest matching prefix gives the child
+    its own page and the parent the detail pages beneath it.
     """
     from apps.people import nav
 

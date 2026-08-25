@@ -297,3 +297,80 @@ def audit_view(request: HttpRequest) -> HttpResponse:
             },
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8K — the three read-only system screens the demo sidebar shows
+# ---------------------------------------------------------------------------
+# They live here, beside users and the audit trail, because a guarded view has
+# to ask ``policy`` — and ADR-008 forbids ``apps.core`` from knowing any
+# business app, the permission engine included. The Setting model stays in
+# core, where infrastructure belongs; only the screen over it moves.
+def settings_view(request: HttpRequest) -> HttpResponse:
+    """Read-only settings landing page for client/demo parity."""
+    policy.require(request.user, Screen.SETTINGS, Action.VIEW, request=request)
+    return render(
+        request,
+        "core/settings.html",
+        {"title": _("الإعدادات"), "active_screen": Screen.SETTINGS},
+    )
+
+
+def coverage_view(request: HttpRequest) -> HttpResponse:
+    """Requirement coverage matrix; informational, no business mutation."""
+    policy.require(request.user, Screen.SETTINGS, Action.VIEW, request=request)
+    rows = [
+        ("§3.1/1", _("لوحة المؤشرات"), _("لوحة المؤشرات"), _("منفذ")),
+        ("§3.1/2", _("مسار التسجيل والدفع"), _("مسار التسجيل والدفع"), _("إرشادي")),
+        (
+            "§3.2/3-8",
+            _("المشاركون والتسجيل والحالات الخاصة"),
+            _("المشاركون، التسجيلات، النقل، الحالات الخاصة"),
+            _("منفذ/إرشادي"),
+        ),
+        (
+            "§3.3/9-15",
+            _("البرامج والأسعار واعتماد الوزارة"),
+            _("البرامج، القوائم، الدفعات، اعتماد الوزارة"),
+            _("منفذ"),
+        ),
+        (
+            "§3.4/16-22",
+            _("الدفع والإقفال والحركات المالية"),
+            _("الدفعات، الإقفال، الخصومات، الاستردادات، الرسوم، المصروفات"),
+            _("منفذ"),
+        ),
+        (
+            "§3.5/23-29",
+            _("الشركاء والاتفاقيات والاستحقاقات"),
+            _("الشركاء، الاتفاقيات، الاستحقاق، المطالبات، المخالصات، الالتزامات"),
+            _("منفذ/إرشادي"),
+        ),
+        (
+            "§3.6/30-31",
+            _("براءة الذمة والشهادات"),
+            _("براءة الذمة، الشهادات، نماذج الطباعة"),
+            _("منفذ"),
+        ),
+        (
+            "§3.7/32-38",
+            _("التقارير والنظام والتغطية والنطاق المستقبلي"),
+            _("التقارير، المستخدمون، التدقيق، الإعدادات، الترحيل، التغطية، النطاق المستقبلي"),
+            _("منفذ/إرشادي"),
+        ),
+    ]
+    return render(
+        request,
+        "core/coverage.html",
+        {"title": _("مصفوفة تغطية المتطلبات"), "active_screen": "coverage", "rows": rows},
+    )
+
+
+def future_view(request: HttpRequest) -> HttpResponse:
+    """Future-scope page; visible so deferred items are not mistaken for omissions."""
+    policy.require(request.user, Screen.SETTINGS, Action.VIEW, request=request)
+    return render(
+        request,
+        "core/future.html",
+        {"title": _("النطاق المستقبلي"), "active_screen": "future"},
+    )

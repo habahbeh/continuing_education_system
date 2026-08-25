@@ -242,6 +242,7 @@ def test_the_certificate_screen_refuses_an_enrolment_with_no_clearance(
     )
     assert not Certificate.objects.filter(enrollment=settled_enrollment).exists()
 
+
 # ---------------------------------------------------------------------------
 # Sprint 8K — demo parity routes
 # ---------------------------------------------------------------------------
@@ -251,9 +252,9 @@ def test_the_certificate_screen_refuses_an_enrolment_with_no_clearance(
         "operations:enroll-flow",
         "operations:special-cases",
         "settlements:entitlement",
-        "settings",
-        "coverage",
-        "future",
+        "people:settings",
+        "people:coverage",
+        "people:future",
     ],
 )
 def test_sprint_8k_demo_parity_pages_open_for_the_manager(
@@ -265,3 +266,50 @@ def test_sprint_8k_demo_parity_pages_open_for_the_manager(
     response = client.get(reverse(route))
 
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ],
+)
+def test_the_guided_flow_never_offers_a_step_the_reader_may_not_open(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The guide sends a new employee to the screen for each step, and the first
+    version linked all six steps for everyone who could open the page. Four
+    roles can, and none of them may open all six: §3.4/17 keeps the manager,
+    the registrar and the audit account out of cash collection — BR-081 is
+    enforced "on UI and API alike" — and §3.2/4 keeps the finance officer out
+    of the admission form. Following the guide as written therefore ended in a
+    refusal and a DENIED_ATTEMPT row (BR-085) for three roles out of four.
+
+    A step the reader may not VIEW keeps its explanation and loses its link.
+    """
+    from apps.people.constants import Action, Screen
+    from apps.people.permissions.matrix import allowed_actions
+
+    steps = [
+        ("people:participant-new", Screen.STUDENT_NEW),
+        ("operations:enrollments", Screen.ENROLLMENTS),
+        ("cashbox:payment-new", Screen.PAYMENT_NEW),
+        ("operations:transfers", Screen.TRANSFERS),
+        ("operations:clearances", Screen.CLEARANCE),
+        ("operations:certificates", Screen.CERTIFICATES),
+    ]
+    client.force_login(_user(role, f"guide.{role.lower()}"))
+
+    body = client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+
+    for route, screen in steps:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        offered = f'href="{reverse(route)}"' in body
+        assert offered is may_open, (
+            f"{role} {'may' if may_open else 'may NOT'} open {screen}, "
+            f"but the guide {'offers' if offered else 'omits'} the link"
+        )
