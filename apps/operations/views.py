@@ -22,6 +22,7 @@ from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
@@ -1204,32 +1205,220 @@ def _run_transfer_action(request: HttpRequest, action: str, transfer: Any) -> No
 # ---------------------------------------------------------------------------
 def enroll_flow_view(request: HttpRequest) -> HttpResponse:
     """
-    Read-only workflow map: request → registration → payment → certificate.
+    The registration-and-payment guide — WORKFLOWS §1 … §7, read only.
 
-    Four roles may open this page, and no one of them may open every screen it
-    describes: §3.4/17 keeps the manager, the registrar and the audit account
-    out of cash collection (BR-081 is enforced "on UI and API alike"), and
-    §3.2/4 keeps the finance officer out of the admission form. A step whose
-    screen the reader may not VIEW therefore keeps its explanation and loses
-    its link — offering it would send the reader to a refusal and write a
-    DENIED_ATTEMPT row (BR-085) for following the guide as written.
+    This screen executes nothing. It exists so a new employee can see the whole
+    journey, from the admission request to the certificate, and learn which
+    rule stops them at each stage rather than discovering it as a refusal.
+
+    **Nothing here is invented.** Every stage names the rules that actually run
+    underneath it, so the guide cannot drift from the system: BR-013 · BR-018
+    on the enrolment, BR-022 · BR-025 on the money, BR-027 · BR-028 on the
+    closing, BR-060 … BR-066 on transfers, BR-067 … BR-071 on the special
+    cases, BR-073 · BR-074 on the clearance and BR-075 on the certificate.
+
+    **Why the links are filtered.** Four roles may open this page and none may
+    open every screen it describes — §3.4/17 keeps the manager, the registrar
+    and the audit account out of cash collection, and D-01 makes BR-081 an
+    explicit deny for the manager rather than a missing grant. A stage whose
+    screen the reader may not VIEW keeps its whole explanation and loses only
+    its button; offering it would send someone following the guide as written
+    into a refusal and a DENIED_ATTEMPT row (BR-085).
     """
     policy.require(request.user, Screen.ENROLL_FLOW, Action.VIEW, request=request)
-    may = {
-        "student_new": policy.is_allowed(request.user, Screen.STUDENT_NEW, Action.VIEW),
-        "enrollments": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.VIEW),
-        "payment_new": policy.is_allowed(request.user, Screen.PAYMENT_NEW, Action.VIEW),
-        "transfers": policy.is_allowed(request.user, Screen.TRANSFERS, Action.VIEW),
-        "clearance": policy.is_allowed(request.user, Screen.CLEARANCE, Action.VIEW),
-        "certificates": policy.is_allowed(request.user, Screen.CERTIFICATES, Action.VIEW),
-    }
+
+    def _links(*candidates: tuple[str, str, Any]) -> list[dict[str, Any]]:
+        """The subset of a stage's screens this particular reader may open."""
+        return [
+            {"url": reverse(route), "label": label}
+            for screen, route, label in candidates
+            if policy.is_allowed(request.user, screen, Action.VIEW)
+        ]
+
+    stages: list[dict[str, Any]] = [
+        {
+            "number": 1,
+            "title": _("طلب التحاق جديد"),
+            "what": _(
+                "تُدخل بيانات المشارك وفئته ومؤهله، ويولّد النظام رقمه الجامعي: "
+                "السنة (٤) + رمز النوع (١) + التسلسل (٤)."
+            ),
+            "who": _("موظف التسجيل، أو مدير المركز"),
+            "before": _("لا شيء — هنا يبدأ المسار."),
+            "after": _("إنشاء التسجيل على دفعة معتمدة."),
+            "rules": [
+                _(
+                    "الرقم الجامعي دائم ولا يُصحَّح لاحقاً (BR-001)، ولذلك يرفض "
+                    "النظام توليده إذا لم يكن هناك فصل نشط بدل أن يخمّن السنة."
+                ),
+            ],
+            "links": _links(
+                (Screen.STUDENT_NEW, "people:participant-new", _("افتح طلب التحاق جديد")),
+            ),
+        },
+        {
+            "number": 2,
+            "title": _("التسجيل ومتابعته"),
+            "what": _(
+                "يُربط المشارك بدفعة مُشغّلة، وتُحتسب رسومه، ثم يُعتمد التسجيل فيصبح "
+                "نافذاً ويظهر في كشوف الدفعة."
+            ),
+            "who": _("موظف التسجيل يُنشئ ويعدّل، ومدير المركز يعتمد"),
+            "before": _("طلب التحاق مُسجَّل، ودفعة اعتمدتها الوزارة."),
+            "after": _("استيفاء الدفعة في الصندوق."),
+            "rules": [
+                _("لا تسجيل على دفعة لم تعتمدها الوزارة (BR-013 · D-21)."),
+                _(
+                    "لا يُعتمد التسجيل قبل تسجيل الوصل (BR-018) — وهذا قيد في قاعدة "
+                    "البيانات أيضاً، لا رسالة على الشاشة فقط."
+                ),
+            ],
+            "links": _links(
+                (Screen.ENROLLMENTS, "operations:enrollments", _("افتح التسجيلات")),
+            ),
+        },
+        {
+            "number": 3,
+            "title": _("استيفاء دفعة"),
+            "what": _(
+                "يُقبض المبلغ ويوزّعه النظام على بنود الرسوم ويخزّن التوزيع، فيبقى "
+                "مجموع التخصيصات مساوياً لقيمة السند بالفلس."
+            ),
+            "who": _("أمين الصندوق، أو الموظف المالي"),
+            "before": _("تسجيل قائم للمشارك."),
+            "after": _("صدور سند القبض وتسليمه للمشارك."),
+            "rules": [
+                _(
+                    "مدير المركز لا يستوفي دفعة ولا يُنشئ سند قبض (BR-081 · D-01)، "
+                    "وموظف التسجيل لا يقبض نقداً — منعٌ صريح لا نقصٌ في الصلاحية."
+                ),
+                _("التوزيع على البنود مُخزَّن لا محسوباً عند كل قراءة (BR-022)."),
+            ],
+            "links": _links(
+                (Screen.PAYMENT_NEW, "cashbox:payment-new", _("افتح استيفاء دفعة")),
+            ),
+        },
+        {
+            "number": 4,
+            "title": _("الدفعات وسندات القبض"),
+            "what": _("سجل السندات الصادرة: قيمها وتخصيصاتها وحالتها، ومنه يُطلب إلغاء سند ويُعتمد."),
+            "who": _("الصندوق يطلب الإلغاء، والموظف المالي يعتمده"),
+            "before": _("استيفاء دفعة."),
+            "after": _("اعتماد التسجيل (BR-018)، ثم الإقفال اليومي."),
+            "rules": [
+                _(
+                    "لا أحد يعدّل سنداً صادراً (BR-025). الإلغاء يكتب تخصيصات عكسية "
+                    "ويُبقي السند الأصلي برقمه وقيمته — فيُقرأ الأمر كتاريخ، لا كرقم "
+                    "تغيّر وحده."
+                ),
+            ],
+            "links": _links(
+                (Screen.PAYMENTS, "cashbox:payments", _("افتح الدفعات وسندات القبض")),
+            ),
+        },
+        {
+            "number": 5,
+            "title": _("النقل أو الحالة الخاصة"),
+            "optional": True,
+            "what": _(
+                "مسار جانبي يُسلك عند الحاجة وحدها: نقل بين دورتين، أو حالة موثّقة "
+                "مثل التأجيل أو الإحلال أو الفصل."
+            ),
+            "who": _("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده"),
+            "before": _("تسجيل قائم."),
+            "after": _("العودة إلى المسار الطبيعي عند نقطة التوقف."),
+            "rules": [
+                _(
+                    "النقل لا يعدّل قيداً مالياً ولا يحذفه: البنود تُلغى وتُعاد على "
+                    "التسجيل الجديد، والتخصيصات تنتقل كزوج عكسي (BR-060 … BR-066)."
+                ),
+                _(
+                    "لكل حالة خاصة أثر مالي مكتوب بالكلمات لا بالحالة وحدها "
+                    "(BR-067 … BR-071) — الرصيد الدائن يُنشأ هنا ويُردّ عند براءة الذمة."
+                ),
+            ],
+            "links": _links(
+                (Screen.TRANSFERS, "operations:transfers", _("افتح النقل بين الدورات")),
+                (Screen.SPECIAL_CASES, "operations:special-cases", _("افتح الحالات الخاصة")),
+            ),
+        },
+        {
+            "number": 6,
+            "title": _("الإقفال اليومي"),
+            "what": _(
+                "يُعدّ الصندوق نقده في آخر اليوم، ويُقارَن المعدود بالمستحق، ثم يعتمد الإقفال شخصٌ آخر."
+            ),
+            "who": _("أمين الصندوق يُنشئ ويُدخل المعدود، والموظف المالي يعتمد"),
+            "before": _("قبض اليوم."),
+            "after": _("يوم جديد، وأرقام يمكن أن تُبنى عليها التقارير."),
+            "rules": [
+                _(
+                    "قد يُقفل الصندوق بفرق، لكن لا يُقفل بفرق صامت: الفرق يحتاج "
+                    "تسوية مكتوبة (BR-027)."
+                ),
+                _(
+                    "من قبض المال لا يوقّع على عدّه (BR-028) — قيدٌ في قاعدة البيانات "
+                    "يجعل الأمر مستحيلاً على كل المسارات، لا مجرد زر مخفي."
+                ),
+            ],
+            "links": _links(
+                (Screen.CLOSING, "cashbox:closing", _("افتح الإقفال اليومي")),
+            ),
+        },
+        {
+            "number": 7,
+            "title": _("براءة الذمة"),
+            "what": _(
+                "ثلاث خطوات لا يُعاد ترتيبها على النموذج CS Fm 7.18 Rev A: يستردّ "
+                "المركز عهدته، ثم تتحقق المالية من الحساب، ثم يُسلَّم المشارك شهادته."
+            ),
+            "who": _("المركز في الخطوتين الأولى والثالثة، والمالية في الثانية"),
+            "before": _("انتهاء الدراسة وتسوية الحساب."),
+            "after": _("إصدار الشهادة."),
+            "rules": [
+                _(
+                    "الرصيد يجب أن يكون صفراً في الاتجاهين: الرصيد الدائن يوقف "
+                    "البراءة كما يوقفها الدَّين تماماً (BR-073 · C-09)."
+                ),
+                _(
+                    "الخطوة المالية تحتاج توقيعين من شخصين مختلفين — الموظف المالي "
+                    "أولاً ثم المدير المالي (BR-074)."
+                ),
+            ],
+            "links": _links(
+                (Screen.CLEARANCE, "operations:clearances", _("افتح براءة الذمة")),
+            ),
+        },
+        {
+            "number": 8,
+            "title": _("الشهادة"),
+            "what": _(
+                "تُصدر الشهادة برقمها ويُدخَل التقدير، وتبقى إعادة الطباعة نفس "
+                "الشهادة على ورق جديد بالرقم ذاته."
+            ),
+            "who": _("مدير المركز"),
+            "before": _("براءة ذمة مكتملة."),
+            "after": _("نهاية المسار."),
+            "rules": [
+                _("لا شهادة بلا براءة ذمة مكتملة (BR-075)."),
+                _(
+                    "لا وحدة علامات في النظام ولا كيان امتحانات (BR-078): التقدير "
+                    "يُدخله مُصدر الشهادة ويُتحقق من قائمة التقديرات المعتمدة."
+                ),
+            ],
+            "links": _links(
+                (Screen.CERTIFICATES, "operations:certificates", _("افتح الشهادات")),
+            ),
+        },
+    ]
+
     return render(
         request,
         "operations/enroll_flow.html",
         {
             "title": _("مسار التسجيل والدفع"),
             "active_screen": Screen.ENROLL_FLOW,
-            "may": may,
+            "stages": stages,
         },
     )
 

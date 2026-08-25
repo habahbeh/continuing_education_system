@@ -8,19 +8,56 @@
   <div>
     <span class="eyebrow">{% translate "دليل العمل" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "خريطة تشغيلية مختصرة: من طلب الالتحاق حتى براءة الذمة والشهادة. هذه الصفحة إرشادية وتربط بالشاشات الفعلية." %}</p>
+    <p class="sub">{% translate "رحلة المشارك كاملة، من طلب الالتحاق حتى الشهادة: ماذا تفعل كل مرحلة، ومن ينفّذها، وما الذي يسبقها ويليها، وأي قاعدة توقفها." %}</p>
   </div>
 </div>
 
-<div class="card2">
-  <div class="mini-title">{% translate "التسلسل اليومي للموظف" %}</div>
-  <div class="vflow">
-    <div class="vstep done"><div class="dot">1</div><div><div class="vtitle">{% translate "إنشاء طلب التحاق" %}</div><div class="vbox">{% translate "يدخل موظف التسجيل بيانات المشارك والبرنامج والدفعة." %} {% if may.student_new %}<a href="{% url 'people:participant-new' %}">{% translate "افتح طلب التحاق جديد" %}</a>{% endif %}</div></div></div>
-    <div class="vstep done"><div class="dot">2</div><div><div class="vtitle">{% translate "متابعة التسجيل" %}</div><div class="vbox">{% translate "راجع حالة التسجيل، الوصل، والرصيد المتبقي." %} {% if may.enrollments %}<a href="{% url 'operations:enrollments' %}">{% translate "افتح التسجيلات" %}</a>{% endif %}</div></div></div>
-    <div class="vstep done"><div class="dot">3</div><div><div class="vtitle">{% translate "استيفاء الدفعة" %}</div><div class="vbox">{% translate "أمين الصندوق أو الموظف المالي يسجل القبض وفق قواعد الحد الأدنى والتوزيع." %} {% if may.payment_new %}<a href="{% url 'cashbox:payment-new' %}">{% translate "استيفاء دفعة" %}</a>{% endif %}</div></div></div>
-    <div class="vstep done"><div class="dot">4</div><div><div class="vtitle">{% translate "معالجة الحالات أثناء الدراسة" %}</div><div class="vbox">{% translate "النقل والحالات الخاصة لا تُعالج كحركات عشوائية؛ لكل حالة قاعدة وقرار." %} {% if may.transfers %}<a href="{% url 'operations:transfers' %}">{% translate "النقل بين الدورات" %}</a>{% endif %}</div></div></div>
-    <div class="vstep done"><div class="dot">5</div><div><div class="vtitle">{% translate "براءة الذمة" %}</div><div class="vbox">{% translate "لا تُغلق البراءة إلا بعد العهد والتحقق المالي والتوقيعات المطلوبة." %} {% if may.clearance %}<a href="{% url 'operations:clearances' %}">{% translate "براءة الذمة" %}</a>{% endif %}</div></div></div>
-    <div class="vstep done"><div class="dot">6</div><div><div class="vtitle">{% translate "إصدار الشهادة" %}</div><div class="vbox">{% translate "الشهادة محجوبة حتى تكتمل براءة الذمة حسب القاعدة." %} {% if may.certificates %}<a href="{% url 'operations:certificates' %}">{% translate "الشهادات" %}</a>{% endif %}</div></div></div>
+{% comment %}
+  «إرشاد» و«تنفيذ» يجب أن يُقرآ مختلفين. الشرح نصّ، والانتقال إلى الشاشة زرّ —
+  ولا يظهر الزرّ إلا لمن يملك صلاحية فتح تلك الشاشة، فالمرحلة تُشرح للجميع
+  ولا تُعرض إلا لمن يستطيع (Sprint 8K-2).
+{% endcomment %}
+<div class="note info">
+  <div>
+    <strong>{% translate "هذه الصفحة إرشادية." %}</strong>
+    {% translate "لا يُنفَّذ منها شيء — الشرح هنا، والعمل في الشاشة التي يفتحها زرّ المرحلة. لا يظهر زرّ إلا للشاشات التي تسمح لك صلاحيتك بفتحها، فقد تقرأ مرحلة كاملة دون أن ترى زرّها، وهذا مقصود لا نقص." %}
   </div>
 </div>
+
+{% for stage in stages %}
+  <div class="step">
+    <div class="step-head">
+      <span class="step-num" aria-hidden="true">{{ stage.number }}</span>
+      <h2>{{ stage.title }}</h2>
+      {% if stage.optional %}
+        <span class="chip warn">{% translate "عند الحاجة فقط" %}</span>
+      {% endif %}
+    </div>
+    <div class="step-body">
+      <p class="mb-3">{{ stage.what }}</p>
+
+      <dl class="dl">
+        <dt>{% translate "من ينفّذها" %}</dt><dd>{{ stage.who }}</dd>
+        <dt>{% translate "ما يسبقها" %}</dt><dd>{{ stage.before }}</dd>
+        <dt>{% translate "ما يليها" %}</dt><dd>{{ stage.after }}</dd>
+      </dl>
+
+      {% comment %}
+        القواعد هنا مرجع لا إنذار: «.note» بلا لون هي الحياد في نظام التصميم،
+        والأصفر يبقى للحظة التي يُرفض فيها شيء فعلاً على شاشته.
+      {% endcomment %}
+      {% for rule in stage.rules %}
+        <div class="note"><div>{{ rule }}</div></div>
+      {% endfor %}
+
+      {% if stage.links %}
+        <div class="form-acts">
+          {% for link in stage.links %}
+            <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
 {% endblock %}
