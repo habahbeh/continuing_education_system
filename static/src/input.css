@@ -304,6 +304,37 @@
   /* عنوان قسم فوق كتلة لا تملك ترويسة بطاقة — بمظهر `eyebrow` نفسه. */
   .sec-title    { @apply block text-2xs font-bold text-ink-3 mb-2; letter-spacing: .04em; }
 
+  /* --- لوحة المؤشرات: البطاقة والشريط -----------------------------------
+   * أصناف جديدة لا تعديل على قائم: `.kpi` و`.card2` كما هما على كل الشاشات
+   * الأخرى، والإضافة هنا تُطلب بالاسم على هذه الشاشة وحدها (قاعدة ١٠).
+   *
+   * الحاشية العلوية لهجة واحدة لا قوس ألوان: العدّاد الرئيسي يأخذ لون الهوية
+   * وما سواه يأخذ لون الخط. مؤسسة تعليمية لا نظام مبيعات.
+   */
+  .kpi.tile     { @apply relative overflow-hidden; box-shadow: 0 1px 2px rgb(15 22 32 / .05); }
+  .kpi.tile::before {
+    content: ""; position: absolute; inset-inline: 0; top: 0; height: 3px;
+    background: theme(colors.line.DEFAULT);
+  }
+  .kpi.tile.is-lead::before { background: theme(colors.brand.700); }
+
+  /*
+   * شريط مقسّم إلى خانات: الخانة الممتلئة صنف، لا عرضٌ محسوب. لذلك لا نمط
+   * سطري ولا جافاسكربت ولا مكتبة رسم — ويتحوّل إلى شريط فارغ عند غياب
+   * البيانات بدل أن ينكسر.
+   */
+  .bar          { @apply flex gap-px w-full mt-1.5; }
+  .bar span     { @apply block h-1.5 flex-1 bg-line-2; }
+  .bar span:first-child { border-start-start-radius: 3px; border-end-start-radius: 3px; }
+  .bar span:last-child  { border-start-end-radius: 3px; border-end-end-radius: 3px; }
+  .bar span.on  { @apply bg-brand-600; }
+  /* الطوابير ترتيبٌ نسبي لا إنذار، فتأخذ الحياد لا لون الهوية. */
+  .bar.calm span.on { @apply bg-ink-3; }
+
+  .chart-row    { @apply py-2 border-b border-line-2; }
+  .chart-row:last-child { @apply border-b-0; }
+  .chart-row .top { @apply flex flex-wrap items-baseline justify-between gap-x-2 text-sm; }
+
   /* --- قوائم التفاصيل -------------------------------------------------- */
   .dl           { @apply grid gap-x-4 gap-y-0 text-sm; grid-template-columns: max-content 1fr; }
   .dl dt        { @apply text-xs text-ink-3 font-bold py-2 border-b border-line-2; }

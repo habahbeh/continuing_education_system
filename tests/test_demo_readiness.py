@@ -1219,7 +1219,7 @@ def test_the_dashboard_layout_classes_survived_the_css_build() -> None:
 
     built = Path("static/css/app.css").read_text(encoding="utf-8")
 
-    for name in ("dash-cols", "dash-main", "dash-side", "sec-title"):
+    for name in ("dash-cols", "dash-main", "dash-side", "sec-title", "bar", "chart-row"):
         assert f".{name}" in built, f"«{name}» is not in the built stylesheet — rebuild CSS"
 
 
@@ -1234,3 +1234,109 @@ def test_the_dashboard_uses_no_class_this_project_never_defined() -> None:
         assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
         assert dead not in source, f"dashboard.html uses the demo-only class «{dead}»"
     assert "style=" not in source, "inline styles were removed in 8J-5 and do not come back"
+
+
+# ---------------------------------------------------------------------------
+# The dashboard's bars — page polish phase
+# ---------------------------------------------------------------------------
+def test_the_dashboard_bar_never_overflows_or_divides_by_zero() -> None:
+    """
+    A bar is N cells with the first K filled, and K is integer arithmetic all
+    the way down — A-01b keeps ``float()`` out of application code and a bar has
+    no business being where it creeps back in.
+
+    Three edges matter: a scale of zero must not raise, a value above its scale
+    must clamp instead of spilling, and one-in-forty must still light a cell
+    rather than rounding away to an empty strip beside a full one.
+    """
+    from apps.operations.views import DASHBOARD_BAR_SEGMENTS as N
+    from apps.operations.views import _bar
+
+    assert _bar(0, 0) == [False] * N
+    assert _bar(5, 0) == [False] * N
+    assert _bar(0, 10) == [False] * N
+    assert sum(_bar(1, 40)) == 1
+    assert sum(_bar(40, 40)) == N
+    assert sum(_bar(41, 40)) == N, "a bar spilled past its own width"
+    assert sum(_bar(20, 40)) == N // 2
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_distribution_chart_appears_only_for_readers_of_the_enrolments_screen(
+    client: Client, seeded_settings: None, settled_enrollment: Any, role: str
+) -> None:
+    """
+    The chart is a grouping of the enrolment rows, so it carries exactly the
+    permission those rows do. A role that may not open «التسجيلات» may not read
+    their shape either — a distribution is still the data, counted.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_read = Action.VIEW in allowed_actions(role, "enrollments")
+    client.force_login(_user(role, f"dash.chart.{role.lower()}"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    assert ("توزيع التسجيلات حسب الحالة" in body) is may_read
+
+
+def test_the_distribution_chart_counts_the_same_enrolments_the_counter_does(
+    client: Client, seeded_settings: None, settled_enrollment: Any
+) -> None:
+    """
+    No invented numbers: the chart groups the rows the view already fetched, so
+    its bars must add up to the «التسجيلات» counter beside them. If the two ever
+    disagree, one of them is making something up — and this says which.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "dash.chart.total"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    counter = re.search(
+        r'<div class="label">التسجيلات</div>\s*<div class="value num">(\d+)</div>', body
+    )
+    assert counter, "the enrolments counter is not on the page to compare against"
+
+    chart = body.split("توزيع التسجيلات حسب الحالة", 1)[1].split("ما ينتظر قراراً", 1)[0]
+    bars = [int(v) for v in re.findall(r'<span class="num">(\d+)</span>', chart)]
+
+    assert bars, "the chart drew no rows"
+    assert sum(bars) == int(counter.group(1))
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_dashboard_draws_no_chart_when_there_is_nothing_to_chart(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Settings seeded and nothing else. A chart of nothing is not a chart, so the
+    card is absent rather than present and empty — the counters already say
+    zero, and three empty boxes are a worse answer than one.
+    """
+    client.force_login(_user(role, f"dash.nochart.{role.lower()}"))
+
+    response = client.get(reverse("operations:dashboard"))
+    body = response.content.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "توزيع التسجيلات حسب الحالة" not in body
+    assert 'class="bar' not in body
+
+
+def test_the_dashboard_charts_need_no_script_and_no_inline_style() -> None:
+    """
+    The bar is cells with a class, not a width. That is the whole reason there
+    is no charting library here, no CDN, and nothing for A-07 to catch — and
+    why the fill survives a printer, which computed widths often do not.
+    """
+    from pathlib import Path
+
+    source = Path("templates/operations/dashboard.html").read_text(encoding="utf-8")
+
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+    # The fill is expressed as a class the stylesheet owns.
+    assert 'class="bar' in source
+    assert 'class="{% if on %}on{% endif %}"' in source

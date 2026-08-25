@@ -14,6 +14,7 @@ paraphrase would drop the reference the centre needs in order to act.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 from typing import Any
 
@@ -74,6 +75,28 @@ def _message_of(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 # Dashboard — the landing page after sign-in
 # ---------------------------------------------------------------------------
+#: Segments in a dashboard bar. A bar is drawn as N cells with the first K
+#: filled, which is why nothing here needs an inline width, a script or a
+#: charting library — and why it degrades to an empty strip rather than to a
+#: broken graphic when there is nothing to show.
+DASHBOARD_BAR_SEGMENTS = 12
+
+
+def _bar(value: int, scale: int) -> list[bool]:
+    """
+    ``value`` out of ``scale``, as filled/empty cells.
+
+    Integer arithmetic throughout: A-01b keeps ``float()`` out of application
+    code, and a bar has no business being the one place it creeps back in.
+    Anything above zero lights at least one cell, so a queue of one is visible
+    beside a queue of forty rather than rounding away to nothing.
+    """
+    if value <= 0 or scale <= 0:
+        return [False] * DASHBOARD_BAR_SEGMENTS
+    filled = min(DASHBOARD_BAR_SEGMENTS, (value * DASHBOARD_BAR_SEGMENTS + scale - 1) // scale)
+    return [i < filled for i in range(DASHBOARD_BAR_SEGMENTS)]
+
+
 def dashboard_view(request: HttpRequest) -> HttpResponse:
     """
     Counters and nothing more.
@@ -104,6 +127,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     today = timezone.localdate()
     kpis: list[dict[str, Any]] = []
     waiting: list[dict[str, Any]] = []
+    distribution: list[dict[str, Any]] = []
 
     def _kpi(label: Any, value: int, foot: Any, route: str, *, lead: bool = False) -> None:
         kpis.append(
@@ -131,6 +155,14 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             _("لا يُعتمد التسجيل قبل تسجيل الوصل (BR-018)"),
             "operations:enrollments",
         )
+        # A grouping of rows already fetched — not a query, not a calculation,
+        # and not a report. Every enrolment is counted once under the status
+        # the service already resolved for it.
+        tally = Counter(str(r["status_display"]) for r in rows)
+        distribution = [
+            {"label": label, "value": count, "bar": _bar(count, len(rows))}
+            for label, count in tally.most_common()
+        ]
 
     if _may(Screen.COHORTS):
         cohorts = cohort_service.list_cohorts(actor=actor, request=request)
@@ -193,6 +225,12 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             "settlements:claims",
         )
 
+    # Each queue against the longest one, so "which of these is the big one"
+    # is answered by looking rather than by reading every number.
+    longest = max((row["value"] for row in waiting), default=0)
+    for row in waiting:
+        row["bar"] = _bar(row["value"], longest)
+
     # The two or three things this reader is most likely to have come to do.
     # ``ENROLL_FLOW`` is absent on purpose: the guided-help block above already
     # offers it, and offering it twice on one screen is noise, not emphasis.
@@ -216,6 +254,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             "kpis": kpis[:4],
             "waiting": waiting,
             "actions": actions,
+            "distribution": distribution,
         },
     )
 

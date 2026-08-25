@@ -12,10 +12,11 @@
   الترتيب ترتيب ما يفعله القارئ لا ترتيب ما لدينا من بيانات:
   1. «ابدأ من هنا» — الأفعال التي جاء ليقوم بها، بالصلاحية.
   2. «حالة العمل الآن» — العدّادات، وأولها واحد بارز لا أربعة متساوية.
-  3. «ما ينتظر قراراً» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
+  3. «توزيع التسجيلات» — تجميع لصفوف بيد العرض أصلاً، لا استعلام جديد.
+  4. «ما ينتظر قراراً» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
 
-  ٢ و٣ عمودان متجاوران من `lg` فصاعداً: الطابور بضعة أسطر قصيرة، وامتداده على
-  عرض الشاشة كاملاً كان يترك فراغاً لا يقرؤه أحد. دون `lg` يعودان عموداً واحداً.
+  الأشرطة خانات لا أعرض محسوبة: الخانة الممتلئة صنف. فلا نمط سطري ولا سكربت
+  ولا مكتبة رسم، ولا شيء ينكسر حين لا تكون هناك بيانات.
 {% endcomment %}
 
 {% block content %}
@@ -48,12 +49,31 @@
         <h2 class="sec-title">{% translate "حالة العمل الآن" %}</h2>
         <div class="kpi-grid">
           {% for kpi in kpis %}
-            <a class="kpi {% if kpi.lead %}primary{% endif %}" href="{{ kpi.url }}">
+            <a class="kpi tile {% if kpi.lead %}primary is-lead{% endif %}" href="{{ kpi.url }}">
               <div class="label">{{ kpi.label }}</div>
               <div class="value num">{{ kpi.value }}</div>
               <div class="foot">{{ kpi.foot }}</div>
             </a>
           {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if distribution %}
+        <h2 class="sec-title">{% translate "توزيع التسجيلات حسب الحالة" %}</h2>
+        <div class="card2">
+          <div class="card2-body">
+            {% for row in distribution %}
+              <div class="chart-row">
+                <div class="top">
+                  <span>{{ row.label }}</span>
+                  <span class="num">{{ row.value }}</span>
+                </div>
+                <div class="bar" aria-hidden="true">
+                  {% for on in row.bar %}<span class="{% if on %}on{% endif %}"></span>{% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
         </div>
       {% endif %}
     </div>
@@ -64,12 +84,15 @@
         {% if waiting %}
           <div class="card2-body">
             {% for row in waiting %}
-              <div class="calc-row">
-                <span>
+              <div class="chart-row">
+                <div class="top">
                   <a href="{{ row.url }}">{{ row.label }}</a>
-                  <span class="hint">{{ row.foot }}</span>
-                </span>
-                <span class="chip">{{ row.value }}</span>
+                  <span class="chip">{{ row.value }}</span>
+                </div>
+                <div class="bar calm" aria-hidden="true">
+                  {% for on in row.bar %}<span class="{% if on %}on{% endif %}"></span>{% endfor %}
+                </div>
+                <div class="hint">{{ row.foot }}</div>
               </div>
             {% endfor %}
           </div>
