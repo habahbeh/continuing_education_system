@@ -9,14 +9,16 @@
   لا من اسم الدور، فأمين الصندوق يحصل على شاشة صندوق وموظف التسجيل على شاشة
   تسجيل دون أن يسأل هذا القالب من هو أحدهما.
 
-  الترتيب ترتيب ما يفعله القارئ لا ترتيب ما لدينا من بيانات:
-  1. «ابدأ من هنا» — الأفعال التي جاء ليقوم بها، بالصلاحية.
-  2. «حالة العمل الآن» — العدّادات، وأولها واحد بارز لا أربعة متساوية.
-  3. «توزيع التسجيلات» — تجميع لصفوف بيد العرض أصلاً، لا استعلام جديد.
-  4. «ما ينتظر قراراً» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
+  الترتيب ترتيب ما يفعله القارئ:
+  1. النطاق — ما الذي تغطّيه صلاحياته، مرة واحدة في الأعلى.
+  2. «ابدأ من هنا» — الأفعال، بطاقاتٍ لا صفَّ أزرار مسطّح.
+  3. «مسار العمل» — ستّ محطات. خريطة لا مؤشّر تقدّم، ولا تعتمد على حجم
+     البيانات: مركزٌ فيه أربعة تسجيلات له مسارٌ كامل كمركزٍ فيه أربعمئة.
+  4. «حالة المركز اليوم» — العدّادات، وأولها واحد بارز لا أربعة متساوية.
+  5. «ما يحتاج متابعة» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
 
-  الأشرطة خانات لا أعرض محسوبة: الخانة الممتلئة صنف. فلا نمط سطري ولا سكربت
-  ولا مكتبة رسم، ولا شيء ينكسر حين لا تكون هناك بيانات.
+  الأشرطة خانات لا أعرض محسوبة، فلا نمط سطري ولا سكربت ولا مكتبة رسم. وهي
+  تُحجب حين لا يكون هناك ما يُقارَن به: صنف واحد بنسبة ١٠٠٪ ليس توزيعاً.
 {% endcomment %}
 
 {% block content %}
@@ -24,7 +26,12 @@
   <div>
     <span class="eyebrow">{% translate "الرئيسية" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "عدّادات تشغيلية لحالة العمل الآن — ليست تقريراً مالياً." %}</p>
+    {% if scope %}
+      <p class="sub">
+        {% translate "صلاحياتك تغطّي" %}:
+        {% for area in scope %}{{ area }}{% if not forloop.last %} · {% endif %}{% endfor %}
+      </p>
+    {% endif %}
   </div>
   <div class="acts">
     <span class="chip"><span class="num">{{ today }}</span></span>
@@ -34,25 +41,39 @@
 {% guided_help "dashboard" %}
 
 {% if actions %}
-  <div class="action-bar">
-    <span class="hint">{% translate "ابدأ من هنا" %}</span>
+  <h2 class="sec-title">{% translate "ابدأ من هنا" %}</h2>
+  <div class="act-grid">
     {% for action in actions %}
-      <a class="btn2 {% if forloop.first %}primary{% endif %}" href="{{ action.url }}">{{ action.label }}</a>
+      <a class="act-card {% if forloop.first %}lead{% endif %}" href="{{ action.url }}">
+        <span class="t">{{ action.label }}</span>
+        <span class="d">{{ action.hint }}</span>
+      </a>
     {% endfor %}
   </div>
 {% endif %}
+
+<h2 class="sec-title">{% translate "مسار العمل — من الطلب حتى الشهادة" %}</h2>
+<ol class="flow">
+  {% for step in flow %}
+    <li class="{% if step.url %}on{% else %}off{% endif %}">
+      <span class="n">{{ forloop.counter }}</span>
+      {% if step.url %}<a href="{{ step.url }}">{{ step.label }}</a>{% else %}<span>{{ step.label }}</span>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
+<p class="hint">{% translate "خريطة إرشادية لتسلسل العمل، لا حالة مشارك بعينه. المحطة التي لا تفتحها صلاحيتك تبقى معروضة بلا رابط." %}</p>
 
 {% if kpis or waiting %}
   <div class="dash-cols">
     <div class="dash-main">
       {% if kpis %}
-        <h2 class="sec-title">{% translate "حالة العمل الآن" %}</h2>
+        <h2 class="sec-title">{% translate "حالة المركز اليوم" %}</h2>
         <div class="kpi-grid">
           {% for kpi in kpis %}
             <a class="kpi tile {% if kpi.lead %}primary is-lead{% endif %}" href="{{ kpi.url }}">
               <div class="label">{{ kpi.label }}</div>
               <div class="value num">{{ kpi.value }}</div>
-              <div class="foot">{{ kpi.foot }}</div>
+              <div class="foot">{% if kpi.value %}{{ kpi.foot }}{% else %}{% translate "لا يوجد حالياً" %}{% endif %}</div>
             </a>
           {% endfor %}
         </div>
@@ -79,7 +100,7 @@
     </div>
 
     <div class="dash-side">
-      <h2 class="sec-title">{% translate "ما ينتظر قراراً" %}</h2>
+      <h2 class="sec-title">{% translate "ما يحتاج متابعة" %}</h2>
       <div class="card2">
         {% if waiting %}
           <div class="card2-body">
@@ -89,9 +110,11 @@
                   <a href="{{ row.url }}">{{ row.label }}</a>
                   <span class="chip">{{ row.value }}</span>
                 </div>
-                <div class="bar calm" aria-hidden="true">
-                  {% for on in row.bar %}<span class="{% if on %}on{% endif %}"></span>{% endfor %}
-                </div>
+                {% if row.bar %}
+                  <div class="bar calm" aria-hidden="true">
+                    {% for on in row.bar %}<span class="{% if on %}on{% endif %}"></span>{% endfor %}
+                  </div>
+                {% endif %}
                 <div class="hint">{{ row.foot }}</div>
               </div>
             {% endfor %}
@@ -100,7 +123,7 @@
           <div class="empty">
             <span class="empty-title">{% translate "لا شيء ينتظر قراراً" %}</span>
             <span class="empty-body">
-              {% translate "لا طابور مفتوح ضمن شاشاتك: لا وصولات ناقصة، ولا طلبات معلّقة، ولا إقفال بانتظار اعتماد. الطوابير تظهر هنا وحدها متى امتلأت." %}
+              {% translate "لا وصولات ناقصة، ولا طلبات معلّقة، ولا إقفال بانتظار اعتماد ضمن شاشاتك. هذه حالة تشغيلية سليمة، لا صفحة فارغة." %}
             </span>
           </div>
         {% endif %}
@@ -114,7 +137,7 @@
     <div class="empty">
       <span class="empty-title">{% translate "لا عدّادات ضمن صلاحيات دورك" %}</span>
       <span class="empty-body">
-        {% translate "هذه اللوحة تعدّ صفوفاً في شاشات لا يفتحها دورك، فلا رقم هنا يخصّك. اختر من القائمة الجانبية الشاشة التي تعمل عليها." %}
+        {% translate "هذه اللوحة تعدّ صفوفاً في شاشات لا يفتحها دورك، فلا رقم هنا يخصّك. مسار العمل أعلاه يبقى مرجعاً، واختر من القائمة الجانبية الشاشة التي تعمل عليها." %}
       </span>
     </div>
   </div>

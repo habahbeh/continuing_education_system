@@ -159,10 +159,13 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         # and not a report. Every enrolment is counted once under the status
         # the service already resolved for it.
         tally = Counter(str(r["status_display"]) for r in rows)
-        distribution = [
-            {"label": label, "value": count, "bar": _bar(count, len(rows))}
-            for label, count in tally.most_common()
-        ]
+        # One category at 100% is not a distribution, it is a restatement of
+        # the counter above it. The chart earns its place from two upward.
+        if len(tally) > 1:
+            distribution = [
+                {"label": label, "value": count, "bar": _bar(count, len(rows))}
+                for label, count in tally.most_common()
+            ]
 
     if _may(Screen.COHORTS):
         cohorts = cohort_service.list_cohorts(actor=actor, request=request)
@@ -226,20 +229,73 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         )
 
     # Each queue against the longest one, so "which of these is the big one"
-    # is answered by looking rather than by reading every number.
-    longest = max((row["value"] for row in waiting), default=0)
-    for row in waiting:
-        row["bar"] = _bar(row["value"], longest)
+    # is answered by looking rather than by reading every number. A lone queue
+    # has nothing to be longer than, so it keeps its number and drops its bar.
+    if len(waiting) > 1:
+        longest = max(row["value"] for row in waiting)
+        for row in waiting:
+            row["bar"] = _bar(row["value"], longest)
+
+    # WORKFLOWS §1 … §7 in six stops. It is a map, not a progress bar: no step
+    # is ever marked done, because the page has no participant in mind. It is
+    # here because a centre with four enrolments still has a whole process, and
+    # a dashboard that shows only volume has nothing to say on a quiet morning.
+    #
+    # A stop the reader may not open keeps its place and loses its link — the
+    # rule the guided help follows, for the same reason: the shape of the work
+    # belongs to everyone, the screens do not.
+    flow = [
+        {"label": label, "url": reverse(route) if _may(screen) else ""}
+        for screen, route, label in (
+            (Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق")),
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيل")),
+            (Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة")),
+            (Screen.CLOSING, "cashbox:closing", _("الإقفال اليومي")),
+            (Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
+            (Screen.CERTIFICATES, "operations:certificates", _("الشهادة")),
+        )
+    ]
+
+    # What this reader's permissions actually cover, said once at the top.
+    # Derived from the matrix, never from the role name — so it cannot drift
+    # from what the sidebar and the screens themselves allow.
+    scope = [
+        label
+        for label, screens in (
+            (_("التسجيل"), (Screen.STUDENTS, Screen.ENROLLMENTS)),
+            (_("البرامج والدفعات"), (Screen.PROGRAMS, Screen.COHORTS)),
+            (_("الصندوق"), (Screen.PAYMENTS, Screen.CLOSING)),
+            (_("الشركاء"), (Screen.PARTNERS, Screen.CLAIMS)),
+            (_("الإنهاء والشهادات"), (Screen.CLEARANCE, Screen.CERTIFICATES)),
+            (_("التقارير"), (Screen.REPORTS,)),
+        )
+        if any(_may(screen) for screen in screens)
+    ]
 
     # The two or three things this reader is most likely to have come to do.
     # ``ENROLL_FLOW`` is absent on purpose: the guided-help block above already
     # offers it, and offering it twice on one screen is noise, not emphasis.
     actions = [
-        {"url": reverse(route), "label": label}
-        for screen, route, label in (
-            (Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق جديد")),
-            (Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة")),
-            (Screen.TRANSFER_NEW, "operations:transfer-new", _("طلب نقل جديد")),
+        {"url": reverse(route), "label": label, "hint": hint}
+        for screen, route, label, hint in (
+            (
+                Screen.STUDENT_NEW,
+                "people:participant-new",
+                _("طلب التحاق جديد"),
+                _("بيانات المشارك وفئته، ويُولَّد رقمه الجامعي"),
+            ),
+            (
+                Screen.PAYMENT_NEW,
+                "cashbox:payment-new",
+                _("استيفاء دفعة"),
+                _("قبض وتوزيع على البنود، ثم سند قبض"),
+            ),
+            (
+                Screen.TRANSFER_NEW,
+                "operations:transfer-new",
+                _("طلب نقل جديد"),
+                _("فحص الشروط وفرق الرسوم قبل التقديم"),
+            ),
         )
         if _may(screen)
     ]
@@ -255,6 +311,8 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             "waiting": waiting,
             "actions": actions,
             "distribution": distribution,
+            "flow": flow,
+            "scope": scope,
         },
     )
 

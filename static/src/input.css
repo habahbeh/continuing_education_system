@@ -335,6 +335,36 @@
   .chart-row:last-child { @apply border-b-0; }
   .chart-row .top { @apply flex flex-wrap items-baseline justify-between gap-x-2 text-sm; }
 
+  /* --- لوحة المؤشرات: منطقة البدء ---------------------------------------
+   * صفّ أزرار مسطّح لا يقول أي فعل هو الأهم. بطاقة تحمل عنواناً وسطر شرح
+   * تقول ذلك، وتملأ العرض بما هو نافع لا بما هو حشو.
+   */
+  .act-grid     { @apply grid gap-3 mb-4 sm:grid-cols-2 lg:grid-cols-3; }
+  .act-card     { @apply block rounded-xl border border-line bg-white p-4 transition-colors duration-150;
+                  box-shadow: 0 1px 2px rgb(15 22 32 / .05); }
+  .act-card:hover { @apply border-brand-300; }
+  .act-card .t  { @apply block text-sm font-extrabold text-ink; }
+  .act-card .d  { @apply block mt-1 text-xs text-ink-3; text-wrap: pretty; }
+  .act-card.lead { @apply bg-brand-100 border-brand-200; }
+  .act-card.lead .t { @apply text-brand-800; }
+  .act-card.lead .d { @apply text-brand-800/80; }
+
+  /* --- لوحة المؤشرات: شريط مسار العمل ------------------------------------
+   * خريطة لا مؤشّر تقدّم: لا خطوة تُعلَّم «منجزة» لأن الصفحة لا تعرف مشاركاً
+   * بعينه. ترقيمها يقرأ التسلسل، فلا حاجة إلى أسهم تنقلب مع اتجاه الكتابة.
+   * `flex-1` مع حدّ أدنى للعرض: ستّ محطات في صفّ على المكتبي، وتلتفّ وحدها
+   * إلى صفّين أو ثلاثة دون استعلام وسائط.
+   */
+  .flow         { @apply flex flex-wrap gap-2 m-0 p-0; list-style: none; }
+  .flow li      { @apply flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm;
+                  flex: 1 1 9rem; }
+  .flow .n      { @apply inline-flex items-center justify-center w-5 h-5 shrink-0 rounded-full
+                  bg-surface-2 text-2xs font-bold text-ink-3; font-variant-numeric: tabular-nums; }
+  .flow li.on   { @apply border-brand-200; }
+  .flow li.on .n { @apply bg-brand-100 text-brand-800; }
+  /* محطة خارج صلاحية القارئ: تبقى مكانها وتفقد رابطها وحده. */
+  .flow li.off  { @apply text-ink-3 bg-surface-2; }
+
   /* --- قوائم التفاصيل -------------------------------------------------- */
   .dl           { @apply grid gap-x-4 gap-y-0 text-sm; grid-template-columns: max-content 1fr; }
   .dl dt        { @apply text-xs text-ink-3 font-bold py-2 border-b border-line-2; }

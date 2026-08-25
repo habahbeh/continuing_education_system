@@ -1204,9 +1204,17 @@ def test_the_dashboard_keeps_its_responsive_scaffolding() -> None:
     # Four counters squeezed into two-thirds of the width are unreadable.
     assert "xl:grid-cols-2" in rule(".dash-main .kpi-grid")
 
-    # …and the wrapping bar, so buttons stack instead of overflowing.
-    assert 'class="action-bar"' in source
-    assert "flex-wrap" in rule(".action-bar")
+    # The action zone is a card grid now, and it collapses the same way:
+    # one column on a phone, two on a tablet, three on a desktop.
+    assert 'class="act-grid"' in source
+    assert "sm:grid-cols-2" in rule(".act-grid")
+    assert "lg:grid-cols-3" in rule(".act-grid")
+
+    # The workflow strip wraps rather than scrolling sideways, and each stop
+    # keeps a floor width so six of them never shred into slivers.
+    assert 'class="flow"' in source
+    assert "flex-wrap" in rule(".flow")
+    assert "9rem" in rule(".flow li")
 
 
 def test_the_dashboard_layout_classes_survived_the_css_build() -> None:
@@ -1219,7 +1227,17 @@ def test_the_dashboard_layout_classes_survived_the_css_build() -> None:
 
     built = Path("static/css/app.css").read_text(encoding="utf-8")
 
-    for name in ("dash-cols", "dash-main", "dash-side", "sec-title", "bar", "chart-row"):
+    for name in (
+        "dash-cols",
+        "dash-main",
+        "dash-side",
+        "sec-title",
+        "bar",
+        "chart-row",
+        "act-grid",
+        "act-card",
+        "flow",
+    ):
         assert f".{name}" in built, f"«{name}» is not in the built stylesheet — rebuild CSS"
 
 
@@ -1239,6 +1257,39 @@ def test_the_dashboard_uses_no_class_this_project_never_defined() -> None:
 # ---------------------------------------------------------------------------
 # The dashboard's bars — page polish phase
 # ---------------------------------------------------------------------------
+@pytest.fixture
+def mixed_enrollments(settled_enrollment: Any) -> Any:
+    """
+    Two enrolments in two different states.
+
+    One is not enough any more: a distribution of a single category is a
+    restatement of the counter beside it, so the view suppresses it. A chart
+    needs something to compare against before it can be tested.
+    """
+    from apps.operations.models import Cohort, Enrollment
+
+    # Q-19 — one enrolment per participant per cohort, so the second one needs
+    # a cohort of its own rather than a second seat in the first.
+    second = Cohort.objects.create(
+        code="CO-DEMO-2",
+        program=settled_enrollment.cohort.program,
+        semester=settled_enrollment.cohort.semester,
+        name_ar="دفعة العرض الثانية",
+        starts_on=settled_enrollment.cohort.starts_on,
+        ends_on=settled_enrollment.cohort.ends_on,
+        capacity=25,
+    )
+    Enrollment.objects.create(
+        code="EN-DEMO-2",
+        participant=settled_enrollment.participant,
+        cohort=second,
+        enrolled_on=settled_enrollment.enrolled_on,
+        price_list=settled_enrollment.price_list,
+        status="ACTIVE",
+    )
+    return settled_enrollment
+
+
 def test_the_dashboard_bar_never_overflows_or_divides_by_zero() -> None:
     """
     A bar is N cells with the first K filled, and K is integer arithmetic all
@@ -1263,7 +1314,7 @@ def test_the_dashboard_bar_never_overflows_or_divides_by_zero() -> None:
 
 @pytest.mark.parametrize("role", ALL_ROLES)
 def test_the_distribution_chart_appears_only_for_readers_of_the_enrolments_screen(
-    client: Client, seeded_settings: None, settled_enrollment: Any, role: str
+    client: Client, seeded_settings: None, mixed_enrollments: Any, role: str
 ) -> None:
     """
     The chart is a grouping of the enrolment rows, so it carries exactly the
@@ -1282,7 +1333,7 @@ def test_the_distribution_chart_appears_only_for_readers_of_the_enrolments_scree
 
 
 def test_the_distribution_chart_counts_the_same_enrolments_the_counter_does(
-    client: Client, seeded_settings: None, settled_enrollment: Any
+    client: Client, seeded_settings: None, mixed_enrollments: Any
 ) -> None:
     """
     No invented numbers: the chart groups the rows the view already fetched, so
@@ -1298,7 +1349,7 @@ def test_the_distribution_chart_counts_the_same_enrolments_the_counter_does(
     )
     assert counter, "the enrolments counter is not on the page to compare against"
 
-    chart = body.split("توزيع التسجيلات حسب الحالة", 1)[1].split("ما ينتظر قراراً", 1)[0]
+    chart = body.split("توزيع التسجيلات حسب الحالة", 1)[1].split("ما يحتاج متابعة", 1)[0]
     bars = [int(v) for v in re.findall(r'<span class="num">(\d+)</span>', chart)]
 
     assert bars, "the chart drew no rows"
@@ -1340,3 +1391,166 @@ def test_the_dashboard_charts_need_no_script_and_no_inline_style() -> None:
     # The fill is expressed as a class the stylesheet owns.
     assert 'class="bar' in source
     assert 'class="{% if on %}on{% endif %}"' in source
+
+
+# ---------------------------------------------------------------------------
+# The command-center sections — page polish phase
+# ---------------------------------------------------------------------------
+#: The six stops of the workflow strip, and the screen each one opens.
+DASHBOARD_FLOW = [
+    ("طلب التحاق", "people:participant-new", "student-new"),
+    ("التسجيل", "operations:enrollments", "enrollments"),
+    ("استيفاء دفعة", "cashbox:payment-new", "payment-new"),
+    ("الإقفال اليومي", "cashbox:closing", "closing"),
+    ("براءة الذمة", "operations:clearances", "clearance"),
+    ("الشهادة", "operations:certificates", "certificates"),
+]
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_workflow_strip_shows_every_stop_to_everyone(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The strip is the reason this page is worth opening on a quiet morning: a
+    centre with four enrolments has the same process as one with four hundred,
+    and the map does not shrink with the numbers.
+
+    So every stop is named for every reader — the shape of the work is not a
+    privilege. Only the links are filtered.
+    """
+    client.force_login(_user(role, f"dash.flow.{role.lower()}"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    for label, _route, _screen in DASHBOARD_FLOW:
+        assert label in body, f"{role} is not shown the «{label}» stop"
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_workflow_strip_links_only_the_stops_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    A stop the reader may not open keeps its place and loses its link. The
+    manager's «استيفاء دفعة» is the case that proves it: D-01 makes BR-081 an
+    explicit deny, so the map still shows the centre takes money — it just
+    does not hand the manager a door into the till.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"dash.flowlink.{role.lower()}"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+    strip = body.split('<ol class="flow">', 1)[1].split("</ol>", 1)[0]
+
+    for label, route, screen in DASHBOARD_FLOW:
+        may = Action.VIEW in allowed_actions(role, screen)
+        linked = f'<a href="{reverse(route)}">{label}</a>' in strip
+        assert linked is may, (
+            f"{role} {'may' if may else 'may NOT'} open {screen}, "
+            f"but «{label}» is {'linked' if linked else 'unlinked'}"
+        )
+
+
+def test_the_manager_sees_the_till_stop_named_but_not_linked(
+    client: Client, seeded_settings: None
+) -> None:
+    """BR-081 · D-01, spelled out on the strip as well as on the buttons."""
+    client.force_login(_user(Role.CENTER_MANAGER, "dash.flow.mgr"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+    strip = body.split('<ol class="flow">', 1)[1].split("</ol>", 1)[0]
+
+    assert "استيفاء دفعة" in strip
+    assert f'<a href="{reverse("cashbox:payment-new")}">' not in strip
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_dashboard_says_what_this_reader_may_reach(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    One line at the top naming the reader's own territory, read off the matrix
+    rather than off the role name — so it cannot claim more than the sidebar
+    will actually open, whatever the permissions become later.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"dash.scope.{role.lower()}"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+    header = body.split('<p class="sub">', 1)[-1].split("</p>", 1)[0]
+
+    may_cash = Action.VIEW in allowed_actions(role, "payments") or (
+        Action.VIEW in allowed_actions(role, "closing")
+    )
+    may_partners = Action.VIEW in allowed_actions(role, "partners") or (
+        Action.VIEW in allowed_actions(role, "claims")
+    )
+    assert ("الصندوق" in header) is may_cash
+    assert ("الشركاء" in header) is may_partners
+
+
+def test_a_single_category_is_not_drawn_as_a_distribution(
+    client: Client, seeded_settings: None, settled_enrollment: Any
+) -> None:
+    """
+    One enrolment in one state used to draw a bar at 100% beside a counter
+    reading 1 — a chart that restates the number next to it and makes the page
+    look like a toy. A comparison needs two things to compare.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "dash.onecat"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+
+    assert "التسجيلات" in body, "the counter itself still belongs on the page"
+    assert "توزيع التسجيلات حسب الحالة" not in body
+
+
+def test_the_dashboard_is_still_worth_opening_with_no_data_at_all(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Settings seeded and nothing else — no enrolment, no receipt, no cohort.
+
+    The page must still carry substance, because this is what a new centre sees
+    on its first morning and what a demo opens on. Structure comes from the
+    process and the reader's own permissions, neither of which is a count.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "dash.brandnew"))
+
+    response = client.get(reverse("operations:dashboard"))
+    body = response.content.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "مسار العمل" in body, "the workflow map is what fills a quiet morning"
+    assert "صلاحياتك تغطّي" in body
+    assert "ابدأ من هنا" in body
+    assert "حالة المركز اليوم" in body
+    # A zero reads as a statement, not as a blank card.
+    assert "لا يوجد حالياً" in body
+    # …and no chart pretends to describe nothing.
+    assert 'class="bar' not in body
+
+
+def test_the_dashboard_action_cards_stay_permission_gated(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The buttons became cards with a line of explanation. That is presentation;
+    the gate behind them is the same one, and the manager still gets no till.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in ALL_ROLES:
+        client.force_login(_user(role, f"dash.cards.{role.lower()}"))
+        body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+        cards = re.findall(r'<a class="act-card[^"]*" href="([^"]+)">', body)
+
+        for route, screen in DASHBOARD_ACTIONS:
+            may = Action.VIEW in allowed_actions(role, screen)
+            assert (reverse(route) in cards) is may, f"{role} · {screen}"
