@@ -5,9 +5,16 @@
 
 {% comment %}
   الأعمدة تُقرَّر في الخدمة لا هنا: `columns` تحمل ما يجوز لهذا الدور رؤيته،
-  والحقل المحجوب غائب عن الاستجابة أصلاً (BR-101 · T-283). لم يتغيّر شيء من
-  ذلك — تغيّر أن شريط البحث كان مبنياً على `.calc-row` فتفرّقت حقوله على
-  عرض الصفحة، وأن عدد النتائج كان تنبيهاً أسفل الجدول لا معلومة بجانب مرشّحه.
+  والحقل المحجوب غائب عن الاستجابة أصلاً لا مخفيّ بـ CSS (BR-101 · T-283).
+  لذلك كل عمود اختياري محروس بوجود اسمه في `columns`، ولا يُضاف عمود هنا
+  لأن الديمو يعرضه.
+
+  ومن هذا الحرس نفسه: مرشّح الفئة وشرائح العدّ لا يظهران إلا لمن يرى حقل
+  الفئة. عرض مرشّح على حقل لا يراه صاحب الدور يجعل الشاشة تُخبره عمّا حُجب
+  عنه — وهو ما تتفاداه الخدمة في صندوق البحث للسبب نفسه.
+
+  اسم الفئة يأتي جاهزاً من العرض (`category_display`) بدل الرمز المخزَّن:
+  سجلٌّ يقول UNIVERSITY أمام العميل ليس سجلاً.
 {% endcomment %}
 
 {% block content %}
@@ -15,6 +22,7 @@
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
     <h1>{% translate "المشاركون" %}</h1>
+    <p class="sub">{% translate "سجل المشاركين: بحث وفتح ملف. ما يظهر لك من أعمدة تحدّده صلاحيتك، لا هذه الشاشة." %}</p>
   </div>
   {% if can_create %}
     <div class="acts">
@@ -31,15 +39,17 @@
     <input type="search" id="q" name="q" value="{{ query }}"
            placeholder="{% translate 'بالاسم أو الرقم الجامعي…' %}" spellcheck="false">
   </div>
-  <div class="fld">
-    <label for="category">{% translate "الفئة" %}</label>
-    <select name="category" id="category">
-      <option value="">{% translate "كل الفئات" %}</option>
-      {% for value, label in categories %}
-        <option value="{{ value }}" {% if value == selected_category %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-  </div>
+  {% if "category" in columns %}
+    <div class="fld">
+      <label for="category">{% translate "الفئة" %}</label>
+      <select name="category" id="category">
+        <option value="">{% translate "كل الفئات" %}</option>
+        {% for value, label in categories %}
+          <option value="{{ value }}" {% if value == selected_category %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  {% endif %}
   <button type="submit" class="btn2">{% translate "بحث" %}</button>
   {% if query or selected_category %}
     <a class="btn2 ghost" href="{% url 'people:participants' %}">{% translate "إلغاء التصفية" %}</a>
@@ -49,7 +59,31 @@
   </span>
 </form>
 
+{% if query or selected_category %}
+  <div class="note">
+    <div>
+      {% translate "نتائج مصفّاة" %}:
+      {% if query %}<span class="chip">{% translate "بحث" %}: {{ query }}</span>{% endif %}
+      {% if selected_category %}
+        {% for value, label in categories %}
+          {% if value == selected_category %}<span class="chip">{% translate "الفئة" %}: {{ label }}</span>{% endif %}
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "سجل المشاركين" %}</h2>
+    {% if category_counts %}
+      <div class="acts">
+        {% for label, count in category_counts %}
+          <span class="chip">{{ label }}: <span class="num">{{ count }}</span></span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -64,25 +98,25 @@
       <tbody>
         {% for p in participants %}
           <tr>
-            <td dir="ltr" translate="no">{{ p.participant_number }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ p.participant_number }}</strong></td>
             <td>{{ p.name_ar }}</td>
-            {% if "category" in columns %}<td>{{ p.category }}</td>{% endif %}
+            {% if "category" in columns %}<td><span class="chip">{{ p.category_display }}</span></td>{% endif %}
             {% if "phone" in columns %}<td dir="ltr">{{ p.phone|default:"—" }}</td>{% endif %}
             <td class="acts">
               <a class="btn2 ghost" href="{% url 'people:participant-detail' p.participant_number %}">
-                {% translate "عرض" %}
+                {% translate "عرض الملف" %}
               </a>
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="5" class="empty">
+          <tr><td colspan="{{ column_count }}" class="empty">
             {% if query or selected_category %}
               <span class="empty-title">{% translate "لا مشارك يطابق البحث" %}</span>
-              <span class="empty-body">{% translate "جرّب الرقم الجامعي كاملاً، أو وسّع الفئة إلى «كل الفئات»." %}</span>
+              <span class="empty-body">{% translate "جرّب الرقم الجامعي كاملاً، أو وسّع الفئة إلى «كل الفئات». البحث يطابق بداية الرقم لا وسطه." %}</span>
               <a class="btn2 empty-act" href="{% url 'people:participants' %}">{% translate "عرض كل المشاركين" %}</a>
             {% else %}
               <span class="empty-title">{% translate "لا مشاركون بعد" %}</span>
-              <span class="empty-body">{% translate "الرقم الجامعي يُولَّد آلياً عند الحفظ من الفصل الدراسي النشط (BR-001)." %}</span>
+              <span class="empty-body">{% translate "يبدأ السجل بأول طلب التحاق. الرقم الجامعي يُولَّد آلياً عند الحفظ من الفصل الدراسي النشط (BR-001)." %}</span>
               {% if can_create %}
                 <a class="btn2 primary empty-act" href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
               {% endif %}

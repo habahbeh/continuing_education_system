@@ -9,6 +9,8 @@ import models directly.
 
 from __future__ import annotations
 
+from collections import Counter
+
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist
@@ -158,12 +160,32 @@ def participants_view(request: HttpRequest) -> HttpResponse:
         category=request.GET.get("category", "").strip(),
         request=request,
     )
+    columns = participant_service.visible_fields_for(request.user)
+
+    # Presentation only, and only over what the projection already handed us.
+    # ``category`` was reaching the page as its stored code — a registry that
+    # says UNIVERSITY at a client instead of «طالب جامعة/خرّيج». The label is
+    # attached to rows that ALREADY carry the field, so a restricted role gains
+    # no key it did not have (BR-101).
+    labels = dict(PARTICIPANT_CATEGORY_CHOICES)
+    tally: Counter[str] = Counter()
+    for row in rows:
+        if "category" in row:
+            row["category_display"] = labels.get(row["category"], row["category"])
+            tally[str(row["category_display"])] += 1
+
     return render(
         request,
         "people/participants.html",
         {
             "participants": rows,
-            "columns": participant_service.visible_fields_for(request.user),
+            "columns": columns,
+            # The empty row has to span the table this role actually gets:
+            # number, name, actions, plus whichever optional columns survived.
+            "column_count": 3 + sum(1 for name in ("category", "phone") if name in columns),
+            # Counts of the rows on screen, not of the registry — the listing is
+            # capped, and a total nobody can verify from the page is a claim.
+            "category_counts": sorted(tally.items()) if "category" in columns else [],
             "categories": PARTICIPANT_CATEGORY_CHOICES,
             "query": request.GET.get("q", ""),
             "selected_category": request.GET.get("category", ""),

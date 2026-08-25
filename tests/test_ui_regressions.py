@@ -775,3 +775,244 @@ def test_the_admission_form_added_no_dead_class_and_no_dependency() -> None:
     assert not [c for c in used if f".{c}" not in css]
     # Inputs stay full width and the sections stack on a phone.
     assert "sm:grid-cols-2" in css.split(".grid2", 1)[1].split("}", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# The participant registry — page polish
+# ---------------------------------------------------------------------------
+REGISTRY_TEMPLATE = Path("templates/people/participants.html")
+
+#: Fields BR-101 keeps from the cashier and the finance manager. None of them
+#: may appear in the page they are served, in any form.
+RESTRICTED_AWAY = (
+    "id_document_number",
+    "date_of_birth",
+    "nationality",
+    "email",
+    "employer",
+    "po_box",
+)
+
+
+@pytest.fixture
+def three_participants(seeded_settings: None) -> None:
+    """One of each category, so counts and filters have something to sort."""
+    from datetime import date
+
+    from apps.people.models import IdDocumentType, Participant, ParticipantCategory
+
+    for i, category in enumerate(
+        (ParticipantCategory.UNIVERSITY, ParticipantCategory.CENTER, ParticipantCategory.EMPLOYEE)
+    ):
+        Participant.objects.create(
+            participant_number=f"20269000{i}",
+            category=category,
+            name_ar=f"مشارك الاختبار {i}",
+            id_document_type=IdDocumentType.NATIONAL_ID,
+            id_document_number=f"88800{i}",
+            phone=f"07900000{i}",
+            registered_on=date(2026, 1, 1),
+        )
+
+
+@pytest.mark.parametrize(
+    ("role", "allowed"),
+    [
+        (Role.CENTER_MANAGER, True),
+        (Role.REGISTRATION_OFFICER, True),
+        (Role.FINANCE_OFFICER, True),
+        (Role.FINANCE_MANAGER, True),
+        (Role.CASHIER, True),
+        (Role.AUDIT_ACCOUNT, True),
+    ],
+)
+def test_the_registry_opens_for_every_role_the_matrix_grants_view(
+    client: Client, seeded_settings: None, role: str, allowed: bool
+) -> None:
+    """§3.2/3 grants VIEW to all six — narrowed by field, not by door."""
+    client.force_login(_user(role, f"reg.open.{role.lower()}"))
+
+    assert client.get(reverse("people:participants")).status_code == (200 if allowed else 403)
+
+
+def test_the_registry_refuses_an_anonymous_visitor(client: Client, seeded_settings: None) -> None:
+    """Fail-closed: it lists people, and it is not public."""
+    assert client.get(reverse("people:participants")).status_code == 403
+
+
+@pytest.mark.parametrize("role", [Role.CASHIER, Role.FINANCE_MANAGER])
+def test_a_restricted_role_is_served_no_field_it_may_not_see(
+    client: Client, three_participants: None, role: str
+) -> None:
+    """
+    BR-101 · T-283 — the narrowing is in the projection, so the forbidden field
+    is absent from the response body rather than hidden in the page. The polish
+    added a category label and a count row; neither may reopen what the service
+    closed.
+    """
+    client.force_login(_user(role, f"reg.priv.{role.lower()}"))
+
+    body = client.get(reverse("people:participants")).content.decode("utf-8")
+
+    for field in RESTRICTED_AWAY:
+        assert field not in body, f"{role} was served «{field}»"
+    assert "88800" not in body, "an identity document number reached the page"
+    assert "0790000" not in body, "a phone number reached the page"
+    # …and the row still carries what they ARE allowed: number and name.
+    assert "202690000" in body
+    assert "مشارك الاختبار 0" in body
+
+
+@pytest.mark.parametrize("role", [Role.CASHIER, Role.FINANCE_MANAGER])
+def test_a_restricted_role_is_offered_no_filter_on_a_field_it_cannot_see(
+    client: Client, three_participants: None, role: str
+) -> None:
+    """
+    A filter on a hidden field turns the screen into an oracle for it — which
+    is exactly why ``list_participants`` narrows the SEARCH for these roles.
+    The category filter and the category counts follow the same rule here: they
+    are drawn only for a reader who already sees the field.
+    """
+    client.force_login(_user(role, f"reg.filter.{role.lower()}"))
+
+    body = client.get(reverse("people:participants")).content.decode("utf-8")
+
+    assert 'id="category"' not in body
+    assert "الفئة" not in body
+    for code in ("UNIVERSITY", "CENTER", "EMPLOYEE"):
+        assert code not in body
+
+
+def test_the_registry_names_the_category_instead_of_printing_its_code(
+    client: Client, three_participants: None
+) -> None:
+    """
+    The column was rendering the stored value, so a client reading the registry
+    saw «UNIVERSITY» where the label says «طالب جامعة / خرّيج». The label is
+    attached in the view, over rows that already carry the field.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "reg.labels"))
+
+    body = client.get(reverse("people:participants")).content.decode("utf-8")
+
+    assert not re.search(r"<td[^>]*>[^<]*(UNIVERSITY|CENTER|EMPLOYEE)", body), (
+        "a stored code is being printed in a table cell"
+    )
+    assert "طالب جامعة / خرّيج" in body
+    assert "طالب مركز" in body
+
+
+def test_the_category_counts_describe_the_rows_on_screen(
+    client: Client, three_participants: None
+) -> None:
+    """
+    The listing is capped, so a registry-wide total would be a number nobody
+    can check against the page. The chips count what is drawn — and they follow
+    the filter, which is what makes them verifiable by eye.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "reg.counts"))
+
+    def chips(url: str) -> dict[str, int]:
+        body = client.get(url).content.decode("utf-8")
+        return {
+            label.strip(): int(n)
+            for label, n in re.findall(
+                r'<span class="chip">([^<:]+): <span class="num">(\d+)', body
+            )
+        }
+
+    assert sum(chips(reverse("people:participants")).values()) == 3
+    filtered = chips(reverse("people:participants") + "?category=CENTER")
+    assert sum(filtered.values()) == 1
+    assert "طالب مركز" in filtered
+
+
+def test_the_registry_empty_row_spans_the_table_this_role_actually_gets(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The empty row was hard-coded to five columns while the cashier's table has
+    three, so the message overhung its own table. The span is counted from the
+    permitted columns now.
+    """
+    import re
+
+    for role, expected in ((Role.CENTER_MANAGER, "5"), (Role.CASHIER, "3")):
+        client.force_login(_user(role, f"reg.span.{role.lower()}"))
+        body = client.get(reverse("people:participants")).content.decode("utf-8")
+        assert re.search(rf'colspan="{expected}"', body), f"{role} empty row spans wrongly"
+
+
+def test_the_registry_offers_the_admission_form_only_where_it_is_allowed(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    §3.2/4 — creating is the manager's and the registrar's; the rest read. The
+    audit account is the case worth naming: it holds VIEW on the admission form
+    and not CREATE, so the sidebar links it and this page must not offer it.
+
+    Which is why the assertion is scoped past ``</nav>``. A bare ``href in
+    body`` is answered by the menu and proves nothing about the page — it
+    passed for every role until the audit account, where the two disagree.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.CASHIER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"reg.create.{role.lower()}"))
+        body = client.get(reverse("people:participants")).content.decode("utf-8")
+        page = body.split("</nav>", 1)[-1]
+        may = Action.CREATE in allowed_actions(role, "student-new")
+        offered = f'class="btn2 primary" href="{reverse("people:participant-new")}"' in page or (
+            f'class="btn2 primary empty-act" href="{reverse("people:participant-new")}"' in page
+        )
+        assert offered is may, role
+
+
+def test_the_registry_shows_which_filters_are_active(
+    client: Client, three_participants: None
+) -> None:
+    """A filtered registry that looks unfiltered is how «where did they go?» starts."""
+    client.force_login(_user(Role.CENTER_MANAGER, "reg.active"))
+
+    plain = client.get(reverse("people:participants")).content.decode("utf-8")
+    filtered = client.get(
+        reverse("people:participants") + "?q=2026&category=CENTER"
+    ).content.decode("utf-8")
+
+    assert "نتائج مصفّاة" not in plain
+    assert "إلغاء التصفية" not in plain
+    assert "نتائج مصفّاة" in filtered
+    assert "إلغاء التصفية" in filtered
+
+
+def test_the_registry_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = REGISTRY_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters"]:
+        assert dead not in source, f"the registry uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    # The wide table scrolls inside its own wrapper, never the page body.
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
