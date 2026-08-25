@@ -8,6 +8,8 @@ seeing an identity document.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 
@@ -33,6 +35,14 @@ def registrar(seeded_settings: None) -> User:
 @pytest.fixture
 def cashier(seeded_settings: None) -> User:
     return User.objects.create_user(username="cash.one", password=PASSWORD, role=Role.CASHIER)
+
+
+@pytest.fixture
+def finance_manager(seeded_settings: None) -> User:
+    """The other role BR-101 narrows to number and name (footnote g)."""
+    return User.objects.create_user(
+        username="fim.one", password=PASSWORD, role=Role.FINANCE_MANAGER
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +262,101 @@ def test_br101_restricted_search_cannot_probe_hidden_fields(
 
     by_number = svc.list_participants(actor=cashier, query="202610001")
     assert len(by_number) == 1
+
+
+@pytest.fixture
+def one_of_each_category(registrar: User, active_semester: Semester) -> None:
+    """Three participants, three categories — something for a filter to sort."""
+    payload = {
+        "name_en": "",
+        "id_document_type": "NATIONAL_ID",
+        "nationality": "أردنية",
+        "gender": "FEMALE",
+        "qualification": "BACHELOR",
+        "city": "AMMAN",
+        "phone": "",
+        "po_box": "",
+        "email": "",
+        "employer": "",
+        "registered_on": date(2026, 1, 1),
+        "no_refund_pledge_accepted": True,
+        "is_exempt": False,
+        "exemption_approval_ref": "",
+        "exemption_approval_date": None,
+    }
+    for index, category in enumerate(
+        (
+            ParticipantCategory.UNIVERSITY,
+            ParticipantCategory.CENTER,
+            ParticipantCategory.EMPLOYEE,
+        )
+    ):
+        svc.create_participant(
+            actor=registrar,
+            data={
+                **payload,
+                "category": category,
+                "name_ar": f"مشارك الفئة {index}",
+                "id_document_number": f"99700000{index}",
+            },
+        )
+
+
+@pytest.mark.parametrize("restricted", ["cashier", "finance_manager"])
+def test_br101_restricted_category_filter_cannot_probe_hidden_categories(
+    request: pytest.FixtureRequest, one_of_each_category: None, restricted: str
+) -> None:
+    """
+    A filter reports a field as surely as printing it.
+
+    ``category`` is absent from the cashier's and the finance manager's row
+    (BR-101), and yet three requests for three categories used to return three
+    different one-row lists — reading back the category of every participant in
+    the registry without it ever being rendered. The search box is guarded for
+    exactly this reason; the filter was the other way in.
+
+    The parameter is ignored rather than obeyed, so the reader gets the same
+    set with it and without it and learns nothing from the difference.
+    """
+    actor = request.getfixturevalue(restricted)
+
+    unfiltered = svc.list_participants(actor=actor)
+    assert len(unfiltered) == 3
+    assert "category" not in unfiltered[0], "the projection leaked the field itself"
+
+    numbers = sorted(row["participant_number"] for row in unfiltered)
+    for category in ("UNIVERSITY", "CENTER", "EMPLOYEE"):
+        probed = svc.list_participants(actor=actor, category=category)
+        assert sorted(row["participant_number"] for row in probed) == numbers, (
+            f"?category={category} told {restricted} something the row does not"
+        )
+
+
+def test_br101_the_category_filter_still_works_for_a_role_that_sees_it(
+    registrar: User, one_of_each_category: None
+) -> None:
+    """
+    The gate is on the field, not on the feature. A reader whose projection
+    carries ``category`` filters by it exactly as before — closing an oracle
+    must not cost the registrar their filter.
+    """
+    assert len(svc.list_participants(actor=registrar)) == 3
+
+    for category in ("UNIVERSITY", "CENTER", "EMPLOYEE"):
+        rows = svc.list_participants(actor=registrar, category=category)
+        assert len(rows) == 1, f"the registrar lost the {category} filter"
+        assert rows[0]["category"] == category
+
+
+def test_br101_the_filter_gate_reads_the_projection_not_a_role_list(
+    cashier: User, registrar: User
+) -> None:
+    """
+    The guard asks ``visible_fields_for`` rather than naming roles, so a change
+    to either field set moves the gate with it and the two cannot drift apart.
+    """
+    assert "category" in svc.visible_fields_for(registrar)
+    assert "category" not in svc.visible_fields_for(cashier)
 
 
 # ---------------------------------------------------------------------------

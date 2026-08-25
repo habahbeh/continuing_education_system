@@ -106,8 +106,16 @@ def list_participants(
 ) -> list[dict[str, Any]]:
     policy.require(actor, Screen.STUDENTS, Action.VIEW, request=request)
 
+    visible = visible_fields_for(actor)
+
     rows = Participant.objects.all()
-    if category:
+    # A filter narrows the list by a field, which reports that field as surely
+    # as printing it: three requests for three categories read the category of
+    # every row back. So a field the projection withholds cannot be filtered on
+    # either, and the parameter is ignored rather than obeyed — the reader gets
+    # the same set with it and without it, and learns nothing from the
+    # difference. This is the search guard below, applied to the other way in.
+    if category and "category" in visible:
         rows = rows.filter(category=category)
     if query:
         # Restricted roles may not search by the fields they cannot see —
