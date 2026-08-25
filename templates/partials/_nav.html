@@ -12,6 +12,11 @@
   العرض وحده — على الهاتف تصير القائمة درجاً ينزلق من الحافة البادئة بدل أن
   تبتلع 256px من عرض الشاشة وتسحق عمود المحتوى. الحالة في Alpine على
   `<body>`، والدرج مغلق افتراضياً وظاهر ثابتاً من `md` فصاعداً.
+
+  تحسين الشريط الجانبي: البنية صارت قائمةً معنونة لا سلسلة روابط. أربعون
+  مدخلاً في سبع مجموعات: `<ul>` تجعل قارئ الشاشة يعلن «قائمة من ٨»، و`<h2>`
+  مع `aria-labelledby` تجعل التنقّل بالعناوين ممكناً بدل المرور على الأربعين
+  واحداً واحداً. لا صنف صلاحية ولا ترتيب تغيّر — العرض وحده.
 {% endcomment %}
 {% if nav_groups %}
   <nav class="sidebar" id="sidebar" aria-label="{% translate 'التنقّل الرئيسي' %}"
@@ -25,16 +30,20 @@
     </div>
 
     {% for group in nav_groups %}
-      <div class="nav-group">
-        <div class="nav-group-title">{{ group.title }}</div>
-        {% for item in group.items %}
-          <a class="nav-item{% if item.is_active %} active{% endif %}"
-             href="{{ item.url }}"
-             @click="nav = false"
-             {% if item.is_active %}aria-current="page"{% endif %}>
-            {{ item.label }}
-          </a>
-        {% endfor %}
+      <div class="nav-group" role="group" aria-labelledby="nav-group-{{ forloop.counter }}">
+        <h2 class="nav-group-title" id="nav-group-{{ forloop.counter }}">{{ group.title }}</h2>
+        <ul>
+          {% for item in group.items %}
+            <li>
+              <a class="nav-item{% if item.is_active %} active{% endif %}"
+                 href="{{ item.url }}"
+                 @click="nav = false"
+                 {% if item.is_active %}aria-current="page"{% endif %}>
+                {{ item.label }}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
       </div>
     {% endfor %}
   </nav>

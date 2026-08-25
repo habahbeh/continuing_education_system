@@ -538,18 +538,40 @@
     }
     .sidebar.is-open { transform: translateX(0); }
     .nav-close-row { @apply flex justify-end px-4 pb-3 mb-1 border-b border-line; }
+    /* إصبعٌ لا مؤشّر: الصفّ يرتفع إلى ٤٤px، وزرّ الإغلاق يكبر معه. */
+    .nav-item { @apply py-3; }
+    .nav-close-row .btn2 { @apply px-4 py-2; }
   }
   .nav-scrim    { @apply fixed inset-0 z-30 bg-ink/45 md:hidden; }
   .nav-toggle   { @apply md:hidden inline-flex items-center justify-center w-9 h-9 shrink-0
                          rounded-lg text-white bg-white/10; touch-action: manipulation; }
   .nav-toggle:hover { @apply bg-white/20; }
   .nav-toggle svg { @apply w-5 h-5; }
-  .nav-group    { @apply mb-4; }
-  .nav-group-title { @apply px-4 pb-1 text-2xs font-black text-ink-3; letter-spacing: .04em; }
-  .nav-item     { @apply flex items-center gap-2 px-4 py-2 text-sm font-bold text-ink-2 transition-colors duration-150;
+  /*
+   * أربعون مدخلاً في سبع مجموعات. كانت كلها `font-bold`، والعنوان `font-black`
+   * فوقها: وزنان متجاوران لا يفصلان عنواناً عن بند، فتُقرأ القائمة عموداً
+   * واحداً طويلاً لا أقساماً. الوزن هنا يفصل — البند ٥٠٠، والعنوان ٩٠٠،
+   * والمفتوح ٨٠٠ — ويُضاف فاصل شعرة بين المجموعات ليُرى القسم قبل أن يُقرأ.
+   */
+  .nav-group    { @apply mb-1 pb-1; }
+  .nav-group ul { @apply m-0 p-0; list-style: none; }
+  .nav-group + .nav-group { @apply mt-1 pt-3 border-t border-line-2; }
+  /*
+   * العنوان يلتصق بأعلى القائمة أثناء التمرير: في قائمة بأربعين مدخلاً يضيع
+   * القسم الذي أنت فيه بمجرّد أن تمرّر قليلاً. `bg-white` ليمرّ ما تحته خلفه.
+   */
+  .nav-group-title { @apply sticky top-0 z-10 px-4 py-1.5 mb-0.5 text-2xs font-black
+                            text-ink-3 bg-white; letter-spacing: .06em; }
+  .nav-item     { @apply flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-ink-2
+                         transition-colors duration-150;
                   border-inline-start: 3px solid transparent; }
   .nav-item:hover { @apply bg-brand-50 text-brand-800; }
-  .nav-item.active { @apply bg-brand-100 text-brand-800;
+  /*
+   * الشاشة المفتوحة تُعرف بأربع إشارات لا بلون واحد: الأرضية، والحاشية على
+   * الحافة البادئة (منطقية لا يسارية، فتنقلب مع الاتجاه)، ووزن الخط، و
+   * `aria-current="page"` لقارئ الشاشة. اللون وحده لا يكفي أحداً.
+   */
+  .nav-item.active { @apply bg-brand-100 text-brand-800 font-extrabold;
                      border-inline-start-color: theme(colors.brand.700); }
   .topbar-user  { @apply flex items-center gap-2 sm:gap-3 text-sm min-w-0; margin-inline-start: auto; }
   .topbar-user form { @apply inline; }

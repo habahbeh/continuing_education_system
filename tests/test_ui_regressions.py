@@ -304,3 +304,159 @@ def test_a_payment_method_cannot_be_deleted_from_the_admin(rf: object) -> None:
 
     model_admin = django_admin.site._registry[PaymentMethod]
     assert not model_admin.has_delete_permission(None)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# The sidebar — navigation polish
+# ---------------------------------------------------------------------------
+NAV_PARTIAL = Path("templates/partials/_nav.html")
+
+#: Copied from the demo's stylesheet by Sprint 8K-1 and defined nowhere here.
+NAV_DEAD_CLASSES = ["vflow", "vstep", "vtitle", "vmeta", "vbox", "mini-title", "stack-list"]
+
+
+def test_the_sidebar_announces_its_groups_as_named_lists(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Forty entries in seven groups. As a bare run of links a screen reader had
+    to be walked through all forty to find out which section it was in, and the
+    group heading was a ``div`` it never announced.
+
+    Now every group is a named region over a real list: the heading can be
+    jumped to, and the list says how many entries are under it.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "nav.groups"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+    nav = body.split('<nav class="sidebar"', 1)[1].split("</nav>", 1)[0]
+
+    headings = re.findall(r'<h2 class="nav-group-title" id="(nav-group-\d+)">', nav)
+    labelled = re.findall(r'aria-labelledby="(nav-group-\d+)"', nav)
+
+    assert headings, "the sidebar draws no group headings"
+    assert headings == labelled, "a group points at a heading that is not there"
+    assert len(re.findall(r"<ul>", nav)) == len(headings)
+    assert nav.count('role="group"') == len(headings)
+
+
+def test_the_open_screen_is_marked_by_more_than_its_colour(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Exactly one entry is current, and it says so four ways: the ``active``
+    class carries a ground and a rule on the leading edge, the weight lifts,
+    and ``aria-current="page"`` tells anyone not looking at the colour.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "nav.active"))
+
+    body = client.get(reverse("operations:enrollments")).content.decode("utf-8")
+    nav = body.split('<nav class="sidebar"', 1)[1].split("</nav>", 1)[0]
+
+    active = re.findall(r'<a class="nav-item active"[^>]*aria-current="page"', nav)
+    assert len(active) == 1, f"{len(active)} entries claim to be the open screen"
+    # …and the class is not decorative: the stylesheet gives it a weight and a
+    # rule, not only a background.
+    rule = CSS_SOURCE.read_text(encoding="utf-8").split(".nav-item.active", 1)[1].split("}", 1)[0]
+    assert "font-extrabold" in rule
+    assert "border-inline-start-color" in rule
+
+
+def test_the_sidebar_still_filters_by_permission_after_the_polish(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Presentation changed; the gate did not. The cashier's menu is short because
+    BR-083 keeps them out of partner data and the reports, not because a
+    template hid anything.
+    """
+    import re
+
+    client.force_login(_user(Role.CASHIER, "nav.cashier"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+    nav = body.split('<nav class="sidebar"', 1)[1].split("</nav>", 1)[0]
+
+    assert "الشركاء المتعاقدون" not in nav
+    assert "التقارير" not in nav
+    assert "استيفاء دفعة" in nav
+    # Every entry drawn is still a real address.
+    for href in re.findall(r'<a class="nav-item[^"]*" href="([^"]+)"', nav):
+        assert href.startswith("/"), href
+
+
+def test_the_phone_drawer_survived_the_polish(client: Client, seeded_settings: None) -> None:
+    """
+    The sidebar is a drawer below ``md``. Its close button, the toggle that
+    opens it and the scrim behind it all have to stay, and the row has to stay
+    comfortable to hit with a thumb rather than a mouse pointer.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "nav.drawer"))
+
+    body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+
+    assert 'class="nav-close-row"' in body
+    assert 'x-ref="navClose"' in body
+    assert 'class="nav-toggle"' in body
+    assert 'class="nav-scrim"' in body
+    # The drawer slides on a logical axis, so it opens from the right in RTL.
+    assert '[dir="rtl"] .sidebar' in css
+    # A 40px row is a mouse target; the phone gets a taller one.
+    phone = css.split("@media (max-width: 767px)", 1)[1].split("\n  }", 1)[0]
+    assert ".nav-item" in phone and "py-3" in phone
+
+
+def test_the_sidebar_polish_added_no_icon_font_and_no_dead_class() -> None:
+    """
+    No icon system exists in this project — one inline SVG for the hamburger is
+    not one. Forty hand-authored glyphs are a content project, and a CDN is
+    refused outright by A-07, so the hierarchy is carried by weight, spacing
+    and rules instead.
+    """
+    source = NAV_PARTIAL.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+
+    assert "http://" not in source and "https://" not in source
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "<i " not in source, "no icon-font element crept in"
+    for dead in NAV_DEAD_CLASSES:
+        assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
+        assert dead not in source, f"the sidebar uses the demo-only class «{dead}»"
+
+
+def test_the_sidebar_reads_as_sections_not_as_one_long_column() -> None:
+    """
+    Every entry was ``font-bold`` under a ``font-black`` heading: two adjacent
+    weights, so nothing separated a heading from an entry and forty links read
+    as one column. Weight now does the separating, a hairline divides the
+    groups, and the heading stays put while its own section scrolls.
+    """
+    import re
+
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+
+    def declarations(selector: str) -> str:
+        """Every block for this selector, joined.
+
+        A selector can appear more than once — ``.nav-item`` is redeclared
+        inside the phone media query — and the phone one comes first in the
+        file, so taking the first match reads the wrong rule.
+        """
+        pattern = re.escape(selector) + r"\s*\{(.*?)\}"
+        blocks = re.findall(pattern, css, re.S)
+        assert blocks, f"no rule found for {selector}"
+        return "\n".join(blocks)
+
+    # The entry sits at 500 under a heading at 900: two weights apart, not one.
+    assert "font-medium" in declarations(".nav-item")
+    assert "font-black" in declarations(".nav-group-title")
+    # A hairline between groups, and a heading that stays while its own
+    # section scrolls under it.
+    assert "border-t" in declarations(".nav-group + .nav-group")
+    assert "sticky" in declarations(".nav-group-title")
