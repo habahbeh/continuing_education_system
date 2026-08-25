@@ -8,16 +8,91 @@
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "مدخل واضح لحساب الاستحقاق قبل إنشاء المطالبة والمخالصة. المنطق التشغيلي الفعلي موجود في المطالبات والالتزامات والمخالصات." %}</p>
+    <p class="sub">{% translate "كيف يصير الشريك مستحقاً: من الاتفاقية إلى ما حُصِّل فعلاً، ثم الأهلية والمطالبة والخصم والمخالصة." %}</p>
+  </div>
+</div>
+
+<div class="note info">
+  <div>
+    <strong>{% translate "صفحة دليل — لا تحتسب مبلغاً." %}</strong>
+    {% translate "الحسبة الفعلية تجري على شاشة المطالبات، حيث تُقرأ اتفاقية بعينها مقابل تسجيلات بعينها. هذه الصفحة تشرح الطريقة وتدلّ على الشاشة التي تنفّذها، ولا تكرّرها باسم ثانٍ." %}
   </div>
 </div>
 
 <div class="card2">
-  <div class="mini-title">{% translate "كيف يقرأ الموظف استحقاق الشريك؟" %}</div>
-  <div class="vflow">
-    <div class="vstep done"><div class="dot">1</div><div><div class="vtitle">{% translate "الاتفاقية السارية" %}</div><div class="vbox">{% translate "تحدد نموذج الاحتساب والنسب والبنود المؤثرة." %} <a href="{% url 'partners:agreements' %}">{% translate "الاتفاقيات" %}</a></div></div></div>
-    <div class="vstep done"><div class="dot">2</div><div><div class="vtitle">{% translate "المطالبة" %}</div><div class="vbox">{% translate "تجمّد الحساب للفترة وتمنع التعديل بعد الاعتماد." %} <a href="{% url 'settlements:claims' %}">{% translate "المطالبات" %}</a></div></div></div>
-    <div class="vstep done"><div class="dot">3</div><div><div class="vtitle">{% translate "الالتزامات والمخالصات" %}</div><div class="vbox">{% translate "تظهر المصاريف، الغيابات، التسويات، والتوقيع النهائي." %} <a href="{% url 'settlements:obligations' %}">{% translate "التزامات الشركاء" %}</a></div></div></div>
+  <div class="card2-head"><h2>{% translate "السلسلة، بالترتيب" %}</h2></div>
+  <div class="card2-body">
+    {% for link_step in chain %}
+      <div class="step">
+        <div class="step-head">
+          <span class="step-num" aria-hidden="true">{{ link_step.number }}</span>
+          <h2>{{ link_step.title }}</h2>
+        </div>
+        <div class="step-body">{{ link_step.what }}</div>
+      </div>
+    {% endfor %}
   </div>
 </div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "نماذج الاحتساب الثلاثة" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      {% for label, meaning in models %}
+        <dt>{{ label }}</dt><dd>{{ meaning }}</dd>
+      {% endfor %}
+    </dl>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "تسجيلات لا تُكسب الشريك شيئاً" %}</h2></div>
+  <div class="card2-body">
+    <p class="hint">{% translate "هذه القائمة تُقرأ من قاعدة BR-045 نفسها في الخدمة، لا منسوخة هنا." %}</p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>{% translate "حالة التسجيل" %}</th><th>{% translate "سبب عدم الأهلية" %}</th></tr>
+        </thead>
+        <tbody>
+          {% for row in ineligible %}
+            <tr><td>{{ row.status }}</td><td>{{ row.reason }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "غياب المدرّسين — التزام على الشريك" %}</h2></div>
+  <div class="card2-body">
+    <div class="note">
+      <div>
+        {% translate "ينص البند الموقّع على غرامة تعادل ثلاثة أضعاف نفقات المحاضرة التي يغيب عنها مدرّسو الشريك، ويُستثنى منها ما كان طارئاً ووافق عليه الطرف الأول خطياً. وإذا تكرر الغياب لأكثر من أربع محاضرات جاز استبدال المدرّس (BR-057 · BR-058)." %}
+      </div>
+    </div>
+    <p class="hint">{% translate "الغرامة لا تُطالَب بها بفاتورة: تصير التزاماً يُخصم من مطالبة لاحقة (BR-036)." %}</p>
+  </div>
+</div>
+
+<div class="note warn">
+  <div>
+    <strong>{% translate "بانتظار قرار العميل:" %}</strong>
+    {% translate "هل يُحتسب أساس الشريك قبل الضريبة أم بعدها (Q-28)؟ العمل جارٍ اليوم على «قبل الضريبة»، وهي فرضية مسجَّلة لا قرار. ولذلك يُختم أساس الاحتساب على كل مطالبة، فيبقى ما استُخدم مقروءاً على الوثيقة نفسها." %}
+  </div>
+</div>
+
+{% if links %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "الشاشات التي تنفّذ هذه السلسلة" %}</h2></div>
+    <div class="card2-body">
+      <div class="form-acts">
+        {% for link in links %}
+          <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

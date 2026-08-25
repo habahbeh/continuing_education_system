@@ -4,6 +4,62 @@
 {% block title %}{% translate "النطاق المستقبلي — مركز التعليم المستمر" %}{% endblock %}
 
 {% block content %}
-<div class="page-head"><div><span class="eyebrow">{% translate "مراجعة التسليم" %}</span><h1>{{ title }}</h1><p class="sub">{% translate "ما يظهر هنا ليس مفقوداً من التسليم؛ هو نطاق موثق يحتاج قراراً أو مرحلة لاحقة." %}</p></div></div>
-<div class="card2"><div class="mini-title">{% translate "بنود مؤجلة بوضوح" %}</div><ul class="stack-list"><li>{% translate "تكامل تقني مباشر مع نظام الوزارة — الإدخال الحالي يدوي ومقصود." %}</li><li>{% translate "توسيع طرق الدفع مثل التحويل البنكي والبطاقات والشيكات." %}</li><li>{% translate "تحميل المرفقات بسياسات احتفاظ وفحص فيروسات وصلاحيات تنزيل مفصلة." %}</li><li>{% translate "توسيع شاشة الإعدادات لتعديل آمن بتاريخ سريان واعتماد." %}</li></ul></div>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "النظام" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "بنود موثّقة خارج نطاق التسليم الحالي، ومعها ما يعمل اليوم مكانها وسبب تأجيلها." %}</p>
+  </div>
+</div>
+
+<div class="note info">
+  <div>
+    <strong>{% translate "هذه ليست نواقص." %}</strong>
+    {% translate "كل بند هنا قرار مكتوب: إمّا أن حدوده لم تُحسم بعد، أو أنه خارج النطاق المعتمد، أو أنه أُغلق عمداً لأن فتحه يفسد قاعدة قائمة. ولكل بند ما يقوم مقامه اليوم، مذكوراً بصراحة." %}
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "بنود مؤجَّلة أو خارج النطاق" %}</h2></div>
+  <div class="card2-body">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>{% translate "البند" %}</th>
+            <th>{% translate "ما الذي يعمل اليوم" %}</th>
+            <th>{% translate "لماذا هو مؤجَّل" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in deferred %}
+            <tr>
+              <td>{{ row.item }}</td>
+              <td>{{ row.today }}</td>
+              <td>{{ row.why }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "أسئلة بانتظار قرار العميل" %}</h2></div>
+  <div class="card2-body">
+    <p class="hint">{% translate "يعمل النظام اليوم على فرضية مهنية مسجَّلة في كل واحد منها. الفرضية ليست قراراً، وتغييرها يكلّف تعديل إعداد لا هجرة ولا إصدار." %}</p>
+    <dl class="dl">
+      {% for ref, question in open_questions %}
+        <dt>{{ ref }}</dt><dd>{{ question }}</dd>
+      {% endfor %}
+    </dl>
+  </div>
+</div>
+
+<div class="note">
+  <div>
+    {% translate "لا تحمل هذه الصفحة تواريخ تسليم: ترتيب هذه البنود وتوقيتها قرار يخصّ العميل، ويُتفق عليه خارج النظام." %}
+  </div>
+</div>
 {% endblock %}

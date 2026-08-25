@@ -8,17 +8,70 @@
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "صفحة إرشادية للحالات التي تغيّر مسار التسجيل: الفصل، الإلغاء، التأجيل، الإحلال، وتحويل الأرصدة." %}</p>
+    <p class="sub">{% translate "الاستثناءات الموثّقة على مسار التسجيل العادي: ما هي، وماذا تكلّف، وأي قاعدة تحكم كل واحدة منها." %}</p>
+  </div>
+</div>
+
+<div class="note info">
+  <div>
+    <strong>{% translate "صفحة إرشادية — لا إدخال منها." %}</strong>
+    {% translate "القواعد تعمل اليوم فعلاً: الخدمات تفرضها وقاعدة البيانات تحرسها وسجل التدقيق يكتبها. غير المبني بعد هو شاشة الإدخال، ولذلك تشرح هذه الصفحة الأنواع ولا ترسم نموذجاً يردّ كل من يفتحه." %}
+  </div>
+</div>
+
+<div class="note">
+  <div>
+    {% translate "الحالة الخاصة ليست تعديلاً غير رسمي على السجل: لكل نوع قاعدة تحكمه، ولكل حالة أثر مالي مكتوب بالكلمات لا بالحالة وحدها، ومرجع القرار إلزامي في الفصل. كل ذلك يُكتب في سجل التدقيق، ولا يُصحَّح قيد مالي بالحذف بل بقيد مقابل." %}
   </div>
 </div>
 
 <div class="card2">
-  <div class="note warn"><strong>{% translate "حالة الشاشة:" %}</strong> {% translate "القواعد والخدمات موجودة ومحمية بالاختبارات، وهذه الصفحة تضيف المدخل الواضح الذي ظهر في الديمو. شاشة الإدخال والتعديل التفصيلية مؤجلة إلى مرحلة لاحقة عند اعتمادها." %}</div>
-  <div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>{% translate "الحالة" %}</th><th>{% translate "الفكرة" %}</th></tr></thead><tbody>
-    <tr><td>{% translate "الفصل" %}</td><td>{% translate "قرار إداري يحتاج مرجع قرار ولا يحذف الأثر المالي." %}</td></tr>
-    <tr><td>{% translate "التأجيل" %}</td><td>{% translate "ينقل الرصيد والتسجيل إلى دفعة لاحقة وفق القواعد." %}</td></tr>
-    <tr><td>{% translate "الإحلال" %}</td><td>{% translate "استبدال مشارك بآخر مع حفظ الأثر والتدقيق." %}</td></tr>
-    <tr><td>{% translate "رصيد دائن" %}</td><td>{% translate "ينشأ من حالة خاصة أو استرداد ولا يُحذف." %}</td></tr>
-  </tbody></table></div>
+  <div class="card2-head"><h2>{% translate "الأنواع الستة" %}</h2></div>
+  <div class="card2-body">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>{% translate "النوع" %}</th>
+            <th>{% translate "ما الذي يحدث، وأي قاعدة تحكمه" %}</th>
+            <th>{% translate "حالته في النظام" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for case in cases %}
+            <tr>
+              <td>{{ case.label }}</td>
+              <td>{{ case.what }}</td>
+              <td><span class="chip {% if case.built %}ok{% else %}warn{% endif %} dot">{{ case.state }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "حالة السجل" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      {% for label, meaning in statuses %}
+        <dt>{{ label }}</dt><dd>{{ meaning }}</dd>
+      {% endfor %}
+    </dl>
+  </div>
+</div>
+
+{% if links %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "الشاشات التي تلتقي بها هذه الحالات" %}</h2></div>
+    <div class="card2-body">
+      <div class="form-acts">
+        {% for link in links %}
+          <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

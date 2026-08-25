@@ -195,11 +195,25 @@ def partner_share_for(*, agreement: Any, base: Decimal, student_count: int) -> D
     return round_money(agreement.commission_amount or ZERO)
 
 
+def ineligibility_reasons() -> list[tuple[str, str]]:
+    """(enrolment status, reason label) pairs of BR-045, for a read-only screen.
+
+    Read from ``INELIGIBLE_STATUSES`` rather than retyped beside it, so a status
+    added to the rule reaches the screen without anyone remembering to.
+    """
+    reasons = dict(IneligibilityReason.choices)
+    return [
+        (status, str(reasons.get(reason, reason)))
+        for status, reason in sorted(INELIGIBLE_STATUSES.items())
+    ]
+
+
 __all__ = [
     "INELIGIBLE_STATUSES",
     "EligibilityVerdict",
     "evaluate_eligibility",
     "excluded_collected",
+    "ineligibility_reasons",
     "is_payment_overdue",
     "partner_share_for",
     "shareable_collected",

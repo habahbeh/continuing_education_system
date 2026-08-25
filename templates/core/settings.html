@@ -4,7 +4,74 @@
 {% block title %}{% translate "الإعدادات — مركز التعليم المستمر" %}{% endblock %}
 
 {% block content %}
-<div class="page-head"><div><span class="eyebrow">{% translate "النظام" %}</span><h1>{{ title }}</h1><p class="sub">{% translate "صفحة قراءة أولية لقرارات النظام المهمة. تعديل الإعدادات مؤجل حتى لا نفتح مسار تغيير غير مضبوط قبل التسليم." %}</p></div></div>
-<div class="card2"><div class="note warn"><strong>{% translate "Read-only" %}</strong> {% translate "هذه الصفحة تحافظ على ظهور شاشة الإعدادات كما في الديمو، وتعرض القرار بوضوح: لا تعديل مباشر في هذه المرحلة." %}</div>
-<ul class="stack-list"><li>{% translate "التأمينات المستردة: قرار تشغيلي يُفعل عند الحاجة." %}</li><li>{% translate "مهل الدفع والتأخير: مضبوطة عبر خدمة الإعدادات." %}</li><li>{% translate "إعدادات الوثائق والطباعة: مرتبطة بنماذج الشهادة وبراءة الذمة." %}</li></ul></div>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "النظام" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "ما الذي يستطيع المركز تغييره دون إصدار برمجي جديد: المفاتيح التي تحكم القواعد، والقرارات التي ما زالت مفتوحة." %}</p>
+  </div>
+</div>
+
+<div class="note info">
+  <div>
+    <strong>{% translate "قراءة فقط في هذه المرحلة." %}</strong>
+    {% translate "لا ثابت من ثوابت العمل مكتوب في الشيفرة: كل حدّ ورسم ومضاعف هو قيمة مؤرّخة بتاريخ سريان. لذلك تغيير قاعدة عملٌ إداري لا إصدار برمجي، وهو لا يعيد كتابة الماضي — مطالبة حُسبت في تموز تبقى تُقرأ بإعدادات تموز." %}
+  </div>
+</div>
+
+<div class="note warn">
+  <div>
+    <strong>{% translate "لماذا لا يوجد زرّ تعديل هنا؟" %}</strong>
+    {% translate "لأن تعديل إعداد يعني كتابة قيمة جديدة لها تاريخ سريان، لا استبدال القيمة القائمة. نموذج تعديل بسيط كان سيمحو التأريخ ويجعل حساب الشهر الماضي يُقرأ بقيمة هذا الشهر. صلاحية التعديل نفسها ممنوحة لمدير المركز في مصفوفة الصلاحيات؛ الشاشة التي تمارسها هي غير المبنية بعد." %}
+  </div>
+</div>
+
+<div class="note">
+  <div>
+    {% translate "القيم غير معروضة هنا عن قصد: تُقرأ عند لحظة استعمالها بحسب تاريخ سريانها، فطباعة قيمة على هذه الصفحة تُظهر رقماً هو رقم اليوم بالمصادفة وحدها. الثابت هو المفتاح وما يحكمه." %}
+  </div>
+</div>
+
+{% for group in groups %}
+  <div class="card2">
+    <div class="card2-head"><h2>{{ group.title }}</h2></div>
+    <div class="card2-body">
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead>
+            <tr><th>{% translate "المفتاح" %}</th><th>{% translate "ما الذي يحكمه" %}</th></tr>
+          </thead>
+          <tbody>
+            {% for key, meaning in group.keys %}
+              <tr><td dir="ltr">{{ key }}</td><td>{{ meaning }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "قرارات ما زالت مفتوحة" %}</h2></div>
+  <div class="card2-body">
+    <p class="hint">{% translate "كل واحد منها يعمل اليوم على فرضية مهنية مسجَّلة، لا على قرار من العميل. وكلٌّ منها يُعكس بتغيير قيمة إعداد — لا بهجرة ولا بإصدار." %}</p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>{% translate "المرجع" %}</th><th>{% translate "السؤال" %}</th><th>{% translate "المفتاح الذي يحسمه" %}</th></tr>
+        </thead>
+        <tbody>
+          {% for ref, question, key in open_decisions %}
+            <tr>
+              <td><span class="chip warn">{{ ref }}</span></td>
+              <td>{{ question }}</td>
+              <td dir="ltr">{{ key }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

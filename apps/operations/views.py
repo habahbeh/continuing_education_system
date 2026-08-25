@@ -1424,10 +1424,109 @@ def enroll_flow_view(request: HttpRequest) -> HttpResponse:
 
 
 def special_cases_view(request: HttpRequest) -> HttpResponse:
-    """Special-cases landing page; the rules exist, the guided UI is explicit."""
+    """
+    The six documented exceptions to the ordinary lifecycle (DATA_MODEL §7.6).
+
+    The rules run today — ``special_case_service`` enforces BR-067 … BR-071 and
+    the database carries the dismissal constraint — but no data-entry screen
+    exists yet, so this page teaches the types and says so plainly instead of
+    drawing a form that would refuse everyone.
+
+    Two of the six types are honest about a gap: CANCELLATION and
+    CREDIT_TRANSFER are valid ``SpecialCaseType`` values with a CheckConstraint
+    behind them and no service that creates one. Listing them as though they
+    worked would be the fake functionality this sprint exists to avoid.
+    """
     policy.require(request.user, Screen.SPECIAL_CASES, Action.VIEW, request=request)
+
+    built = _("مسار مبني")
+    declared = _("نوع مُعرَّف — بلا خدمة تُنشئه بعد")
+    cases = [
+        {
+            "label": _("إلغاء"),
+            "state": declared,
+            "built": False,
+            "what": _(
+                "إلغاء التسجيل قبل أن يبدأ أثره. النوع محفوظ في النموذج ومحمي "
+                "بقيد في قاعدة البيانات، ولا توجد خدمة تُنشئ حالة من هذا النوع بعد."
+            ),
+        },
+        {
+            "label": _("فصل"),
+            "state": built,
+            "built": True,
+            "what": _(
+                "قرار إداري لا يُتخذ على كلام: مرجع القرار إلزامي في الخدمة وفي "
+                "قاعدة البيانات معاً (BR-067). لا استرداد يتبع الفصل، والشريك لا "
+                "يستحق عنه شيئاً (BR-045)، وأي رصيد متبقٍ يبقى ديناً يمنع براءة "
+                "الذمة (BR-068)."
+            ),
+        },
+        {
+            "label": _("ترحيل لدفعة لاحقة"),
+            "state": built,
+            "built": True,
+            "what": _(
+                "ينتقل المشارك وماله معاً إلى دفعة لاحقة (BR-069). المال ينتقل كما "
+                "ينتقل في النقل: تخصيص عكسي على التسجيل القديم ومثله على الجديد — "
+                "لا يُعدَّل قيد ولا يُحذف."
+            ),
+        },
+        {
+            "label": _("إحلال"),
+            "state": built,
+            "built": True,
+            "what": _(
+                "بديل يأخذ مقعداً شاغراً بانسحاب موثّق، وبلا رسم تسجيل ثانٍ "
+                "(BR-070): المقعد دُفع عنه إدارياً مرة، وتحصيل الرسم مجدداً يُحاسب "
+                "المركز على عمله مرتين."
+            ),
+        },
+        {
+            "label": _("نقل رصيد"),
+            "state": declared,
+            "built": False,
+            "what": _(
+                "نقل رصيد بين تسجيلين. النوع مُعرَّف في النموذج، ولا توجد خدمة "
+                "تُنشئ حالة من هذا النوع بعد."
+            ),
+        },
+        {
+            "label": _("رصيد دائن"),
+            "state": built,
+            "built": True,
+            "what": _(
+                "يجعل الرصيد الدائن حالةً لها صاحب بدل أن يبقى رقماً سالباً "
+                "(BR-071). يُنشأ عن ترحيل أو إحلال أو نقل أرخص، ويُردّ عند براءة "
+                "الذمة — فالبراءة لا تُغلق ورصيد المشارك غير صفر (BR-073)."
+            ),
+        },
+    ]
+
+    statuses = [
+        (_("قائمة"), _("سُجِّلت ولم تُسوَّ بعد.")),
+        (_("مسوّاة"), _("انتهى أثرها المالي والإداري.")),
+        (_("ملغاة"), _("أُلغيت الحالة نفسها، ويبقى أثرها في سجل التدقيق.")),
+    ]
+
+    links = [
+        {"url": reverse(route), "label": label}
+        for screen, route, label in (
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+            (Screen.TRANSFERS, "operations:transfers", _("النقل بين الدورات")),
+            (Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
+        )
+        if policy.is_allowed(request.user, screen, Action.VIEW)
+    ]
+
     return render(
         request,
         "operations/special_cases.html",
-        {"title": _("الحالات الخاصة"), "active_screen": Screen.SPECIAL_CASES},
+        {
+            "title": _("الحالات الخاصة"),
+            "active_screen": Screen.SPECIAL_CASES,
+            "cases": cases,
+            "statuses": statuses,
+            "links": links,
+        },
     )

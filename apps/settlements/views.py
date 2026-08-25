@@ -21,6 +21,7 @@ from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
@@ -41,6 +42,7 @@ from apps.settlements.services import (
     absence_service,
     claim_service,
     clawback_service,
+    entitlement_service,
     obligation_service,
     settlement_service,
 )
@@ -581,10 +583,105 @@ def _handle_settlement_detail(request: HttpRequest, code: str) -> HttpResponse |
 # Sprint 8K — entitlement landing page from the demo
 # ---------------------------------------------------------------------------
 def entitlement_view(request: HttpRequest) -> HttpResponse:
-    """Read-only guide to partner entitlement before claims and settlements."""
+    """
+    How a partner comes to be owed money — read only, and deliberately so.
+
+    The entitlement figure itself is never computed here. ``entitlement_service``
+    works one enrolment against one agreement at a time, and a landing page that
+    picked enrolments and agreements for the reader would be building the claim
+    screen over again under a second name. The claim screen already does that,
+    and this page sends the reader to it.
+
+    What it does take from the service is real: ``INELIGIBLE_STATUSES`` is the
+    BR-045 list itself, read from the module rather than retyped here, so a
+    status added to the rule shows up on this page without anyone remembering to
+    update it.
+    """
     policy.require(request.user, Screen.ENTITLEMENT, Action.VIEW, request=request)
+
+    ineligible = [
+        {"status": status, "reason": reason}
+        for status, reason in entitlement_service.ineligibility_reasons()
+    ]
+
+    chain = [
+        {
+            "number": 1,
+            "title": _("الاتفاقية"),
+            "what": _(
+                "هي التي تقرر: نموذج الاحتساب، وما الذي يُشارَك وما الذي يُستثنى. "
+                "الاستثناءات تأتي من العقد الموقّع لا من الشيفرة (BR-046)، "
+                "والتأمينات مستثناة افتراضياً ما لم ينص العقد صراحةً على غير ذلك "
+                "(BR-092 · Q-01)."
+            ),
+        },
+        {
+            "number": 2,
+            "title": _("ما حُصِّل فعلاً"),
+            "what": _(
+                "الاستحقاق يتبع النقد المقبوض لا الفاتورة (BR-044): تُقرأ التخصيصات "
+                "على السندات الصادرة، لا المبالغ المستحقة على الورق. الفاتورة وحدها "
+                "لا تُكسب الشريك شيئاً."
+            ),
+        },
+        {
+            "number": 3,
+            "title": _("الأهلية"),
+            "what": _(
+                "بعض التسجيلات لا تُكسب الشريك شيئاً مهما حُصِّل عليها (BR-045) — "
+                "القائمة كاملة في الجدول أدناه."
+            ),
+        },
+        {
+            "number": 4,
+            "title": _("المطالبة"),
+            "what": _(
+                "تُجمَّد الحسبة لفترة: يُطبَّق نموذج الاحتساب على ما حُصِّل من "
+                "المؤهّلين، وبعد الاعتماد لا يعدّلها أحد (BR-051)."
+            ),
+        },
+        {
+            "number": 5,
+            "title": _("الالتزامات والخصم"),
+            "what": _(
+                "ما على الشريك — غياب مدرّس، أو استرداد دفعة مقدّمة — لا يُطالَب به "
+                "بفاتورة، بل يُخصم من مطالبة لاحقة (BR-036)."
+            ),
+        },
+        {
+            "number": 6,
+            "title": _("المخالصة"),
+            "what": _("التوقيع النهائي على ما استقر بعد الخصم — وبها ينتهي أثر الفترة."),
+        },
+    ]
+
+    models = [
+        (_("نسبة مئوية"), _("نسبة من الأساس المحصَّل (BR-046).")),
+        (_("مبلغ ثابت لكل طالب"), _("مبلغ مقطوع عن كل طالب مؤهَّل، مهما كان الأساس (BR-048).")),
+        (_("عمولة خدمة"), _("عمولة مقطوعة على خدمة مُنجَزة (BR-049).")),
+    ]
+
+    links = [
+        {"url": reverse(route), "label": label}
+        for screen, route, label in (
+            (Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
+            (Screen.CLAIMS, "settlements:claims", _("المطالبات")),
+            (Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
+            (Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
+            (Screen.OBLIGATIONS, "settlements:absences", _("غيابات المدربين")),
+        )
+        if policy.is_allowed(request.user, screen, Action.VIEW)
+    ]
+
     return render(
         request,
         "settlements/entitlement.html",
-        {"title": _("استحقاق الشركاء"), "active_screen": Screen.ENTITLEMENT},
+        {
+            "title": _("استحقاق الشركاء"),
+            "active_screen": Screen.ENTITLEMENT,
+            "chain": chain,
+            "models": models,
+            "ineligible": ineligible,
+            "links": links,
+        },
     )

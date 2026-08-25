@@ -401,3 +401,146 @@ def test_the_guided_flow_never_offers_a_step_the_reader_may_not_open(
             f"{role} {'may' if may_open else 'may NOT'} open {screen}, "
             f"but the guide {'offers' if offered else 'omits'} its button"
         )
+
+
+# ---------------------------------------------------------------------------
+# The four screens the demo had and the project did not — Sprint 8K-3
+# ---------------------------------------------------------------------------
+#: route → (screen that guards it, the screens it offers buttons to)
+GUIDED_SCREENS: dict[str, tuple[str, list[tuple[str, str]]]] = {
+    "operations:special-cases": (
+        "special-cases",
+        [
+            ("operations:enrollments", "enrollments"),
+            ("operations:transfers", "transfers"),
+            ("operations:clearances", "clearance"),
+        ],
+    ),
+    "settlements:entitlement": (
+        "entitlement",
+        [
+            ("partners:agreements", "agreements"),
+            ("settlements:claims", "claims"),
+            ("settlements:settlements", "settlements"),
+            ("settlements:obligations", "obligations"),
+            ("settlements:absences", "obligations"),
+        ],
+    ),
+    "people:settings": ("settings", []),
+    "people:future": ("settings", []),
+}
+
+ALL_ROLES = [
+    Role.CENTER_MANAGER,
+    Role.REGISTRATION_OFFICER,
+    Role.FINANCE_OFFICER,
+    Role.FINANCE_MANAGER,
+    Role.CASHIER,
+    Role.AUDIT_ACCOUNT,
+]
+
+#: Classes the first 8K-1 draft copied from the demo's stylesheet. None of them
+#: is defined in this project's CSS, so anything using one renders unstyled.
+DEAD_DEMO_CLASSES = ["vflow", "vstep", "vtitle", "vmeta", "vbox", "mini-title", "stack-list"]
+
+GUIDED_TEMPLATES = [
+    "templates/operations/special_cases.html",
+    "templates/settlements/entitlement.html",
+    "templates/core/settings.html",
+    "templates/core/future.html",
+    "templates/operations/enroll_flow.html",
+]
+
+
+@pytest.mark.parametrize("route", sorted(GUIDED_SCREENS))
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_guided_screens_open_for_exactly_the_roles_the_matrix_allows(
+    client: Client, seeded_settings: None, route: str, role: str
+) -> None:
+    """Hiding a menu entry is courtesy; this is the control (BR-080)."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    screen, _links = GUIDED_SCREENS[route]
+    may_view = Action.VIEW in allowed_actions(role, screen)
+    client.force_login(_user(role, f"g3.{role.lower()}.{route.replace(':', '.')}"))
+
+    response = client.get(reverse(route))
+
+    assert response.status_code == (200 if may_view else 403)
+
+
+@pytest.mark.parametrize("route", sorted(GUIDED_SCREENS))
+def test_the_guided_screens_refuse_an_anonymous_visitor(
+    client: Client, seeded_settings: None, route: str
+) -> None:
+    """Fail-closed: none of the four is public, however read-only it is."""
+    assert client.get(reverse(route)).status_code == 403
+
+
+@pytest.mark.parametrize("route", sorted(GUIDED_SCREENS))
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_guided_screens_offer_no_button_the_reader_may_not_follow(
+    client: Client, seeded_settings: None, route: str, role: str
+) -> None:
+    """
+    Every button on these pages leaves for another screen, and a button the
+    reader may not follow ends in a refusal plus a DENIED_ATTEMPT row (BR-085).
+    The gate is asserted in both directions so a matrix change cannot silently
+    turn a working button into a trap — or hide one that should be there.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    screen, links = GUIDED_SCREENS[route]
+    if Action.VIEW not in allowed_actions(role, screen):
+        pytest.skip("cannot open the page at all")
+    client.force_login(_user(role, f"g3b.{role.lower()}.{route.replace(':', '.')}"))
+
+    body = client.get(reverse(route)).content.decode("utf-8")
+
+    for target_route, target_screen in links:
+        may_follow = Action.VIEW in allowed_actions(role, target_screen)
+        offered = f'<a class="btn2 sm" href="{reverse(target_route)}">' in body
+        assert offered is may_follow, (
+            f"{role} {'may' if may_follow else 'may NOT'} open {target_screen}, "
+            f"but {route} {'offers' if offered else 'omits'} its button"
+        )
+
+
+@pytest.mark.parametrize("template", GUIDED_TEMPLATES)
+def test_the_guided_screens_use_no_class_this_project_never_defined(template: str) -> None:
+    """
+    8K-1 built these pages with markup lifted from the demo's stylesheet, so
+    ``vflow``/``vstep``/``vtitle``/``vbox`` and friends rendered as bare divs
+    here. The project has its own stepper; a class that exists in neither
+    ``input.css`` nor the built sheet is a silent styling hole.
+    """
+    from pathlib import Path
+
+    source = Path(template).read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    for dead in DEAD_DEMO_CLASSES:
+        assert f".{dead}" not in css, f"{dead} now exists — drop it from DEAD_DEMO_CLASSES"
+        assert dead not in source, f"{template} still uses the demo-only class «{dead}»"
+
+
+@pytest.mark.parametrize(
+    ("route", "role", "phrase"),
+    [
+        ("operations:special-cases", Role.CENTER_MANAGER, "صفحة إرشادية"),
+        ("settlements:entitlement", Role.FINANCE_OFFICER, "صفحة دليل"),
+        ("people:settings", Role.FINANCE_OFFICER, "قراءة فقط"),
+        ("people:future", Role.CENTER_MANAGER, "هذه ليست نواقص"),
+    ],
+)
+def test_each_guided_screen_says_out_loud_what_it_is(
+    client: Client, seeded_settings: None, route: str, role: str, phrase: str
+) -> None:
+    """A read-only page that does not say so reads as a broken functional one."""
+    client.force_login(_user(role, f"g3c.{role.lower()}.{route.replace(':', '.')}"))
+
+    body = client.get(reverse(route)).content.decode("utf-8")
+
+    assert phrase in body
