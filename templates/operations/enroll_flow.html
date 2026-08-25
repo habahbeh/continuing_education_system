@@ -3,58 +3,61 @@
 
 {% block title %}{% translate "مسار التسجيل والدفع — مركز التعليم المستمر" %}{% endblock %}
 
+{% comment %}
+  الخطوات الثماني كما اعتمدها العميل، بترتيبها: من الإعلان عن دفعة معتمدة إلى
+  رفع اسم المتدرب للوزارة. هذه هي الشاشة التي وافق عليها — لا دورة حياة كاملة
+  للمشارك تحمل اسمها.
+
+  ما بعد الاعتماد حقيقي أيضاً، فله قسمٌ تحتها: بطاقات مدمجة لا خطوات مرقّمة،
+  ليُقرأ ثانوياً بالنظر قبل أن يُقرأ بالنصّ.
+
+  «إرشاد» و«تنفيذ» يُقرآن مختلفين: الشرح نصّ، والانتقال إلى الشاشة زرّ، ولا
+  يظهر الزرّ إلا لمن يملك فتح تلك الشاشة. المرحلة تُشرح للجميع ولا تُفتح إلا
+  لمن يستطيع.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "دليل العمل" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "رحلة المشارك كاملة، من طلب الالتحاق حتى الشهادة: ماذا تفعل كل مرحلة، ومن ينفّذها، وما الذي يسبقها ويليها، وأي قاعدة توقفها." %}</p>
+    <p class="sub">{% translate "ثماني خطوات من الإعلان عن دفعة معتمدة حتى رفع اسم المتدرب إلى الوزارة — كل خطوة ومن ينفّذها والقاعدة التي تحكمها." %}</p>
   </div>
 </div>
 
 {% guided_help "enroll-flow" %}
 
-{% comment %}
-  «إرشاد» و«تنفيذ» يجب أن يُقرآ مختلفين. الشرح نصّ، والانتقال إلى الشاشة زرّ —
-  ولا يظهر الزرّ إلا لمن يملك صلاحية فتح تلك الشاشة، فالمرحلة تُشرح للجميع
-  ولا تُعرض إلا لمن يستطيع (Sprint 8K-2).
-{% endcomment %}
 <div class="note info">
   <div>
-    <strong>{% translate "لا يُنفَّذ من هذه الصفحة شيء." %}</strong>
-    {% translate "الشرح هنا، والعمل في الشاشة التي يفتحها زرّ المرحلة. لا يظهر زرّ إلا للشاشات التي تسمح لك صلاحيتك بفتحها، فقد تقرأ مرحلة كاملة دون أن ترى زرّها، وهذا مقصود لا نقص." %}
+    <strong>{% translate "هذه الصفحة لا تنفّذ إجراءات؛ هي خريطة عمل توضّح أين تبدأ وأين تنتقل." %}</strong>
+    {% translate "ولا يُقفَز فوق خطوة: التسجيل يتطلب اعتماد الوزارة، والاعتماد يتطلب وصلاً مُسجَّلاً، ورفع الاسم يتطلب تسجيلاً معتمداً — كلها قواعد تعمل في النظام لا نصائح مكتوبة هنا. ولا يظهر زرّ إلا لشاشة تسمح لك صلاحيتك بفتحها." %}
   </div>
 </div>
 
-{% for stage in stages %}
+<h2 class="sec-title">{% translate "الخطوات الثماني للتسجيل والدفع" %}</h2>
+
+{% for step in steps %}
   <div class="step">
     <div class="step-head">
-      <span class="step-num" aria-hidden="true">{{ stage.number }}</span>
-      <h2>{{ stage.title }}</h2>
-      {% if stage.optional %}
-        <span class="chip warn">{% translate "عند الحاجة فقط" %}</span>
-      {% endif %}
+      <span class="step-num" aria-hidden="true">{{ forloop.counter }}</span>
+      <h3>{{ step.title }}</h3>
+      <span class="chip">{{ step.who }}</span>
     </div>
     <div class="step-body">
-      <p class="mb-3">{{ stage.what }}</p>
+      <p class="mb-3">{{ step.what }}</p>
 
       <dl class="dl">
-        <dt>{% translate "من ينفّذها" %}</dt><dd>{{ stage.who }}</dd>
-        <dt>{% translate "ما يسبقها" %}</dt><dd>{{ stage.before }}</dd>
-        <dt>{% translate "ما يليها" %}</dt><dd>{{ stage.after }}</dd>
+        <dt>{% translate "ما يسبقها" %}</dt><dd>{{ step.before }}</dd>
+        <dt>{% translate "ما يليها" %}</dt><dd>{{ step.after }}</dd>
       </dl>
 
-      {% comment %}
-        القواعد هنا مرجع لا إنذار: «.note» بلا لون هي الحياد في نظام التصميم،
-        والأصفر يبقى للحظة التي يُرفض فيها شيء فعلاً على شاشته.
-      {% endcomment %}
-      {% for rule in stage.rules %}
+      {% for rule in step.rules %}
         <div class="note"><div>{{ rule }}</div></div>
       {% endfor %}
 
-      {% if stage.links %}
+      {% if step.links %}
         <div class="form-acts">
-          {% for link in stage.links %}
+          {% for link in step.links %}
             <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
           {% endfor %}
         </div>
@@ -62,4 +65,24 @@
     </div>
   </div>
 {% endfor %}
+
+<h2 class="sec-title">{% translate "بعد اعتماد التسجيل — مسارات لاحقة عند الحاجة" %}</h2>
+<p class="hint">{% translate "ليست من الخطوات الثماني، ولا تُسلك كلها في كل حالة. تُفتح عند الحاجة، ولكلٍّ منها قواعدها وشاشتها." %}</p>
+<div class="act-grid">
+  {% for item in later %}
+    {% if item.links %}
+      {% for link in item.links %}
+        <a class="act-card" href="{{ link.url }}">
+          <span class="t">{{ item.title }}</span>
+          <span class="d">{{ item.what }}</span>
+        </a>
+      {% endfor %}
+    {% else %}
+      <div class="act-card is-off">
+        <span class="t">{{ item.title }}</span>
+        <span class="d">{{ item.what }}</span>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
 {% endblock %}

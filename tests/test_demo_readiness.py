@@ -269,15 +269,37 @@ def test_sprint_8k_demo_parity_pages_open_for_the_manager(
     assert response.status_code == 200
 
 
-# The guide — Sprint 8K-2
+# The registration-and-payment guide
 # ---------------------------------------------------------------------------
-#: Every screen the guide offers a button to, and the screen permission that
-#: earns it. Nine screens across eight stages: stage 5 offers two.
+#: The eight steps the client approved, in the demo's own order, transcribed
+#: from its js/pages-core.js rather than from the view — so a step renamed,
+#: reordered or dropped fails against the demo and not against a copy of the
+#: page's own opinion.
+DEMO_EIGHT_STEPS = [
+    "الإعلان عن البرنامج المعتمد",
+    "الطالب يقدّم طلب التحاق",
+    "تنسيب مدير المركز للدائرة المالية",
+    "الطالب يدفع في الدائرة المالية",
+    "الطالب يستلم سند القبض",
+    "يعود للمركز ويقدّم الوصل",
+    "المركز يعتمد التسجيل",
+    "رفع اسم المتدرب لنظام الوزارة",
+]
+
+#: Each step's button and the screen that earns it. Step 6 points at the
+#: enrolments screen, not the demo's payments: ``voucher_received`` lives on
+#: the enrolment here, and a map that names the wrong door is worse than none.
 GUIDE_STAGE_SCREENS = [
+    ("operations:mohe", "mohe"),
     ("people:participant-new", "student-new"),
     ("operations:enrollments", "enrollments"),
     ("cashbox:payment-new", "payment-new"),
     ("cashbox:payments", "payments"),
+    ("operations:mohe-submit", "mohe-submit"),
+]
+
+#: The paths that open after approval — a separate section, not a ninth step.
+GUIDE_LATER_SCREENS = [
     ("operations:transfers", "transfers"),
     ("operations:special-cases", "special-cases"),
     ("cashbox:closing", "closing"),
@@ -301,6 +323,11 @@ def _stage_button(url: str) -> str:
     test would pass on the menu alone and prove nothing about the guide.
     """
     return f'<a class="btn2 sm" href="{url}">'
+
+
+def _primary_section(body: str) -> str:
+    """Only the eight. The later-paths section must not answer for them."""
+    return body.split("الخطوات الثماني للتسجيل والدفع", 1)[1].split("بعد اعتماد التسجيل", 1)[0]
 
 
 @pytest.mark.parametrize(
@@ -331,30 +358,96 @@ def test_the_guide_refuses_an_anonymous_visitor(client: Client, seeded_settings:
 
 
 @pytest.mark.parametrize("role", GUIDE_READERS)
-def test_the_guide_explains_every_stage_to_every_reader(
+def test_the_guide_carries_the_eight_steps_the_client_approved(
     client: Client, seeded_settings: None, role: str
 ) -> None:
     """
-    Filtering the buttons must not filter the teaching. A registrar who may
-    not open the till still has to know that a payment happens, who takes it
-    and what it unblocks — otherwise the guide stops being a guide for
-    exactly the people who most need one.
+    The promise the client signed off is a registration-and-payment map of
+    eight steps. This page was once rebuilt around a broader participant
+    lifecycle, which is a different screen wearing the same name.
+
+    All eight, in the demo's order, for every reader — and numbered 1…8 so the
+    sequence is read rather than inferred.
+    """
+    import re
+
+    client.force_login(_user(role, f"guide.eight.{role.lower()}"))
+
+    primary = _primary_section(
+        client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+    )
+    drawn = re.findall(r'<span class="step-num"[^>]*>(\d+)</span>\s*<h3>([^<]+)</h3>', primary)
+
+    assert [title.strip() for _n, title in drawn] == DEMO_EIGHT_STEPS
+    assert [n for n, _t in drawn] == [str(i) for i in range(1, 9)]
+
+
+@pytest.mark.parametrize("role", GUIDE_READERS)
+def test_the_later_paths_are_a_section_of_their_own_not_a_ninth_step(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Transfers, special cases, the closing, the clearance and the certificate
+    are real and belong on the page — underneath, labelled, and drawn as cards
+    rather than as numbered steps, so nobody reads them as part of the eight.
+    """
+    client.force_login(_user(role, f"guide.later.{role.lower()}"))
+
+    body = client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+    later = body.split("بعد اعتماد التسجيل", 1)[1]
+
+    assert "مسارات لاحقة عند الحاجة" in later
+    for title in ("النقل بين الدورات", "الحالات الخاصة", "براءة الذمة", "الشهادة"):
+        assert title in later
+        assert title not in _primary_section(body), f"«{title}» leaked into the eight"
+    # Cards, not steps: the eight own the numbered treatment.
+    assert 'class="act-card' in later
+    assert 'class="step-num"' not in later
+
+
+@pytest.mark.parametrize("role", GUIDE_READERS)
+def test_the_guide_explains_every_step_to_every_reader(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Filtering the buttons must not filter the teaching. A registrar who may not
+    open the till still has to know that a payment happens, who takes it and
+    what it unblocks — otherwise the guide stops guiding exactly the people who
+    most need one.
     """
     client.force_login(_user(role, f"guide.copy.{role.lower()}"))
 
-    body = client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+    primary = _primary_section(
+        client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+    )
 
-    for stage_title in (
-        "طلب التحاق جديد",
-        "التسجيل ومتابعته",
-        "استيفاء دفعة",
-        "الدفعات وسندات القبض",
-        "النقل أو الحالة الخاصة",
-        "الإقفال اليومي",
-        "براءة الذمة",
-        "الشهادة",
-    ):
-        assert stage_title in body, f"{role} is not told about «{stage_title}»"
+    for step in DEMO_EIGHT_STEPS:
+        assert step in primary, f"{role} is not told about «{step}»"
+
+
+def test_the_payment_step_still_carries_the_minimum_first_payment_rule(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    BR-020 is the rule a cashier meets first, and the reason a payment is
+    refused at the counter. The claim has to stay exact: diplomas only, the
+    first payment only, the minimum read from an effective-dated setting, and a
+    per-programme override that beats it (Q-15).
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "guide.br020"))
+
+    primary = _primary_section(
+        client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+    )
+    step = primary.split("الطالب يدفع في الدائرة المالية", 1)[1]
+
+    assert "BR-020" in step
+    assert "diploma_minimum_first_payment" in step
+    assert "دبلوم" in step
+    assert "الدفعة الأولى" in step
+    assert "Q-15" in step
+    # …and the rule that keeps the manager out of the till.
+    assert "BR-081" in step
 
 
 def test_the_guide_shows_the_registrar_the_admission_form_and_not_the_till(
@@ -367,10 +460,8 @@ def test_the_guide_shows_the_registrar_the_admission_form_and_not_the_till(
 
     assert _stage_button(reverse("people:participant-new")) in body
     assert _stage_button(reverse("operations:enrollments")) in body
-    assert _stage_button(reverse("operations:certificates")) in body
-    # D-06 — the registrar takes no cash, so neither till screen is offered.
+    # D-06 — the registrar takes no cash, so the till is named and not opened.
     assert _stage_button(reverse("cashbox:payment-new")) not in body
-    assert _stage_button(reverse("cashbox:closing")) not in body
 
 
 @pytest.mark.parametrize("role", GUIDE_READERS)
@@ -378,15 +469,14 @@ def test_the_guided_flow_never_offers_a_step_the_reader_may_not_open(
     client: Client, seeded_settings: None, role: str
 ) -> None:
     """
-    The guide sends a new employee to the screen for each stage, and the first
-    version linked every stage for everyone who could open the page. Four roles
-    can, and none of them may open all nine screens: §3.4/17 keeps the manager,
-    the registrar and the audit account out of cash collection — D-01 makes
-    BR-081 an explicit deny rather than a missing grant — and §3.2/4 keeps the
-    finance officer out of the admission form. Following the guide as written
-    therefore ended in a refusal and a DENIED_ATTEMPT row (BR-085).
+    The guide sends a new employee to the screen for each step, and an early
+    version linked every step for everyone who could open the page. Four roles
+    can, and none may open all of them: §3.4/17 keeps the manager, the
+    registrar and the audit account out of cash collection — D-01 makes BR-081
+    an explicit deny rather than a missing grant — and §3.3/14 keeps the
+    finance officer out of the ministry file.
 
-    A stage the reader may not VIEW keeps its explanation and loses its button.
+    A step the reader may not open keeps its explanation and loses its button.
     """
     from apps.people.constants import Action
     from apps.people.permissions.matrix import allowed_actions
@@ -395,9 +485,11 @@ def test_the_guided_flow_never_offers_a_step_the_reader_may_not_open(
 
     body = client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
 
-    for route, screen in GUIDE_STAGE_SCREENS:
+    for route, screen in GUIDE_STAGE_SCREENS + GUIDE_LATER_SCREENS:
         may_open = Action.VIEW in allowed_actions(role, screen)
-        offered = _stage_button(reverse(route)) in body
+        offered = _stage_button(reverse(route)) in body or (
+            f'<a class="act-card" href="{reverse(route)}">' in body
+        )
         assert offered is may_open, (
             f"{role} {'may' if may_open else 'may NOT'} open {screen}, "
             f"but the guide {'offers' if offered else 'omits'} its button"
@@ -1554,3 +1646,58 @@ def test_the_dashboard_action_cards_stay_permission_gated(
         for route, screen in DASHBOARD_ACTIONS:
             may = Action.VIEW in allowed_actions(role, screen)
             assert (reverse(route) in cards) is may, f"{role} · {screen}"
+
+
+def test_the_guide_page_uses_no_class_this_project_never_defined() -> None:
+    """The eight steps ride the project's own stepper, not the demo's."""
+    from pathlib import Path
+
+    source = Path("templates/operations/enroll_flow.html").read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    for dead in [*DEAD_DEMO_CLASSES, "compact", "mono"]:
+        assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
+        assert dead not in source, f"enroll_flow.html uses the demo-only class «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+
+def test_the_guide_page_keeps_its_responsive_scaffolding() -> None:
+    """
+    The eight are stacked cards, which read the same on a phone as on a desk.
+    The later paths are a grid that collapses: one column, two, then three.
+    """
+    from pathlib import Path
+
+    source = Path("templates/operations/enroll_flow.html").read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    def rule(selector: str) -> str:
+        return css.split(selector, 1)[1].split("}", 1)[0]
+
+    assert 'class="step"' in source and 'class="step-body"' in source
+    assert 'class="act-grid"' in source
+    assert "sm:grid-cols-2" in rule(".act-grid")
+    assert "lg:grid-cols-3" in rule(".act-grid")
+    # A later path the reader may not open keeps its card and loses its link.
+    assert "act-card is-off" in source
+    assert ".act-card.is-off" in css
+
+
+def test_a_later_path_the_reader_cannot_open_is_shown_without_a_link(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The registrar may not open the daily closing (§3.4/18 grants them nothing
+    there), so the card stays — the closing is part of how the centre works —
+    and it is drawn as a plain card rather than a door that would refuse them.
+    """
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "guide.later.off"))
+
+    body = client.get(reverse("operations:enroll-flow")).content.decode("utf-8")
+    later = body.split("بعد اعتماد التسجيل", 1)[1]
+
+    assert "الإقفال اليومي" in later
+    assert f'href="{reverse("cashbox:closing")}"' not in later
+    assert "act-card is-off" in later

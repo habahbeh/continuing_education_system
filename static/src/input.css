@@ -346,6 +346,9 @@
   .act-card .t  { @apply block text-sm font-extrabold text-ink; }
   .act-card .d  { @apply block mt-1 text-xs text-ink-3; text-wrap: pretty; }
   .act-card.lead { @apply bg-brand-100 border-brand-200; }
+  /* بطاقة لشاشة خارج صلاحية القارئ: تبقى مكانها وتفقد رابطها وحده. */
+  .act-card.is-off { @apply bg-surface-2; box-shadow: none; }
+  .act-card.is-off .t { @apply text-ink-3; }
   .act-card.lead .t { @apply text-brand-800; }
   .act-card.lead .d { @apply text-brand-800/80; }
 
