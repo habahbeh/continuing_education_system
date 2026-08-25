@@ -9,10 +9,13 @@
   لا من اسم الدور، فأمين الصندوق يحصل على شاشة صندوق وموظف التسجيل على شاشة
   تسجيل دون أن يسأل هذا القالب من هو أحدهما.
 
-  ثلاث طبقات بترتيب ما يفعله القارئ:
+  الترتيب ترتيب ما يفعله القارئ لا ترتيب ما لدينا من بيانات:
   1. «ابدأ من هنا» — الأفعال التي جاء ليقوم بها، بالصلاحية.
-  2. العدّادات — حالة العمل الآن، وأولها واحد بارز لا أربعة متساوية.
+  2. «حالة العمل الآن» — العدّادات، وأولها واحد بارز لا أربعة متساوية.
   3. «ما ينتظر قراراً» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
+
+  ٢ و٣ عمودان متجاوران من `lg` فصاعداً: الطابور بضعة أسطر قصيرة، وامتداده على
+  عرض الشاشة كاملاً كان يترك فراغاً لا يقرؤه أحد. دون `lg` يعودان عموداً واحداً.
 {% endcomment %}
 
 {% block content %}
@@ -20,10 +23,10 @@
   <div>
     <span class="eyebrow">{% translate "الرئيسية" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">
-      {% translate "عدّادات تشغيلية لحالة العمل الآن — ليست تقريراً مالياً." %}
-      <span class="num">{{ today }}</span>
-    </p>
+    <p class="sub">{% translate "عدّادات تشغيلية لحالة العمل الآن — ليست تقريراً مالياً." %}</p>
+  </div>
+  <div class="acts">
+    <span class="chip"><span class="num">{{ today }}</span></span>
   </div>
 </div>
 
@@ -38,40 +41,47 @@
   </div>
 {% endif %}
 
-{% if kpis %}
-  <div class="kpi-grid">
-    {% for kpi in kpis %}
-      <a class="kpi {% if kpi.lead %}primary{% endif %}" href="{{ kpi.url }}">
-        <div class="label">{{ kpi.label }}</div>
-        <div class="value num">{{ kpi.value }}</div>
-        <div class="foot">{{ kpi.foot }}</div>
-      </a>
-    {% endfor %}
-  </div>
-{% endif %}
-
-{% if waiting %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "ما ينتظر قراراً" %}</h2></div>
-    <div class="card2-body">
-      {% for row in waiting %}
-        <div class="calc-row">
-          <span>
-            <a href="{{ row.url }}">{{ row.label }}</a>
-            <span class="hint">{{ row.foot }}</span>
-          </span>
-          <span class="val num">{{ row.value }}</span>
+{% if kpis or waiting %}
+  <div class="dash-cols">
+    <div class="dash-main">
+      {% if kpis %}
+        <h2 class="sec-title">{% translate "حالة العمل الآن" %}</h2>
+        <div class="kpi-grid">
+          {% for kpi in kpis %}
+            <a class="kpi {% if kpi.lead %}primary{% endif %}" href="{{ kpi.url }}">
+              <div class="label">{{ kpi.label }}</div>
+              <div class="value num">{{ kpi.value }}</div>
+              <div class="foot">{{ kpi.foot }}</div>
+            </a>
+          {% endfor %}
         </div>
-      {% endfor %}
+      {% endif %}
     </div>
-  </div>
-{% elif kpis %}
-  <div class="card2">
-    <div class="empty">
-      <span class="empty-title">{% translate "لا شيء ينتظر قراراً" %}</span>
-      <span class="empty-body">
-        {% translate "لا طابور مفتوح ضمن شاشاتك: لا وصولات ناقصة، ولا طلبات معلّقة، ولا إقفال بانتظار اعتماد. الطوابير تظهر هنا وحدها متى امتلأت." %}
-      </span>
+
+    <div class="dash-side">
+      <h2 class="sec-title">{% translate "ما ينتظر قراراً" %}</h2>
+      <div class="card2">
+        {% if waiting %}
+          <div class="card2-body">
+            {% for row in waiting %}
+              <div class="calc-row">
+                <span>
+                  <a href="{{ row.url }}">{{ row.label }}</a>
+                  <span class="hint">{{ row.foot }}</span>
+                </span>
+                <span class="chip">{{ row.value }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty">
+            <span class="empty-title">{% translate "لا شيء ينتظر قراراً" %}</span>
+            <span class="empty-body">
+              {% translate "لا طابور مفتوح ضمن شاشاتك: لا وصولات ناقصة، ولا طلبات معلّقة، ولا إقفال بانتظار اعتماد. الطوابير تظهر هنا وحدها متى امتلأت." %}
+            </span>
+          </div>
+        {% endif %}
+      </div>
     </div>
   </div>
 {% endif %}

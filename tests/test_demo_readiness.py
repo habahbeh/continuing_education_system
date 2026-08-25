@@ -1167,21 +1167,60 @@ def test_the_dashboard_renders_on_a_database_with_no_work_in_it(
 
 def test_the_dashboard_keeps_its_responsive_scaffolding() -> None:
     """
-    The grid is what makes this readable on a phone: one column, two on a
-    tablet, four on a desktop. It is defined once in ``.kpi-grid``, so the
-    template must keep using it rather than hand-rolling columns.
+    One column on a phone, two on a wide screen, and nothing hand-rolled.
+
+    The queue is a few short lines and used to stretch the whole width, which
+    left a gap nobody reads. From ``lg`` it sits beside the counters instead.
+    Below that it stacks: splitting a 700px viewport two ways would give the
+    queue a 240px column, which is worse than stacking, not better.
     """
     from pathlib import Path
 
     source = Path("templates/operations/dashboard.html").read_text(encoding="utf-8")
     css = Path("static/src/input.css").read_text(encoding="utf-8")
 
+    def rule(selector: str) -> str:
+        return css.split(selector, 1)[1].split("}", 1)[0]
+
+    # The counters keep their own grid, defined once.
     assert 'class="kpi-grid"' in source
-    assert "sm:grid-cols-2" in css.split(".kpi-grid")[1].split("}")[0]
-    assert "xl:grid-cols-4" in css.split(".kpi-grid")[1].split("}")[0]
+    assert "sm:grid-cols-2" in rule(".kpi-grid")
+    assert "xl:grid-cols-4" in rule(".kpi-grid")
+
+    # Two columns, and only from lg — never below it.
+    assert 'class="dash-cols"' in source
+    assert 'class="dash-main"' in source
+    assert 'class="dash-side"' in source
+    assert "lg:grid-cols-3" in rule(".dash-cols")
+    assert "lg:col-span-2" in rule(".dash-main ")
+    for selector in (".dash-cols", ".dash-main ", ".dash-side"):
+        assert "md:" not in rule(selector), f"{selector} splits before lg"
+
+    # Grid children need an explicit zero minimum or long content bursts the
+    # column instead of scrolling inside it.
+    assert "min-w-0" in rule(".dash-main ")
+    assert "min-w-0" in rule(".dash-side")
+
+    # Four counters squeezed into two-thirds of the width are unreadable.
+    assert "xl:grid-cols-2" in rule(".dash-main .kpi-grid")
+
     # …and the wrapping bar, so buttons stack instead of overflowing.
     assert 'class="action-bar"' in source
-    assert "flex-wrap" in css.split(".action-bar")[1].split("}")[0]
+    assert "flex-wrap" in rule(".action-bar")
+
+
+def test_the_dashboard_layout_classes_survived_the_css_build() -> None:
+    """
+    Tailwind drops a component class no template mentions. Adding the rule and
+    rebuilding BEFORE the markup existed purged all four of these once already,
+    so the built sheet — not the source — is what this asserts.
+    """
+    from pathlib import Path
+
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for name in ("dash-cols", "dash-main", "dash-side", "sec-title"):
+        assert f".{name}" in built, f"«{name}» is not in the built stylesheet — rebuild CSS"
 
 
 def test_the_dashboard_uses_no_class_this_project_never_defined() -> None:
