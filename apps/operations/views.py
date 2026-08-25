@@ -1213,8 +1213,8 @@ def enroll_flow_view(request: HttpRequest) -> HttpResponse:
 
     **Nothing here is invented.** Every stage names the rules that actually run
     underneath it, so the guide cannot drift from the system: BR-013 · BR-018
-    on the enrolment, BR-022 · BR-025 on the money, BR-027 · BR-028 on the
-    closing, BR-060 … BR-066 on transfers, BR-067 … BR-071 on the special
+    on the enrolment, BR-020 · BR-022 · BR-025 on the money, BR-027 · BR-028 on
+    the closing, BR-060 … BR-066 on transfers, BR-067 … BR-071 on the special
     cases, BR-073 · BR-074 on the clearance and BR-075 on the certificate.
 
     **Why the links are filtered.** Four roles may open this page and none may
@@ -1288,6 +1288,12 @@ def enroll_flow_view(request: HttpRequest) -> HttpResponse:
             "before": _("تسجيل قائم للمشارك."),
             "after": _("صدور سند القبض وتسليمه للمشارك."),
             "rules": [
+                _(
+                    "الدفعة الأولى على دبلوم لها حدّ أدنى تُرفض دونه (BR-020)، وأصله "
+                    "«رسم التسجيل + أول مادة». الحدّ إعدادٌ مؤرّخ باسم "
+                    "«diploma_minimum_first_payment»، ولبعض الدبلومات حدّ خاص يتجاوزه "
+                    "(Q-15). القاعدة تخصّ الدبلومات وحدها، والدفعة الأولى وحدها."
+                ),
                 _(
                     "مدير المركز لا يستوفي دفعة ولا يُنشئ سند قبض (BR-081 · D-01)، "
                     "وموظف التسجيل لا يقبض نقداً — منعٌ صريح لا نقصٌ في الصلاحية."
