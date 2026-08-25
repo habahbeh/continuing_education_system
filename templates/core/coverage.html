@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "مصفوفة تغطية المتطلبات — مركز التعليم المستمر" %}{% endblock %}
+
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">{% translate "مراجعة التسليم" %}</span><h1>{{ title }}</h1><p class="sub">{% translate "هذه الصفحة تربط ما رآه العميل في الديمو بما هو موجود في النظام الحقيقي." %}</p></div></div>
+<div class="card2"><div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>{% translate "المرجع" %}</th><th>{% translate "المتطلب" %}</th><th>{% translate "أين يظهر" %}</th><th>{% translate "الحالة" %}</th></tr></thead><tbody>{% for ref, requirement, screen, status in rows %}<tr><td>{{ ref }}</td><td>{{ requirement }}</td><td>{{ screen }}</td><td><span class="chip brand">{{ status }}</span></td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}

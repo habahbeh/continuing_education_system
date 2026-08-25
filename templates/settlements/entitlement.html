@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "استحقاق الشركاء — مركز التعليم المستمر" %}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "مدخل واضح لحساب الاستحقاق قبل إنشاء المطالبة والمخالصة. المنطق التشغيلي الفعلي موجود في المطالبات والالتزامات والمخالصات." %}</p>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="mini-title">{% translate "كيف يقرأ الموظف استحقاق الشريك؟" %}</div>
+  <div class="vflow">
+    <div class="vstep done"><div class="dot">1</div><div><div class="vtitle">{% translate "الاتفاقية السارية" %}</div><div class="vbox">{% translate "تحدد نموذج الاحتساب والنسب والبنود المؤثرة." %} <a href="{% url 'partners:agreements' %}">{% translate "الاتفاقيات" %}</a></div></div></div>
+    <div class="vstep done"><div class="dot">2</div><div><div class="vtitle">{% translate "المطالبة" %}</div><div class="vbox">{% translate "تجمّد الحساب للفترة وتمنع التعديل بعد الاعتماد." %} <a href="{% url 'settlements:claims' %}">{% translate "المطالبات" %}</a></div></div></div>
+    <div class="vstep done"><div class="dot">3</div><div><div class="vtitle">{% translate "الالتزامات والمخالصات" %}</div><div class="vbox">{% translate "تظهر المصاريف، الغيابات، التسويات، والتوقيع النهائي." %} <a href="{% url 'settlements:obligations' %}">{% translate "التزامات الشركاء" %}</a></div></div></div>
+  </div>
+</div>
+{% endblock %}

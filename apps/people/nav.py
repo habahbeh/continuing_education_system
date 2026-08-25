@@ -63,13 +63,14 @@ class NavGroup:
 #: not exist yet are simply absent — an entry pointing at an unbuilt screen
 #: would be a promise the system cannot keep.
 NAV: tuple[NavGroup, ...] = (
+    # Sprint 8K: the order follows the client-approved demo sidebar. Some
+    # entries are informational landing pages, but every visible promise has a
+    # real guarded route behind it.
     NavGroup(
         _("الرئيسية"),
         (
-            # Sprint 8E — found during the readiness run. The dashboard had a
-            # route, a view and a matrix row, and no way in except typing the
-            # URL. It is the first screen a demo opens, so it goes first.
             NavItem(Screen.DASHBOARD, "operations:dashboard", _("لوحة المؤشرات")),
+            NavItem(Screen.ENROLL_FLOW, "operations:enroll-flow", _("مسار التسجيل والدفع")),
         ),
     ),
     NavGroup(
@@ -77,18 +78,9 @@ NAV: tuple[NavGroup, ...] = (
         (
             NavItem(Screen.STUDENTS, "people:participants", _("المشاركون")),
             NavItem(Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق جديد")),
-            NavItem(Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
-            # Sprint 8G — §3.3/14 and §3.3/15. Both filtered on VIEW: the
-            # audit account holds it on each and may read the file and the
-            # editor without being able to draft, send or decide.
-            NavItem(Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
-            NavItem(Screen.MOHE_SUBMIT, "operations:mohe-submit", _("نموذج الإرسال للوزارة")),
             NavItem(Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
-            # Sprint 8H — §3.2/6 and §3.2/7, both on VIEW. Finance reads the
-            # transfers list because it settles them; it is absent from the
-            # request form, which is the registrar's and the manager's.
             NavItem(Screen.TRANSFERS, "operations:transfers", _("النقل بين الدورات")),
-            NavItem(Screen.TRANSFER_NEW, "operations:transfer-new", _("طلب نقل جديد")),
+            NavItem(Screen.SPECIAL_CASES, "operations:special-cases", _("الحالات الخاصة")),
         ),
     ),
     NavGroup(
@@ -97,7 +89,10 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.PROGRAMS, "catalog:programs", _("الدبلومات التدريبية")),
             NavItem(Screen.SHORT_COURSES, "catalog:short-courses", _("الدورات القصيرة")),
             NavItem(Screen.ONLINE_COURSES, "catalog:online-courses", _("الدورات الأونلاين")),
-            NavItem(Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار")),
+            NavItem(Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+            NavItem(Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+            NavItem(Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
+            NavItem(Screen.MOHE_SUBMIT, "operations:mohe-submit", _("نموذج الإرسال للوزارة")),
         ),
     ),
     NavGroup(
@@ -107,7 +102,7 @@ NAV: tuple[NavGroup, ...] = (
             NavItem(Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة")),
             NavItem(Screen.CLOSING, "cashbox:closing", _("الإقفال اليومي")),
             NavItem(Screen.DISCOUNTS, "billing:discounts", _("الخصومات")),
-            NavItem(Screen.REFUNDS, "billing:refunds", _("الاستردادات وردّ الأرصدة")),
+            NavItem(Screen.REFUNDS, "billing:refunds", _("الاستردادات")),
             NavItem(Screen.EXTRA_FEES, "billing:extra-fees", _("الرسوم الإضافية")),
             NavItem(Screen.EXPENSES, "expenses:expenses", _("المصروفات")),
             NavItem(Screen.OPENING_BALANCES, "billing:opening-balances", _("الأرصدة الافتتاحية")),
@@ -117,13 +112,9 @@ NAV: tuple[NavGroup, ...] = (
         _("الشركاء والمخالصات"),
         (
             NavItem(Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),
-            # Sprint 8F — creation is an ACTION on the partners screen, not a
-            # screen of its own, so this entry is earned by C rather than V.
-            NavItem(Screen.PARTNERS, "partners:partner-new", _("شريك جديد"), action=Action.CREATE),
             NavItem(Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
-            # §3.5/25 IS a screen, and its V cell is what this reads — the
-            # audit account may open the editor and may not submit it.
-            NavItem(Screen.AGREEMENT_NEW, "partners:agreement-new", _("تسجيل اتفاقية موقّعة")),
+            NavItem(Screen.AGREEMENT_NEW, "partners:agreement-new", _("محرّر اتفاقية")),
+            NavItem(Screen.ENTITLEMENT, "settlements:entitlement", _("استحقاق الشركاء")),
             NavItem(Screen.CLAIMS, "settlements:claims", _("المطالبات")),
             NavItem(Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
             NavItem(Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
@@ -141,10 +132,13 @@ NAV: tuple[NavGroup, ...] = (
         _("النظام"),
         (
             NavItem(Screen.REPORTS, "reporting:reports", _("التقارير")),
-            NavItem(Screen.MIGRATION, "datamigration:batches", _("الأرشيف التاريخي")),
-            NavItem(Screen.MIGRATION, "datamigration:links", _("ربط السجلات التاريخية")),
             NavItem(Screen.USERS, "people:users", _("المستخدمون والصلاحيات")),
             NavItem(Screen.AUDIT, "people:audit", _("سجل التدقيق")),
+            NavItem(Screen.SETTINGS, "settings", _("الإعدادات")),
+            NavItem(Screen.MIGRATION, "datamigration:batches", _("ترحيل البيانات")),
+            NavItem(Screen.MIGRATION, "datamigration:links", _("ربط السجلات التاريخية")),
+            NavItem(Screen.SETTINGS, "coverage", _("مصفوفة تغطية المتطلبات")),
+            NavItem(Screen.SETTINGS, "future", _("النطاق المستقبلي")),
         ),
     ),
 )

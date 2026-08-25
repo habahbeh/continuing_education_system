@@ -6,9 +6,9 @@ is a silent permission hole: `require(user, "payment-new", ...)` misspelled as
 `"payment_new"` matches no deny rule and no allow entry, and "no entry" would
 otherwise be indistinguishable from a screen nobody guarded.
 
-The screen list is the 37 PRODUCTION screens of PERMISSIONS.md §3. Rows 37
-(`coverage`) and 38 (`future`) are review tools that are never built
-(SPEC.md §3.1) and are therefore absent here.
+The screen list is the 37 production screens of PERMISSIONS.md §3. Sprint 8K
+adds client-review pages such as coverage and future scope as guarded routes,
+but they deliberately do not become permission-matrix screens.
 """
 
 from __future__ import annotations

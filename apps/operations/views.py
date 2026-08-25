@@ -1197,3 +1197,25 @@ def _run_transfer_action(request: HttpRequest, action: str, transfer: Any) -> No
         request=request,
     )
     messages.success(request, _("نُفِّذ النقل وسُوّيت الرسوم."))
+
+# ---------------------------------------------------------------------------
+# Sprint 8K — demo-parity guided screens
+# ---------------------------------------------------------------------------
+def enroll_flow_view(request: HttpRequest) -> HttpResponse:
+    """Read-only workflow map: request → registration → payment → certificate."""
+    policy.require(request.user, Screen.ENROLL_FLOW, Action.VIEW, request=request)
+    return render(
+        request,
+        "operations/enroll_flow.html",
+        {"title": _("مسار التسجيل والدفع"), "active_screen": Screen.ENROLL_FLOW},
+    )
+
+
+def special_cases_view(request: HttpRequest) -> HttpResponse:
+    """Special-cases landing page; the rules exist, the guided UI is explicit."""
+    policy.require(request.user, Screen.SPECIAL_CASES, Action.VIEW, request=request)
+    return render(
+        request,
+        "operations/special_cases.html",
+        {"title": _("الحالات الخاصة"), "active_screen": Screen.SPECIAL_CASES},
+    )

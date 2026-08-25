@@ -9,6 +9,7 @@ from apps.settlements import views
 app_name = "settlements"
 
 urlpatterns = [
+    path("settlements/entitlement/", views.entitlement_view, name="entitlement"),
     path("settlements/obligations/", views.obligations_view, name="obligations"),
     path("settlements/absences/", views.absences_view, name="absences"),
     path("settlements/claims/", views.claims_view, name="claims"),

@@ -241,3 +241,27 @@ def test_the_certificate_screen_refuses_an_enrolment_with_no_clearance(
         follow=True,
     )
     assert not Certificate.objects.filter(enrollment=settled_enrollment).exists()
+
+# ---------------------------------------------------------------------------
+# Sprint 8K — demo parity routes
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "route",
+    [
+        "operations:enroll-flow",
+        "operations:special-cases",
+        "settlements:entitlement",
+        "settings",
+        "coverage",
+        "future",
+    ],
+)
+def test_sprint_8k_demo_parity_pages_open_for_the_manager(
+    client: Client, seeded_settings: None, route: str
+) -> None:
+    """Every demo-sidebar promise added in 8K-1 has a real guarded page."""
+    client.force_login(_user(Role.CENTER_MANAGER, f"mgr.8k.{route.replace(':', '.')}"))
+
+    response = client.get(reverse(route))
+
+    assert response.status_code == 200

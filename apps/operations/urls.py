@@ -10,6 +10,7 @@ app_name = "operations"
 
 urlpatterns = [
     path("dashboard/", views.dashboard_view, name="dashboard"),
+    path("operations/enroll-flow/", views.enroll_flow_view, name="enroll-flow"),
     path("operations/cohorts/", views.cohorts_view, name="cohorts"),
     path("operations/enrollments/", views.enrollments_view, name="enrollments"),
     path(
@@ -25,6 +26,7 @@ urlpatterns = [
     path("operations/transfers/", views.transfers_view, name="transfers"),
     path("operations/transfers/new/", views.transfer_new_view, name="transfer-new"),
     path("operations/transfers/<str:code>/", views.transfer_detail_view, name="transfer-detail"),
+    path("operations/special-cases/", views.special_cases_view, name="special-cases"),
     path("operations/mohe/", views.mohe_view, name="mohe"),
     path("operations/mohe/submit/", views.mohe_submit_view, name="mohe-submit"),
     path("operations/mohe/<int:submission_id>/", views.mohe_detail_view, name="mohe-detail"),

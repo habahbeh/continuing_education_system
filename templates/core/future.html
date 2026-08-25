@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "النطاق المستقبلي — مركز التعليم المستمر" %}{% endblock %}
+
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">{% translate "مراجعة التسليم" %}</span><h1>{{ title }}</h1><p class="sub">{% translate "ما يظهر هنا ليس مفقوداً من التسليم؛ هو نطاق موثق يحتاج قراراً أو مرحلة لاحقة." %}</p></div></div>
+<div class="card2"><div class="mini-title">{% translate "بنود مؤجلة بوضوح" %}</div><ul class="stack-list"><li>{% translate "تكامل تقني مباشر مع نظام الوزارة — الإدخال الحالي يدوي ومقصود." %}</li><li>{% translate "توسيع طرق الدفع مثل التحويل البنكي والبطاقات والشيكات." %}</li><li>{% translate "تحميل المرفقات بسياسات احتفاظ وفحص فيروسات وصلاحيات تنزيل مفصلة." %}</li><li>{% translate "توسيع شاشة الإعدادات لتعديل آمن بتاريخ سريان واعتماد." %}</li></ul></div>
+{% endblock %}

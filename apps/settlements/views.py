@@ -575,3 +575,15 @@ def _handle_settlement_detail(request: HttpRequest, code: str) -> HttpResponse |
     except ObjectDoesNotExist as exc:
         raise Http404 from exc
     return redirect("settlements:settlement-detail", code=code)
+
+# ---------------------------------------------------------------------------
+# Sprint 8K — entitlement landing page from the demo
+# ---------------------------------------------------------------------------
+def entitlement_view(request: HttpRequest) -> HttpResponse:
+    """Read-only guide to partner entitlement before claims and settlements."""
+    policy.require(request.user, Screen.ENTITLEMENT, Action.VIEW, request=request)
+    return render(
+        request,
+        "settlements/entitlement.html",
+        {"title": _("استحقاق الشركاء"), "active_screen": Screen.ENTITLEMENT},
+    )
