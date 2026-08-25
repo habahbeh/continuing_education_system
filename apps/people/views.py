@@ -194,6 +194,36 @@ def participant_detail_view(request: HttpRequest, number: str) -> HttpResponse:
     )
 
 
+#: The admission form's twenty fields, grouped for reading (SPEC §6).
+#:
+#: Presentation only. The names, their order inside a group, whether any of
+#: them is required and what ``clean()`` does with them are all untouched —
+#: this decides which card a field is drawn in and nothing else. Every field
+#: appears exactly once, and a test compares this map against the form so a
+#: field added later cannot go missing from the page by being forgotten here.
+PARTICIPANT_FORM_SECTIONS: dict[str, list[str]] = {
+    "identity": ["category", "registered_on"],
+    "personal": [
+        "name_ar",
+        "name_en",
+        "date_of_birth",
+        "gender",
+        "nationality",
+        "id_document_type",
+        "id_document_number",
+        "duplicate_override_reason",
+    ],
+    "contact": ["city", "phone", "po_box", "email"],
+    "background": ["qualification", "employer"],
+    "consent": [
+        "is_exempt",
+        "exemption_approval_ref",
+        "exemption_approval_date",
+        "no_refund_pledge_accepted",
+    ],
+}
+
+
 @require_http_methods(["GET", "POST"])
 def participant_new_view(request: HttpRequest) -> HttpResponse:
     policy.require(request.user, Screen.STUDENT_NEW, Action.VIEW, request=request)
@@ -219,7 +249,11 @@ def participant_new_view(request: HttpRequest) -> HttpResponse:
             )
             return redirect("people:participant-detail", number=participant.participant_number)
 
-    return render(request, "people/participant_new.html", {"form": form})
+    return render(
+        request,
+        "people/participant_new.html",
+        {"form": form, "sections": PARTICIPANT_FORM_SECTIONS},
+    )
 
 
 @require_http_methods(["GET", "POST"])

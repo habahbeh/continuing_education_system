@@ -4,34 +4,106 @@
 {% block title %}{% translate "طلب التحاق جديد — مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  كان هذا النموذج يبني صفوفه بـ `.calc-row` — سطر حساب للقراءة فقط يوزّع
-  طرفيه بـ `justify-between` — فجاء كل عنوان في أقصى الصفحة وحقله في أقصاها
-  الآخر، وبينهما فراغ يقطع الربط بينهما. `partials/_form.html` هو ما تستخدمه
-  أربعة وعشرون شاشة أخرى، ويأتي معه ما كان ينقص هنا: نص المساعدة، وعلامة
-  الحقل الإلزامي، و`aria-invalid` على المرفوض.
+  عشرون حقلاً كانت في شبكة واحدة بلا قسم ولا فاصل: من يملأها أول مرة لا يعرف
+  أين ينتهي التعريف بالمشارك ويبدأ الإعفاء. الحقول نفسها بترتيبها ذاته، لكنها
+  موزّعة على خمسة أقسام معنونة، ولكل قسم سطر يقول متى يُملأ ومتى يُترك.
+
+  التقسيم عرضٌ لا منطق: `_form.html` هو نفسه الذي تستعمله سبعة وعشرون شاشة،
+  ويُدرَج هنا خمس مرات بقائمة أسماء لكل قسم. فتبقى علامة الإلزامي و
+  `aria-invalid` و`aria-describedby` كما هي، ولا يُعاد بناء أيٍّ منها هنا.
+
+  ⚠️ لا يُعرض الرقم الجامعي ولا يُحجز قبل الحفظ. الديمو كان يعرضه مسبقاً؛
+  هنا يُستهلَّ من عدّاد مقفل داخل المعاملة عند الحفظ (BR-001)، فرقمٌ يُعرض
+  قبلها ويُخالف بعدها أسوأ من ألّا يُعرض.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
-  <h1>{% translate "طلب التحاق جديد" %}</h1>
+  <div>
+    <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
+    <h1>{% translate "طلب التحاق جديد" %}</h1>
+    <p class="sub">{% translate "نموذج طلب الالتحاق كاملاً. الحقول المعلَّمة بنجمة إلزامية، وما عداها يُملأ متى توفّر." %}</p>
+  </div>
+  <div class="acts">
+    <a class="btn2" href="{% url 'people:participants' %}">{% translate "رجوع للسجل" %}</a>
+  </div>
 </div>
 
 {% guided_help "participant-new" %}
 
-<div class="card2">
-  <div class="card2-body">
-    <p class="hint boxed">
-      {% translate "يُولَّد الرقم الجامعي آلياً عند الحفظ من الفصل الدراسي النشط (BR-001)." %}
-    </p>
-
-    <form method="post" novalidate>
-      {% csrf_token %}
-      {% include "partials/_form.html" %}
-      <div class="form-acts">
-        <button type="submit" class="btn2 primary">{% translate "حفظ" %}</button>
-        <a class="btn2" href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
-      </div>
-    </form>
+<div class="note info">
+  <div>
+    <strong>{% translate "الرقم الجامعي لا يُكتب هنا." %}</strong>
+    {% translate "يولّده النظام عند الحفظ من الفصل الدراسي النشط: السنة (٤) + رمز النوع (١) + التسلسل (٤). وهو دائم لا يُصحَّح لاحقاً، ولذلك لا يُعرض ولا يُحجز قبل أن يُحفظ الطلب فعلاً (BR-001)." %}
   </div>
 </div>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+    <div class="note danger" role="alert">{{ form.non_field_errors }}</div>
+  {% endif %}
+  {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+
+  <div class="card2">
+    <div class="card2-head">
+      <span class="step-num" aria-hidden="true">1</span>
+      <h2>{% translate "الفئة وتاريخ التسجيل" %}</h2>
+    </div>
+    <div class="card2-body">
+      <p class="hint">{% translate "الفئة أول ما يُختار: عليها يُبنى سعر البرنامج ورمز النوع في الرقم الجامعي." %}</p>
+      {% include "partials/_form.html" with only=sections.identity %}
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head">
+      <span class="step-num" aria-hidden="true">2</span>
+      <h2>{% translate "البيانات الشخصية ووثيقة الهوية" %}</h2>
+    </div>
+    <div class="card2-body">
+      <p class="hint">{% translate "الاسم رباعياً بالعربية كما في وثيقة الهوية. «سبب المتابعة رغم التكرار» يبقى فارغاً إلا إذا نبّه النظام إلى سجل بنفس الوثيقة." %}</p>
+      {% include "partials/_form.html" with only=sections.personal %}
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head">
+      <span class="step-num" aria-hidden="true">3</span>
+      <h2>{% translate "الاتصال والعنوان" %}</h2>
+    </div>
+    <div class="card2-body">
+      <p class="hint">{% translate "كلها اختيارية، وتُملأ متى توفّرت — بها يُبلَّغ المشارك لاحقاً." %}</p>
+      {% include "partials/_form.html" with only=sections.contact %}
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head">
+      <span class="step-num" aria-hidden="true">4</span>
+      <h2>{% translate "المؤهل والعمل" %}</h2>
+    </div>
+    <div class="card2-body">
+      <p class="hint">{% translate "قائمتا المؤهلات والمدن يملكهما المركز ويعدّلهما من الإعدادات، لا من الشيفرة." %}</p>
+      {% include "partials/_form.html" with only=sections.background %}
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head">
+      <span class="step-num" aria-hidden="true">5</span>
+      <h2>{% translate "الإعفاء والتعهّد" %}</h2>
+    </div>
+    <div class="card2-body">
+      <p class="hint">{% translate "حقول الإعفاء تُترك فارغة في الحالة العادية، ولا تُملأ إلا بموافقة رئيس الجامعة برقمها — ومتى فُعِّل الإعفاء صار رقم الموافقة إلزامياً. أمّا التعهّد فلا يُحفظ الطلب بدون الإقرار به." %}</p>
+      {% include "partials/_form.html" with only=sections.consent %}
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <button type="submit" class="btn2 primary">{% translate "حفظ الطلب" %}</button>
+    <a class="btn2" href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
+  </div>
+</form>
 {% endblock %}

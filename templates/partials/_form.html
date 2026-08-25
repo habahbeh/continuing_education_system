@@ -17,14 +17,25 @@
     يضع `required` على الأداة نفسها وقارئ الشاشة ينطق بها.
 {% endcomment %}
 
-{% if form.non_field_errors %}
-  <div class="note danger" role="alert">{{ form.non_field_errors }}</div>
-{% endif %}
+{% comment %}
+  `only` اختياري: قائمة أسماء حقول تُرسم وحدها. غيابه هو السلوك الأصلي —
+  النموذج كاملاً — فالسبعة والعشرون قالباً التي تُدرج هذا الملف بلا هذا
+  المتغيّر تُصيَّر كما كانت حرفاً بحرف.
 
-{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+  أخطاء النموذج العامة والحقول المخفية تُرسم مع النموذج الكامل وحده؛ الصفحة
+  التي تقسّم حقولها إلى أقسام ترسمها مرة واحدة عندها، لا مرة مع كل قسم.
+{% endcomment %}
+{% if not only %}
+  {% if form.non_field_errors %}
+    <div class="note danger" role="alert">{{ form.non_field_errors }}</div>
+  {% endif %}
+
+  {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+{% endif %}
 
 <div class="grid2">
   {% for field in form.visible_fields %}
+    {% if not only or field.name in only %}
     <div class="fld{% if field|is_checkbox %} is-check{% endif %}{% if field.errors %} has-error{% endif %}">
       {% if field|is_checkbox %}
         <div class="check-row">
@@ -45,5 +56,6 @@
         <div class="err" id="{% field_error_id field %}">{{ field.errors|join:" · " }}</div>
       {% endif %}
     </div>
+    {% endif %}
   {% endfor %}
 </div>

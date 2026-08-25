@@ -587,3 +587,191 @@ def test_the_icon_set_speaks_one_visual_language() -> None:
     assert boxes == {"0 0 20 20"}, f"symbols disagree about their box: {boxes}"
     # A filled shape would ignore currentColor and stay dark on the open row.
     assert 'fill="' not in sprite, "a symbol carries its own fill"
+
+
+# ---------------------------------------------------------------------------
+# The admission form — page polish
+# ---------------------------------------------------------------------------
+ADMISSION_TEMPLATE = Path("templates/people/participant_new.html")
+
+
+def _admission(client: Client, role: str, tag: str) -> str:
+    client.force_login(_user(role, f"adm.{tag}.{role.lower()}"))
+    response = client.get(reverse("people:participant-new"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("role", "allowed"),
+    [
+        (Role.CENTER_MANAGER, True),
+        (Role.REGISTRATION_OFFICER, True),
+        (Role.AUDIT_ACCOUNT, True),
+        (Role.FINANCE_OFFICER, False),
+        (Role.FINANCE_MANAGER, False),
+        (Role.CASHIER, False),
+    ],
+)
+def test_the_admission_form_opens_for_exactly_the_roles_the_matrix_allows(
+    client: Client, seeded_settings: None, role: str, allowed: bool
+) -> None:
+    """§3.2/4 — the audit account may read the form and may not submit it."""
+    client.force_login(_user(role, f"adm.open.{role.lower()}"))
+
+    response = client.get(reverse("people:participant-new"))
+
+    assert response.status_code == (200 if allowed else 403)
+
+
+def test_the_admission_form_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """Fail-closed: it collects identity documents and is not public."""
+    assert client.get(reverse("people:participant-new")).status_code == 403
+
+
+def test_every_form_field_is_drawn_exactly_once_across_the_sections(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Twenty fields in one flat grid became five named cards. Grouping is the
+    whole risk of that change: a field left out of the map would vanish from
+    the page silently, and one listed twice would be submitted twice.
+
+    So the rendered page is compared against the form itself, not against the
+    map — the map cannot vouch for itself.
+    """
+    import re
+
+    from apps.people.participant_forms import ParticipantForm
+
+    body = _admission(client, Role.REGISTRATION_OFFICER, "fields")
+    drawn = re.findall(r'<label for="id_([a-z_]+)"', body)
+
+    assert sorted(drawn) == sorted(ParticipantForm().fields)
+    assert len(drawn) == len(set(drawn)), "a field is rendered twice"
+
+
+def test_the_section_map_covers_the_form_and_invents_nothing() -> None:
+    """A field added to the form later must be placed, not quietly dropped."""
+    from apps.people.participant_forms import ParticipantForm
+    from apps.people.views import PARTICIPANT_FORM_SECTIONS
+
+    placed = [name for names in PARTICIPANT_FORM_SECTIONS.values() for name in names]
+
+    assert sorted(placed) == sorted(ParticipantForm().fields)
+    assert len(placed) == len(set(placed))
+
+
+def test_the_admission_form_draws_its_five_named_sections(
+    client: Client, seeded_settings: None
+) -> None:
+    """Numbered and titled, so the form reads as stages rather than a wall."""
+    import re
+
+    body = _admission(client, Role.CENTER_MANAGER, "sections")
+    sections = re.findall(r'<span class="step-num"[^>]*>(\d+)</span>\s*<h2>([^<]+)</h2>', body)
+
+    assert [n for n, _t in sections] == ["1", "2", "3", "4", "5"]
+    assert "الفئة" in sections[0][1]
+    assert "الإعفاء" in sections[4][1] and "التعهّد" in sections[4][1]
+
+
+def test_the_admission_form_never_shows_a_number_before_it_is_earned(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The demo printed a participant number into a read-only box before saving.
+    Here the number is drawn from a locked counter inside the save transaction
+    (BR-001), so a number shown beforehand would be a guess that the record
+    then contradicts. The page says where it comes from and shows none.
+    """
+    import re
+
+    body = _admission(client, Role.REGISTRATION_OFFICER, "nonumber")
+
+    assert not re.search(r"\b20\d{7}\b", body), "a participant number was previewed"
+    assert 'name="participant_number"' not in body
+    assert "BR-001" in body
+    assert "الفصل الدراسي النشط" in body
+
+
+def test_the_admission_form_explains_the_fields_that_trip_people_up(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Three fields have no obvious meaning to a new employee, and all three were
+    rendered bare: the exemption pair, which needs the president's approval
+    reference before ``clean()`` will pass; and the duplicate override, which
+    belongs to BR-005's WARN mode and should stay empty otherwise.
+    """
+    body = _admission(client, Role.REGISTRATION_OFFICER, "help")
+
+    assert "رقم موافقة رئيس الجامعة" in body
+    assert "إلزامي متى فُعِّل الإعفاء" in body
+    assert "BR-005" in body
+    assert "لا يُحفظ الطلب بدونه" in body
+
+
+def test_the_help_copy_changed_nothing_about_how_the_form_behaves() -> None:
+    """
+    ``help_text`` is copy. The field set, which of them are required, the widget
+    types and ``clean()`` are the behaviour, and none of them moved — this is
+    what separates a polish from a change to the form.
+    """
+    from apps.people.participant_forms import ParticipantEditForm, ParticipantForm
+
+    form = ParticipantForm()
+
+    assert len(form.fields) == 20
+    assert sorted(n for n, f in form.fields.items() if f.required) == [
+        "category",
+        "id_document_number",
+        "id_document_type",
+        "name_ar",
+        "registered_on",
+    ]
+    # The pledge is enforced in clean(), not by `required` on the widget.
+    bound = ParticipantForm(data={})
+    assert not bound.is_valid()
+    assert "no_refund_pledge_accepted" in bound.errors
+    # Editing still skips the pledge it already has on record (BR-003).
+    assert issubclass(ParticipantEditForm, ParticipantForm)
+
+
+def test_the_shared_form_partial_still_renders_whole_forms_untouched(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    ``_form.html`` gained an opt-in ``only`` subset, and twenty-seven templates
+    include it without one. Absent the variable it must behave exactly as it
+    did — this checks a screen that passes nothing and expects every field.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "adm.partial.whole"))
+
+    body = client.get(reverse("partners:partner-new")).content.decode("utf-8")
+
+    assert re.findall(r'<label for="id_[a-z_]+"', body), "the whole-form path drew nothing"
+    assert 'class="grid2"' in body
+
+
+def test_the_admission_form_added_no_dead_class_and_no_dependency() -> None:
+    """No CSS was needed for this page; every class it uses already existed."""
+    import re
+
+    source = ADMISSION_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "form-section", "split3"]:
+        assert dead not in source, f"the admission form uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+    # Every class it draws with is defined; the page needed no new CSS.
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    assert not [c for c in used if f".{c}" not in css]
+    # Inputs stay full width and the sections stack on a phone.
+    assert "sm:grid-cols-2" in css.split(".grid2", 1)[1].split("}", 1)[0]
