@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 
 {% block title %}{% translate "التسجيلات — مركز التعليم المستمر" %}{% endblock %}
 
@@ -10,6 +10,8 @@
     <h1>{{ title }}</h1>
   </div>
 </div>
+
+{% guided_help "enrollments" %}
 
 {# شريط البحث كان `input` بلا أي تنسيق — لم يكن للحقل إطار ولا للحقل عنوان. #}
 <form method="get" class="filterbar" role="search">

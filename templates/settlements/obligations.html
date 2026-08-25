@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "obligations" %}
 <div class="note info">
   {% translate "التزامات الشريك تجاه الجامعة — تُستوفى بالحسم من مطالباته لا نقداً. رواتب المدربين ومصاريف التدريب العملي وإعادة ما قُبض عن أجزاء لم تُنفَّذ تُقيَّد هنا. أما غرامة غياب المدرب فتُحتسب من سجل الغيابات لأنها صيغة بمدخلات، واسترجاع الصرف المقدّم واسترجاع الاسترداد يرفعهما النظام آلياً." %}
 </div>

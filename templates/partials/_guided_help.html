@@ -1,0 +1,21 @@
+{% load i18n %}
+{% comment %}
+  كتلة واحدة هادئة أعلى الشاشة (Sprint 8K-5): جملة عمّا تفعله الشاشة، وسطر
+  عمّن يستخدمها وما يليها، وقاعدةٌ واحدة عند وجود ما يوقف العملية فعلاً.
+  اللون محجوز للحظة الرفض على الشاشة نفسها؛ الشرح هنا محايد عن قصد.
+{% endcomment %}
+{% if guide %}
+  <div class="note">
+    <div>
+      {% if guide.status %}<span class="chip {{ guide.status.1 }} dot">{{ guide.status.0 }}</span> {% endif %}{{ guide.what }}
+      <div class="hint">
+        <strong>{% translate "من يستخدمها" %}:</strong> {{ guide.who }}
+        {% if guide.after %} · <strong>{% translate "بعدها" %}:</strong> {{ guide.after }}{% endif %}
+        {% for link in guide.links %} <a href="{{ link.url }}">{{ link.label }}</a>{% if not forloop.last %} ·{% endif %}{% endfor %}
+      </div>
+      {% if guide.stops %}
+        <div class="hint"><strong>{% translate "ما يوقف العملية" %}:</strong> {{ guide.stops }}</div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{% translate "الإعدادات — مركز التعليم المستمر" %}{% endblock %}
 
@@ -12,9 +12,10 @@
   </div>
 </div>
 
+{% guided_help "settings" %}
+
 <div class="note info">
   <div>
-    <strong>{% translate "قراءة فقط في هذه المرحلة." %}</strong>
     {% translate "لا ثابت من ثوابت العمل مكتوب في الشيفرة: كل حدّ ورسم ومضاعف هو قيمة مؤرّخة بتاريخ سريان. لذلك تغيير قاعدة عملٌ إداري لا إصدار برمجي، وهو لا يعيد كتابة الماضي — مطالبة حُسبت في تموز تبقى تُقرأ بإعدادات تموز." %}
   </div>
 </div>

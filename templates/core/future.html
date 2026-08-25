@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{% translate "النطاق المستقبلي — مركز التعليم المستمر" %}{% endblock %}
 
@@ -11,6 +11,8 @@
     <p class="sub">{% translate "بنود موثّقة خارج نطاق التسليم الحالي، ومعها ما يعمل اليوم مكانها وسبب تأجيلها." %}</p>
   </div>
 </div>
+
+{% guided_help "future" %}
 
 <div class="note info">
   <div>

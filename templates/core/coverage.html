@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{% translate "مصفوفة تغطية المتطلبات — مركز التعليم المستمر" %}{% endblock %}
 
@@ -11,6 +11,8 @@
     <p class="sub">{% translate "كل بند من القائمة الجانبية في الديمو، مقابل عنوانه في النظام الحقيقي وحالته ونوعه — بترتيب الديمو نفسه." %}</p>
   </div>
 </div>
+
+{% guided_help "coverage" %}
 
 <div class="note ok">
   <div>

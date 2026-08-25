@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "partners" %}
 <div class="note info">
   {% translate "الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها كما وردت — لا يؤلّفها ولا يعدّلها بعد سريانها." %}
 </div>

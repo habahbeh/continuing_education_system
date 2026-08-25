@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "clearance" %}
 <div class="note info">
   {% translate "نموذج CS Fm 7.18 Rev A — ثلاث خطوات لا تُعاد ترتيبها: استرجاع العُهد (المركز) · التحقق المالي بتوقيعين (المالية) · تسليم الشهادة (المركز). ولا شهادة بلا براءة ذمة مكتملة." %}
 </div>

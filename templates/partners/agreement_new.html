@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n form_ui %}
+{% load i18n form_ui guided_help %}
 
 {% block title %}{% translate "تسجيل اتفاقية موقّعة — مركز التعليم المستمر" %}{% endblock %}
 
@@ -24,6 +24,8 @@
 <div class="page-head">
   <h1>{% translate "تسجيل اتفاقية موقّعة" %}</h1>
 </div>
+
+{% guided_help "agreement-new" %}
 
 <div class="card2" x-data="{ model: '{{ form.calculation_model.value|default:"PERCENT" }}' }">
   <div class="card2-body">

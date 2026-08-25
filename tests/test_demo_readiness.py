@@ -719,3 +719,149 @@ def test_the_coverage_matrix_uses_no_class_this_project_never_defined() -> None:
     for dead in [*DEAD_DEMO_CLASSES, "compact", "mono"]:
         assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
         assert dead not in source, f"coverage.html still uses the demo-only class «{dead}»"
+
+
+# ---------------------------------------------------------------------------
+# The shared guided-help block — Sprint 8K-5
+# ---------------------------------------------------------------------------
+#: (route, guidance key, screen that guards the route) for every screen the
+#: sprint asked to be taught. Written out here rather than derived from the
+#: registry, so a template that quietly loses its tag is caught.
+GUIDED_HELP_SCREENS = [
+    ("operations:dashboard", "dashboard", "dashboard"),
+    ("people:participants", "participants", "students"),
+    ("people:participant-new", "participant-new", "student-new"),
+    ("operations:enrollments", "enrollments", "enrollments"),
+    ("operations:enroll-flow", "enroll-flow", "enroll-flow"),
+    ("cashbox:payments", "payments", "payments"),
+    ("cashbox:payment-new", "payment-new", "payment-new"),
+    ("operations:transfers", "transfers", "transfers"),
+    ("operations:transfer-new", "transfer-new", "transfer-new"),
+    ("operations:special-cases", "special-cases", "special-cases"),
+    ("operations:clearances", "clearance", "clearance"),
+    ("operations:certificates", "certificates", "certificates"),
+    ("partners:partners", "partners", "partners"),
+    ("partners:agreements", "agreements", "agreements"),
+    ("partners:agreement-new", "agreement-new", "agreement-new"),
+    ("settlements:entitlement", "entitlement", "entitlement"),
+    ("settlements:claims", "claims", "claims"),
+    ("settlements:settlements", "settlements", "settlements"),
+    ("settlements:obligations", "obligations", "obligations"),
+    ("reporting:reports", "reports", "reports"),
+    ("people:settings", "settings", "settings"),
+    ("people:coverage", "coverage", "settings"),
+    ("people:future", "future", "settings"),
+]
+
+
+def _a_role_that_may_open(screen: str) -> str:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in ALL_ROLES:
+        if Action.VIEW in allowed_actions(role, screen):
+            return role
+    raise AssertionError(f"no role may VIEW {screen}")
+
+
+@pytest.mark.parametrize(("route", "key", "screen"), GUIDED_HELP_SCREENS)
+def test_the_guided_help_reaches_every_screen_it_was_asked_to(
+    client: Client, seeded_settings: None, route: str, key: str, screen: str
+) -> None:
+    """
+    The demo taught on every screen; the real system now does too. A template
+    that loses ``{% guided_help %}`` leaves its readers with a correct form and
+    no idea which button is theirs, and that is what this catches.
+    """
+    from apps.people.guidance import GUIDES
+
+    role = _a_role_that_may_open(screen)
+    client.force_login(_user(role, f"gh.{key}.{role.lower()}"))
+
+    response = client.get(reverse(route))
+
+    assert response.status_code == 200, f"{route} did not open for {role}"
+    body = response.content.decode("utf-8")
+    assert str(GUIDES[key].what) in body, f"{route} renders no guided help"
+    assert "من يستخدمها" in body
+
+
+@pytest.mark.parametrize(("route", "key", "screen"), GUIDED_HELP_SCREENS)
+@pytest.mark.parametrize("role", ALL_ROLES)
+def test_the_guided_help_never_points_a_reader_at_a_refusal(
+    client: Client, seeded_settings: None, route: str, key: str, screen: str, role: str
+) -> None:
+    """
+    The prose is for everyone and the links are not. A next-step link the reader
+    may not follow ends in a refusal and a DENIED_ATTEMPT row (BR-085) for doing
+    exactly what the help said — so the gate is asserted in both directions.
+    """
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    if Action.VIEW not in allowed_actions(role, screen):
+        pytest.skip("cannot open the page at all")
+    guide = GUIDES[key]
+    if not guide.links:
+        pytest.skip("this screen offers no next step")
+    client.force_login(_user(role, f"ghl.{key}.{role.lower()}"))
+
+    body = client.get(reverse(route)).content.decode("utf-8")
+    help_block = body.split("من يستخدمها", 1)[1].split("</div>", 2)[0]
+
+    for target_screen, target_route, label in guide.links:
+        may_follow = Action.VIEW in allowed_actions(role, target_screen)
+        offered = f'<a href="{reverse(target_route)}">{label}</a>' in help_block
+        assert offered is may_follow, (
+            f"{role} {'may' if may_follow else 'may NOT'} open {target_screen}, "
+            f"but the help on {route} {'offers' if offered else 'omits'} «{label}»"
+        )
+
+
+def test_the_guided_help_explains_itself_to_readers_who_get_no_links(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Filtering the links must not filter the teaching. The registrar may not open
+    the till (D-06), and still has to learn from the enrolments screen that a
+    payment comes next and who takes it.
+    """
+    from apps.people.guidance import GUIDES
+
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "gh.reg.noLinks"))
+
+    body = client.get(reverse("operations:enrollments")).content.decode("utf-8")
+
+    assert str(GUIDES["enrollments"].what) in body
+    assert str(GUIDES["enrollments"].after) in body
+    # …but the till itself is not offered.
+    assert f'<a href="{reverse("cashbox:payment-new")}">' not in body
+
+
+def test_the_guided_help_partial_uses_no_class_this_project_never_defined() -> None:
+    """One partial on twenty-three screens: a dead class here is a hole on all."""
+    from pathlib import Path
+
+    source = Path("templates/partials/_guided_help.html").read_text(encoding="utf-8")
+    css = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    for dead in [*DEAD_DEMO_CLASSES, "compact", "mono"]:
+        assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
+        assert dead not in source, f"the guided-help partial uses «{dead}»"
+    for used in ["note", "hint", "chip"]:
+        assert f".{used}" in css, f"the partial leans on «{used}», which CSS must define"
+
+
+def test_the_guided_help_stays_calm() -> None:
+    """
+    Colour is for the moment something is actually refused, not for explaining
+    that a rule exists. The block is neutral; a screen that needs amber says so
+    on its own body, where the refusal happens.
+    """
+    from pathlib import Path
+
+    source = Path("templates/partials/_guided_help.html").read_text(encoding="utf-8")
+
+    assert "note warn" not in source
+    assert "note danger" not in source

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{% translate "الحالات الخاصة — مركز التعليم المستمر" %}{% endblock %}
 
@@ -12,9 +12,11 @@
   </div>
 </div>
 
+{% guided_help "special-cases" %}
+
 <div class="note info">
   <div>
-    <strong>{% translate "صفحة إرشادية — لا إدخال منها." %}</strong>
+    <strong>{% translate "لا إدخال من هذه الصفحة." %}</strong>
     {% translate "القواعد تعمل اليوم فعلاً: الخدمات تفرضها وقاعدة البيانات تحرسها وسجل التدقيق يكتبها. غير المبني بعد هو شاشة الإدخال، ولذلك تشرح هذه الصفحة الأنواع ولا ترسم نموذجاً يردّ كل من يفتحه." %}
   </div>
 </div>

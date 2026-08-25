@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{% translate "استحقاق الشركاء — مركز التعليم المستمر" %}{% endblock %}
 
@@ -11,6 +11,8 @@
     <p class="sub">{% translate "كيف يصير الشريك مستحقاً: من الاتفاقية إلى ما حُصِّل فعلاً، ثم الأهلية والمطالبة والخصم والمخالصة." %}</p>
   </div>
 </div>
+
+{% guided_help "entitlement" %}
 
 <div class="note info">
   <div>

@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "settlements" %}
 <div class="note info">
   {% translate "المخالصة إقرار بعدم بقاء مستحقات في الفترة — لا تُوقَّع ورصيدها غير صفري. وفترتها تُشتق من دورة الاتفاقية: كل أربعة أشهر للدبلوم، ونهاية كل دورة للقصيرة." %}
 </div>

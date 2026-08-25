@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "transfer-new" %}
 <div class="note info">
   {% translate "عدد المحاضرات لا يُدخَل هنا — يُقرأ من التسجيل موثّقاً بمصدره ومُتحقِّقه (BR-095)، ويُجمَّد على الطلب لحظة تقديمه. «فحص الشروط» يعرض القرار وفرق الرسوم قبل أن يلتزم أحد بشيء." %}
 </div>

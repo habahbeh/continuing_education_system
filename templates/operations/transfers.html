@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "transfers" %}
 <div class="note info">
   {% translate "النقل للدورات القصيرة فقط (BR-060)، ضمن نفس المجال إلا باستثناء عند إلغاء المركز للدورة (BR-061 · BR-065)، وقبل تجاوز مهلة المحاضرات (BR-062). ثلاث أيدٍ: التسجيل يطلب · المدير ينسّب · المالية تسوّي وتنفّذ (BR-066)." %}
 </div>
