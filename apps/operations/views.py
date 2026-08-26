@@ -1784,6 +1784,19 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
         },
     ]
 
+    # The built/declared split, said once at the top of the table instead of
+    # being left for the reader to derive by scanning six rows. Counted off
+    # `cases` above, so the two can never disagree — and a bucket nobody is in
+    # gets no chip rather than a zero.
+    coverage = [
+        row
+        for row in (
+            {"label": built, "count": sum(1 for c in cases if c["built"]), "built": True},
+            {"label": declared, "count": sum(1 for c in cases if not c["built"]), "built": False},
+        )
+        if row["count"]
+    ]
+
     statuses = [
         (_("قائمة"), _("سُجِّلت ولم تُسوَّ بعد.")),
         (_("مسوّاة"), _("انتهى أثرها المالي والإداري.")),
@@ -1807,6 +1820,7 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
             "title": _("الحالات الخاصة"),
             "active_screen": Screen.SPECIAL_CASES,
             "cases": cases,
+            "coverage": coverage,
             "statuses": statuses,
             "links": links,
         },

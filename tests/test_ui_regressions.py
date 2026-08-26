@@ -1735,3 +1735,226 @@ def test_the_transfer_register_added_no_dead_class_and_no_dependency() -> None:
     assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
     markup = source.split("{% endcomment %}", 1)[-1]
     assert "sr-only" not in markup
+
+
+# ---------------------------------------------------------------------------
+# The special-cases page — page polish
+# ---------------------------------------------------------------------------
+SPECIAL_CASES_TEMPLATE = Path("templates/operations/special_cases.html")
+
+#: What the DEMO's version of this screen offers and the real system does not:
+#: a «حالة جديدة» button (which in the demo only fires a toast), a per-type
+#: count of recorded cases, and a log of actual special-case records. None of
+#: the three is backed by a service here, and a screen that draws them is
+#: lying about what the centre can do today.
+DEMO_ONLY_ON_THIS_SCREEN = (
+    "حالة جديدة",
+    "سجل الحالات الخاصة",
+    "حالة مسجّلة",
+)
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.2/8 leaves both cells empty. Under BR-080 that is a refusal.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_special_cases_page_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"spc.open.{role.lower()}"))
+
+    assert client.get(reverse("operations:special-cases")).status_code == expected
+
+
+def test_the_special_cases_page_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse("operations:special-cases")).status_code == 403
+
+
+def test_the_page_stayed_a_reading_screen(client: Client, seeded_settings: None) -> None:
+    """
+    No data-entry service exists for this screen, so the page teaches the types
+    and says so. The polish added no form, no POST target and no button that
+    would refuse whoever pressed it — and the view still takes no POST.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "spc.readonly"))
+
+    page = (
+        client.get(reverse("operations:special-cases"))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    assert "<form" not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert "<button" not in page
+    # …and the screen says why, rather than leaving the absence to be guessed.
+    assert "لا إدخال من هذه الصفحة" in page
+
+
+def test_the_page_draws_none_of_the_demo_only_furniture(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The demo has a «حالة جديدة» button, a per-type count of recorded cases and
+    a log of records. In the demo the button fires a toast and the counts come
+    from a fixture array. Here there is no service behind any of the three.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "spc.demo"))
+
+    page = (
+        client.get(reverse("operations:special-cases"))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    for marker in DEMO_ONLY_ON_THIS_SCREEN:
+        assert marker not in page, f"the page draws the demo-only «{marker}»"
+
+
+def test_the_coverage_chips_agree_with_the_table_beneath_them(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Four of the six types have a service behind them and two do not, and until
+    now a reader learned that only by scanning six rows. The chips are counted
+    off the same list the table renders, so the two cannot disagree — and the
+    numbers are about what the SYSTEM supports, not about how many cases exist.
+    """
+    import re
+
+    from apps.operations.views import special_cases_view
+
+    client.force_login(_user(Role.CENTER_MANAGER, "spc.chips"))
+    body = client.get(reverse("operations:special-cases")).content.decode("utf-8")
+    page = body.split("</nav>", 1)[-1]
+
+    chips = {
+        label.strip(): int(n)
+        for label, n in re.findall(
+            r'<span class="chip [^"]*">([^<:]+): <span class="num">(\d+)', page
+        )
+    }
+    assert sum(chips.values()) == 6, chips
+    assert chips["مسار مبني"] == 4
+    assert chips["نوع مُعرَّف — بلا خدمة تُنشئه بعد"] == 2
+    # The label says what is being counted, so nobody reads it as a case count.
+    assert "ما يقابله في النظام اليوم" in page
+    # Every «مسار مبني» chip in the table is matched by one in the summary.
+    assert page.count("مسار مبني") == 4 + 1
+    assert special_cases_view is not None
+
+
+def test_the_related_screens_are_linked_only_where_the_reader_may_open_them(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    §5.4 of the polish rules — a link the role cannot follow is a defect: it
+    drops the reader into a refusal and writes a DENIED_ATTEMPT the screen
+    invited. The three cross-references are each gated on their own screen.
+
+    The finance officer is the case that makes this worth asserting: §3.2/6
+    gives them the transfer register and §3.6/30 the clearance, so all three
+    appear — while a role short of one of them must see two, not three.
+    """
+    from apps.people.constants import Action, Screen
+    from apps.people.permissions import policy
+
+    targets = (
+        (Screen.ENROLLMENTS, "operations:enrollments"),
+        (Screen.TRANSFERS, "operations:transfers"),
+        (Screen.CLEARANCE, "operations:clearances"),
+    )
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        user = _user(role, f"spc.links.{role.lower()}")
+        client.force_login(user)
+        page = (
+            client.get(reverse("operations:special-cases"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        for screen, route in targets:
+            may = policy.is_allowed(user, screen, Action.VIEW)
+            assert (f'href="{reverse(route)}"' in page) is may, (role, screen)
+
+
+def test_the_page_renders_the_same_whether_or_not_there_is_any_data(
+    client: Client, two_transfers: object
+) -> None:
+    """
+    The strongest privacy statement this screen can make: it reads no queryset,
+    so its output does not move when the database fills up.
+
+    Asserted against live participants, enrolments and transfers rather than by
+    hunting for keywords — the rule text legitimately contains «الشريك لا
+    يستحق عنه شيئاً (BR-045)», which is a rule being explained, not partner
+    data being shown. What must never appear is a RECORD, and that is what is
+    checked here. It is worth pinning because the demo's version of this screen
+    lists real cases, and a future gap could be closed by copying it.
+    """
+    identifiers = (
+        "202690900",  # a participant number
+        "سامية عبد الرحمن",  # a participant name
+        "9990001112",  # an identity document number
+        "EN-UIX-0",  # an enrolment code
+        "TR-UIX-0",  # a transfer code
+    )
+    for role in (Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT):
+        client.force_login(_user(role, f"spc.priv.{role.lower()}"))
+        page = (
+            client.get(reverse("operations:special-cases"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        for value in identifiers:
+            assert value not in page, f"{role} was shown the record «{value}»"
+        for field in RESTRICTED_AWAY:
+            assert field not in page, f"{role} was served «{field}»"
+        for key in ("partner_share", "entitlement", "استحقاق الشريك"):
+            assert key not in page, f"{role} was shown «{key}»"
+
+
+def test_the_special_cases_page_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = SPECIAL_CASES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the special-cases page uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+    # `.form-acts` closes a form. There is no form on this page, so the class
+    # was drawing a divider under nothing; the links moved into the card head.
+    assert 'class="form-acts"' not in source
+
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    # The one table keeps its scroll wrapper, and every `{# … #}` is closed on
+    # its own line — Django's comment tag does not span lines, and one that
+    # wraps is printed to the page as text.
+    assert 'class="tbl-wrap"' in source
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+    # `.sr-only` in a table header is `position:absolute` with no positioned
+    # ancestor: in RTL it lands off the left edge and drags the page sideways.
+    assert "sr-only" not in source

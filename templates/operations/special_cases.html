@@ -23,12 +23,26 @@
 
 <div class="note">
   <div>
-    {% translate "الحالة الخاصة ليست تعديلاً غير رسمي على السجل: لكل نوع قاعدة تحكمه، ولكل حالة أثر مالي مكتوب بالكلمات لا بالحالة وحدها، ومرجع القرار إلزامي في الفصل. كل ذلك يُكتب في سجل التدقيق، ولا يُصحَّح قيد مالي بالحذف بل بقيد مقابل." %}
+    <strong>{% translate "الحالة الخاصة ليست تعديلاً غير رسمي على السجل." %}</strong>
+    <br>
+    {% translate "لكل نوع قاعدة تحكمه، ولكل حالة أثر مالي مكتوب بالكلمات لا بالحالة وحدها، ومرجع القرار إلزامي في الفصل." %}
+    <br>
+    {% translate "كل ذلك يُكتب في سجل التدقيق، ولا يُصحَّح قيد مالي بالحذف بل بقيد مقابل." %}
   </div>
 </div>
 
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "الأنواع الستة" %}</h2></div>
+  <div class="card2-head">
+    <h2>{% translate "الأنواع الستة" %}</h2>
+    {% if coverage %}
+      <div class="acts">
+        <small class="muted">{% translate "ما يقابله في النظام اليوم" %}:</small>
+        {% for c in coverage %}
+          <span class="chip {% if c.built %}ok{% else %}warn{% endif %}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
   <div class="card2-body">
     <div class="tbl-wrap">
       <table class="tbl">
@@ -42,7 +56,7 @@
         <tbody>
           {% for case in cases %}
             <tr>
-              <td>{{ case.label }}</td>
+              <td><strong>{{ case.label }}</strong></td>
               <td>{{ case.what }}</td>
               <td><span class="chip {% if case.built %}ok{% else %}warn{% endif %} dot">{{ case.state }}</span></td>
             </tr>
@@ -65,10 +79,11 @@
 </div>
 
 {% if links %}
+  {# `.form-acts` closes a form, and there is no form: the links sat under a rule with nothing above it. #}
   <div class="card2">
-    <div class="card2-head"><h2>{% translate "الشاشات التي تلتقي بها هذه الحالات" %}</h2></div>
-    <div class="card2-body">
-      <div class="form-acts">
+    <div class="card2-head">
+      <h2>{% translate "الشاشات التي تلتقي بها هذه الحالات" %}</h2>
+      <div class="acts">
         {% for link in links %}
           <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
         {% endfor %}
