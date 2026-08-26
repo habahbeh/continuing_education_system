@@ -1016,3 +1016,379 @@ def test_the_registry_added_no_dead_class_and_no_dependency() -> None:
     # The wide table scrolls inside its own wrapper, never the page body.
     assert 'class="tbl-wrap"' in source
     assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# The enrolment registry — page polish
+# ---------------------------------------------------------------------------
+ENROLLMENTS_TEMPLATE = Path("templates/operations/enrollments.html")
+
+#: The demo's tenth column. It states, per row, whether a third party earns on
+#: this participant and how much — a financial fact about a partner, on a
+#: screen §3.2/5 opens to six roles. Whether it may be drawn, and to whom, is a
+#: privacy decision the centre has not made, so the page must not pre-empt it.
+PARTNER_ENTITLEMENT_MARKERS = (
+    "استحقاق الشريك",
+    "يستحق",
+    "partner_share",
+    "entitlement",
+)
+
+
+@pytest.fixture
+def two_enrollments(seeded_settings: None, active_semester: object) -> object:
+    """
+    Two enrolments in two states, on two cohorts of two programmes.
+
+    Two rather than one because a distribution of a single status is a
+    restatement of the result counter beside it, and because the second
+    programme is what proves the programme column is per-row rather than
+    constant.
+    """
+    from datetime import date
+
+    from django.core.management import call_command
+
+    from apps.catalog.models import PriceList, PriceListStatus, Program
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.models import IdDocumentType, Participant, ParticipantCategory
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    price_list = PriceList.objects.filter(status=PriceListStatus.APPROVED).first()
+    semester = active_semester
+    assert price_list is not None
+
+    participant = Participant.objects.create(
+        participant_number="202690900",
+        category=ParticipantCategory.UNIVERSITY,
+        name_ar="سامية عبد الرحمن",
+        id_document_type=IdDocumentType.NATIONAL_ID,
+        id_document_number="9990001112",
+        registered_on=date(2026, 1, 1),
+    )
+    programs = list(Program.objects.order_by("code")[:2])
+    assert len(programs) == 2
+
+    for index, (program, status) in enumerate(
+        ((programs[0], "PENDING_APPROVAL"), (programs[1], "ACTIVE"))
+    ):
+        cohort = Cohort.objects.create(
+            code=f"CO-UIX-{index}",
+            program=program,
+            semester=semester,
+            name_ar=f"دفعة التحسين {index}",
+            starts_on=semester.starts_on,
+            ends_on=semester.ends_on,
+            capacity=25,
+        )
+        Enrollment.objects.create(
+            code=f"EN-UIX-{index}",
+            participant=participant,
+            cohort=cohort,
+            enrolled_on=date(2026, 2, 1 + index),
+            price_list=price_list,
+            status=status,
+        )
+    return participant
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.FINANCE_MANAGER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.2/5 gives the cashier an empty cell. Under BR-080 that is a refusal.
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_enrolment_registry_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"enr.open.{role.lower()}"))
+
+    assert client.get(reverse("operations:enrollments")).status_code == expected
+
+
+def test_the_enrolment_registry_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse("operations:enrollments")).status_code == 403
+
+
+def test_the_registration_action_is_offered_only_where_create_is_granted(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    §3.2/5 — CREATE is the manager's and the registrar's. The finance officer,
+    the finance manager and the audit account read. Both the header action and
+    the «تسجيل جديد» card are the same permission, so both are asserted.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.FINANCE_MANAGER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"enr.create.{role.lower()}"))
+        page = (
+            client.get(reverse("operations:enrollments"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        may = Action.CREATE in allowed_actions(role, "enrollments")
+        assert ('id="enrollment-new"' in page) is may, role
+        assert ('href="#enrollment-new"' in page) is may, role
+
+
+def test_the_voucher_and_approval_actions_follow_edit_and_approve(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    Two different permissions on two different buttons, and the matrix gives
+    them to two different sets of roles: EDIT to the manager and the registrar,
+    APPROVE to the manager alone (§3.2/5). Asserted in both directions — a
+    button that appears for a role that cannot use it sends a reader into a
+    refusal and writes a DENIED_ATTEMPT the page invited.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.FINANCE_MANAGER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"enr.act.{role.lower()}"))
+        page = (
+            client.get(reverse("operations:enrollments"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        actions = allowed_actions(role, "enrollments")
+        assert ('value="voucher"' in page) is (Action.EDIT in actions), role
+        assert ('value="approve"' in page) is (Action.APPROVE in actions), role
+
+
+def test_the_approval_route_still_refuses_a_role_the_page_never_offered_it_to(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    Hiding is not protection. The registrar has EDIT and not APPROVE, and the
+    POST is refused at the view whether or not a button was ever drawn.
+    """
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "enr.br018.reg"))
+
+    response = client.post(
+        reverse("operations:enrollment-action", args=["EN-UIX-0"]), {"action": "approve"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_br018_still_blocks_approval_before_the_voucher_is_recorded(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    The rule the page explains in words is the rule the service enforces: the
+    manager may approve, and not yet. The refusal names BR-018, and the polish
+    left both the message and the order of the two steps alone.
+    """
+    from apps.operations.models import Enrollment
+
+    client.force_login(_user(Role.CENTER_MANAGER, "enr.br018.mgr"))
+    url = reverse("operations:enrollment-action", args=["EN-UIX-0"])
+
+    client.post(url, {"action": "approve"}, follow=True)
+    assert Enrollment.objects.get(code="EN-UIX-0").approved_by_id is None
+
+    client.post(url, {"action": "voucher"}, follow=True)
+    client.post(url, {"action": "approve"}, follow=True)
+    assert Enrollment.objects.get(code="EN-UIX-0").approved_by_id is not None
+
+
+def test_the_status_chips_count_the_rows_on_screen_and_follow_the_filter(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    The chips are computed over the result set the request produced, so they
+    can be checked against the table beneath them. A registry-wide total would
+    be a claim nobody reading the page could verify — and the label says which
+    of the two it is.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "enr.chips"))
+
+    def chips(url: str) -> dict[str, int]:
+        body = client.get(url).content.decode("utf-8")
+        page = body.split("</nav>", 1)[-1]
+        return {
+            label.strip(): int(n)
+            for label, n in re.findall(
+                r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
+            )
+        }
+
+    everything = chips(reverse("operations:enrollments"))
+    assert sum(everything.values()) == 2
+    assert "توزيع النتائج المعروضة" in client.get(reverse("operations:enrollments")).content.decode(
+        "utf-8"
+    )
+
+    filtered = chips(reverse("operations:enrollments") + "?status=ACTIVE")
+    assert sum(filtered.values()) == 1
+    assert "منتظم" in filtered
+
+
+def test_the_enrolment_registry_says_which_filters_are_narrowing_it(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    ``cohort`` and ``status`` were reachable from the URL and drawn nowhere, so
+    a narrowed list looked like the whole registry. Naming them adds no filter:
+    both are printed in the table for every role that gets through this door.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "enr.active"))
+    url = reverse("operations:enrollments")
+
+    plain = client.get(url).content.decode("utf-8")
+    assert "نتائج مصفّاة" not in plain
+    assert "إلغاء التصفية" not in plain
+
+    for query in ("?q=EN-UIX", "?status=ACTIVE", "?cohort=CO-UIX-0"):
+        narrowed = client.get(url + query).content.decode("utf-8")
+        assert "نتائج مصفّاة" in narrowed, query
+        assert "إلغاء التصفية" in narrowed, query
+    # …and a search does not drop the filter that was already applied.
+    assert 'name="status" value="ACTIVE"' in client.get(url + "?status=ACTIVE").content.decode(
+        "utf-8"
+    )
+
+
+def test_the_two_empty_states_are_not_the_same_sentence(
+    client: Client, seeded_settings: None, two_enrollments: object
+) -> None:
+    """
+    «No enrolments yet» and «nothing matched what you typed» ask for opposite
+    next actions, and the second one has to offer a way back to the first.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "enr.empty"))
+    url = reverse("operations:enrollments")
+
+    no_match = client.get(url + "?q=" + "لا-يوجد").content.decode("utf-8")
+    assert "لا تسجيل يطابق التصفية الحالية" in no_match
+    assert "عرض كل التسجيلات" in no_match
+    assert "لا توجد تسجيلات بعد" not in no_match
+
+    from apps.operations.models import Enrollment
+
+    Enrollment.objects.all().delete()
+    virgin = client.get(url).content.decode("utf-8")
+    assert "لا توجد تسجيلات بعد" in virgin
+    assert "لا تسجيل يطابق التصفية الحالية" not in virgin
+
+
+def test_the_empty_state_offers_the_form_only_to_a_role_that_may_use_it(
+    client: Client, seeded_settings: None
+) -> None:
+    """A reader is not sent to a button that would refuse them."""
+    for role, may in ((Role.CENTER_MANAGER, True), (Role.AUDIT_ACCOUNT, False)):
+        client.force_login(_user(role, f"enr.empty.{role.lower()}"))
+        page = (
+            client.get(reverse("operations:enrollments"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        assert "لا توجد تسجيلات بعد" in page
+        assert ('class="btn2 primary empty-act" href="#enrollment-new"' in page) is may, role
+
+
+def test_the_registry_names_the_programme_from_the_row_it_already_carried(
+    client: Client, two_enrollments: object
+) -> None:
+    """
+    ``list_enrollments`` has projected ``program_name`` and ``cohort_name`` all
+    along and the page printed neither, so a reader scanned bare codes. The
+    column adds no key to the response — it prints one that was already in it.
+    """
+    from apps.catalog.models import Program
+
+    client.force_login(_user(Role.CENTER_MANAGER, "enr.program"))
+
+    page = (
+        client.get(reverse("operations:enrollments")).content.decode("utf-8").split("</nav>", 1)[-1]
+    )
+
+    for program in Program.objects.order_by("code")[:2]:
+        assert program.name_ar in page
+    assert "دفعة التحسين 0" in page
+    # A `{# … #}` comment is single-line in Django, and one that wraps is not a
+    # comment — it is text, printed inside the table. Caught in the browser.
+    assert "#}" not in page and "{#" not in page
+
+
+@pytest.mark.parametrize(
+    "role",
+    [Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT],
+)
+def test_the_registry_draws_no_partner_entitlement_for_anybody(
+    client: Client, two_enrollments: object, role: str
+) -> None:
+    """
+    The demo's tenth column, deliberately absent.
+
+    It states per row whether a third party earns on this participant and how
+    much. Whether that may be shown, and to which of the six roles §3.2/5 lets
+    in, is a privacy decision the centre has not made. A screen does not make
+    it on their behalf.
+    """
+    client.force_login(_user(role, f"enr.partner.{role.lower()}"))
+
+    # Past `</nav>`: the sidebar links «استحقاق الشركاء» for the roles §3.7 lets
+    # in, and that link is not this page drawing a column.
+    page = (
+        client.get(reverse("operations:enrollments")).content.decode("utf-8").split("</nav>", 1)[-1]
+    )
+
+    for marker in PARTNER_ENTITLEMENT_MARKERS:
+        assert marker not in page, f"{role} was shown «{marker}»"
+
+
+def test_the_enrolment_registry_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = ENROLLMENTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source and f" {dead}" not in source.split("{% comment %}")[0], (
+            f"the enrolment registry uses «{dead}»"
+        )
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    # The table is the widest on the system now; it scrolls inside its wrapper.
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+    # A POST button in the actions cell needs a form, and a block form drops the
+    # button onto its own line. `.inline-form` is what keeps the row one row.
+    assert source.count('class="inline-form"') == 2
+    # The empty row spans the table it sits in — nine columns, counted.
+    assert len(re.findall(r"<th[ >]", source)) == 9
+    assert 'colspan="9"' in source

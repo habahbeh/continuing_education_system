@@ -3,12 +3,34 @@
 
 {% block title %}{% translate "التسجيلات — مركز التعليم المستمر" %}{% endblock %}
 
+{% comment %}
+  ما تعرضه هذه الشاشة كلّه من `list_enrollments`، وما تسمح به كلّه من
+  `policy`: «استلام الوصل» بـ can_edit، و«اعتماد» بـ can_approve، و«تسجيل»
+  بـ can_create — والحماية في العرض لا هنا، فالإخفاء عرضٌ لا حراسة.
+
+  شرائح العدّ تصف الصفوف المرسومة على الشاشة لا السجل كلّه: تُحسب فوق نتيجة
+  هذا الطلب نفسها، فتتبع المرشّح ويمكن مقابلتها بالجدول تحتها.
+
+  والبرنامج داخل خلية الدفعة لا في عمود له: عمودٌ عاشر يزيد عرض الجدول ٧٧
+  بكسل ويجرّ الصفحة أفقياً بقدرها على الهاتف، والاسم يُقرأ تحت اسم الدفعة
+  بلا هذه الكلفة.
+
+  ولا عمود لاستحقاق الشريك هنا. الديمو يعرضه، وهو بيان مالي عن طرف ثالث
+  يحتاج قراراً في الخصوصية قبل أن يُرسم — فبقي تحت «تحسينات مقترحة».
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
     <h1>{{ title }}</h1>
+    <p class="sub">{% translate "سجل التسجيلات: ربط المشارك بدفعة، ومتابعة المستحق والمدفوع، وتسجيل استلام الوصل ثم الاعتماد. ما تراه من أزرار تحدّده صلاحيتك، لا هذه الشاشة." %}</p>
   </div>
+  {% if can_create %}
+    <div class="acts">
+      <a class="btn2 primary" href="#enrollment-new">{% translate "تسجيل" %}</a>
+    </div>
+  {% endif %}
 </div>
 
 {% guided_help "enrollments" %}
@@ -20,19 +42,45 @@
     <input type="search" id="q" name="q" value="{{ query }}"
            placeholder="{% translate 'بالرمز أو الاسم…' %}" spellcheck="false">
   </div>
+  {# مرشّحا الدفعة والحالة يصلان من الرابط؛ يُحملان مع البحث كي لا يسقطا عنده. #}
+  {% if request.GET.cohort %}<input type="hidden" name="cohort" value="{{ request.GET.cohort }}">{% endif %}
+  {% if request.GET.status %}<input type="hidden" name="status" value="{{ request.GET.status }}">{% endif %}
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if query %}
+  {% if active_filters %}
     <a class="btn2 ghost" href="{% url 'operations:enrollments' %}">{% translate "إلغاء التصفية" %}</a>
   {% endif %}
   <span class="count">{% blocktranslate count n=enrollments|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
 </form>
 
+{% if active_filters %}
+  <div class="note">
+    <div>
+      {% translate "نتائج مصفّاة" %}:
+      {% for label, value in active_filters %}
+        <span class="chip">{{ label }}: {{ value }}</span>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "سجل التسجيلات" %}</h2>
+    {% if status_counts %}
+      <div class="acts">
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for s in status_counts %}
+          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead><tr>
         <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
-        <th>{% translate "الدفعة" %}</th><th class="num">{% translate "المستحق" %}</th>
+        <th>{% translate "الدفعة" %}</th>
+        <th class="num">{% translate "المستحق" %}</th>
         <th class="num">{% translate "المدفوع" %}</th><th class="num">{% translate "الخصم" %}</th>
         <th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th>
         <th><span class="sr-only">{% translate "إجراءات" %}</span></th>
@@ -40,9 +88,12 @@
       <tbody>
         {% for e in enrollments %}
           <tr>
-            <td dir="ltr" translate="no">{{ e.code }}</td>
-            <td>{{ e.participant_name }}<br><small class="muted" dir="ltr" translate="no">{{ e.participant_number }}</small></td>
-            <td dir="ltr" translate="no">{{ e.cohort_code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ e.code }}</strong><br>
+              <small class="muted num">{{ e.enrolled_on|date:"Y-m-d" }}</small></td>
+            <td>{{ e.participant_name }}<br><small class="muted num" dir="ltr" translate="no">{{ e.participant_number }}</small></td>
+            <td><span dir="ltr" translate="no">{{ e.cohort_code }}</span><br>
+              <small class="muted">{{ e.cohort_name }}</small><br>
+              <small class="muted">{{ e.program_name }}</small></td>
             <td class="num">{{ e.total_due }}</td>
             <td class="num">{{ e.total_paid }}</td>
             <td class="num">{{ e.total_discount }}</td>
@@ -51,17 +102,25 @@
               {% elif e.centre_owes %}<span class="chip warn dot">{{ e.balance }} {% translate "له" %}</span>
               {% else %}<span class="chip ok dot">{% translate "مسوّى" %}</span>{% endif %}
             </td>
-            <td><span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span></td>
+            <td>
+              <span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span>
+              {# BR-018: الاعتماد بعد الوصل. الواقعة تُقال للقارئ، لا لمن يملك الزرّ وحده. #}
+              {% if e.is_approved %}
+                <br><span class="chip ok">{% translate "معتمد" %}</span>
+              {% elif e.voucher_received %}
+                <br><span class="chip">{% translate "الوصل مستلم" %}</span>
+              {% endif %}
+            </td>
             <td class="acts">
               <a class="btn2 ghost" href="{% url 'operations:account' e.code %}">{% translate "كشف الحساب" %}</a>
               {% if can_edit and not e.voucher_received %}
-                <form method="post" action="{% url 'operations:enrollment-action' e.code %}">
+                <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
                   {% csrf_token %}<input type="hidden" name="action" value="voucher">
                   <button class="btn2" type="submit">{% translate "استلام الوصل" %}</button>
                 </form>
               {% endif %}
               {% if can_approve and not e.is_approved %}
-                <form method="post" action="{% url 'operations:enrollment-action' e.code %}">
+                <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
                   {% csrf_token %}<input type="hidden" name="action" value="approve">
                   <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
                 </form>
@@ -70,13 +129,16 @@
           </tr>
         {% empty %}
           <tr><td colspan="9" class="empty">
-            {% if query %}
-              <span class="empty-title">{% translate "لا تسجيل يطابق البحث" %}</span>
-              <span class="empty-body">{% translate "جرّب رمز التسجيل كاملاً أو جزءاً من اسم المشارك." %}</span>
+            {% if active_filters %}
+              <span class="empty-title">{% translate "لا تسجيل يطابق التصفية الحالية" %}</span>
+              <span class="empty-body">{% translate "جرّب رمز التسجيل كاملاً أو جزءاً من اسم المشارك، أو ارفع تصفية الحالة والدفعة. البحث يطابق الرمز واسم المشارك فقط." %}</span>
               <a class="btn2 empty-act" href="{% url 'operations:enrollments' %}">{% translate "عرض كل التسجيلات" %}</a>
             {% else %}
               <span class="empty-title">{% translate "لا توجد تسجيلات بعد" %}</span>
-              <span class="empty-body">{% translate "يبدأ التسجيل من دفعة معتمدة وزارياً ومشارك مسجَّل — النموذج أدناه يعرض الدفعات المتاحة." %}</span>
+              <span class="empty-body">{% translate "يبدأ التسجيل من دفعة معتمدة وزارياً ومشارك مسجَّل، وتُحمَّل الرسوم آلياً من قائمة الأسعار السارية (BR-012 · BR-013)." %}</span>
+              {% if can_create %}
+                <a class="btn2 primary empty-act" href="#enrollment-new">{% translate "تسجيل جديد" %}</a>
+              {% endif %}
             {% endif %}
           </td></tr>
         {% endfor %}
@@ -86,7 +148,7 @@
 </div>
 
 {% if can_create %}
-  <div class="card2">
+  <div class="card2" id="enrollment-new">
     <div class="card2-head"><h2>{% translate "تسجيل جديد" %}</h2></div>
     <div class="card2-body">
       <p class="hint boxed">

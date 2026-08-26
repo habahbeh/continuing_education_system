@@ -393,11 +393,14 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             if response is not None:
                 return response
 
+    query = request.GET.get("q", "").strip()
+    cohort_code = request.GET.get("cohort", "").strip()
+    status = request.GET.get("status", "").strip()
     rows = enrollment_service.list_enrollments(
         actor=request.user,
-        query=request.GET.get("q", "").strip(),
-        cohort_code=request.GET.get("cohort", "").strip(),
-        status=request.GET.get("status", "").strip(),
+        query=query,
+        cohort_code=cohort_code,
+        status=status,
         request=request,
     )
     return render(
@@ -407,6 +410,8 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             "title": _("التسجيلات"),
             "active_screen": Screen.ENROLLMENTS,
             "enrollments": rows,
+            "status_counts": _enrollment_status_counts(rows),
+            "active_filters": _enrollment_active_filters(rows, query, cohort_code, status),
             "form": form,
             "can_create": can_create,
             "can_edit": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.EDIT),
@@ -414,6 +419,45 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             "query": request.GET.get("q", ""),
         },
     )
+
+
+def _enrollment_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    How the rows ON SCREEN divide by status — not a registry-wide total.
+
+    Counted over the result set the request already produced, so the chips move
+    with the filter and can be checked against the table beneath them. Nothing
+    is queried, no key is read that the row did not already carry to the page,
+    and a status nobody is in simply has no chip.
+    """
+    counts = Counter(str(row["status"]) for row in rows)
+    labels = {str(row["status"]): row["status_display"] for row in rows}
+    return [
+        {"status": status, "label": labels[status], "count": count}
+        for status, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _enrollment_active_filters(
+    rows: list[dict[str, Any]], query: str, cohort_code: str, status: str
+) -> list[tuple[str, str]]:
+    """
+    The filters this request is actually narrowing by, named for the reader.
+
+    A filtered list that looks unfiltered is how «where did they go?» starts.
+    ``cohort`` and ``status`` are reachable from the URL and have been all
+    along; naming them adds no filter and opens no field — both are printed in
+    the table for every role the matrix lets through this door.
+    """
+    active: list[tuple[str, str]] = []
+    if query:
+        active.append((_("بحث"), query))
+    if cohort_code:
+        active.append((_("الدفعة"), cohort_code))
+    if status:
+        labels = {str(row["status"]): row["status_display"] for row in rows}
+        active.append((_("الحالة"), labels.get(status, status)))
+    return active
 
 
 def _create_enrollment(request: HttpRequest, form: EnrollmentForm) -> HttpResponse | None:
