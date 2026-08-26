@@ -750,6 +750,23 @@ def reason_choices() -> list[tuple[str, str]]:
     return [(value, str(label)) for value, label in TransferReason.choices]
 
 
+def filterable_status_choices() -> list[tuple[str, str]]:
+    """
+    The statuses the register may be narrowed by, projected for a form (A-05).
+
+    DRAFT is left out on purpose: it is not a stage anybody waits at — a
+    request is created straight into PENDING_MANAGER — and the filter has
+    never offered it. This projects what the screen already had, so that the
+    four labels stop living as literals in the template, where a filter chip
+    naming the active status could only print the stored code.
+    """
+    return [
+        (value, str(label))
+        for value, label in TransferStatus.choices
+        if value != TransferStatus.DRAFT
+    ]
+
+
 def transfer_instance(*, actor: Any, code: str, request: Any = None) -> Transfer:
     """The model object, for handing back into this module (A-05)."""
     policy.require(actor, Screen.TRANSFERS, Action.VIEW, request=request)

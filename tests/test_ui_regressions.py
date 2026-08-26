@@ -1392,3 +1392,346 @@ def test_the_enrolment_registry_added_no_dead_class_and_no_dependency() -> None:
     # The empty row spans the table it sits in — nine columns, counted.
     assert len(re.findall(r"<th[ >]", source)) == 9
     assert 'colspan="9"' in source
+
+
+# ---------------------------------------------------------------------------
+# The course-transfer register — page polish
+# ---------------------------------------------------------------------------
+TRANSFERS_TEMPLATE = Path("templates/operations/transfers.html")
+
+#: The demo's partner columns, and the money that is nobody's business on a
+#: transfer list. None of them may appear here in any form.
+TRANSFER_MUST_NOT_SHOW = (
+    "استحقاق الشريك",
+    "يستحق",
+    "partner_share",
+    "entitlement",
+    "الشريك المتعاقد",
+)
+
+
+@pytest.fixture
+def two_transfers(two_enrollments: object, seeded_settings: None) -> object:
+    """
+    Two transfer rows in two statuses, reusing the enrolments already built.
+
+    Two rather than one because a distribution of a single status restates the
+    counter beside it, and because a filter needs something to exclude.
+    """
+    from datetime import date
+
+    from apps.operations.models import Enrollment, Transfer
+
+    first = Enrollment.objects.get(code="EN-UIX-0")
+    second = Enrollment.objects.get(code="EN-UIX-1")
+    registrar = _user(Role.REGISTRATION_OFFICER, "trf.fixture.reg")
+
+    Transfer.objects.create(
+        code="TR-UIX-0",
+        from_enrollment=first,
+        to_cohort=second.cohort,
+        requested_on=date(2026, 3, 1),
+        requested_by=registrar,
+        reason="PARTICIPANT_REQUEST",
+        lectures_attended_at_request=2,
+        same_category=True,
+        status="PENDING_MANAGER",
+    )
+    Transfer.objects.create(
+        code="TR-UIX-1",
+        from_enrollment=second,
+        to_cohort=first.cohort,
+        requested_on=date(2026, 3, 2),
+        requested_by=registrar,
+        reason="CENTER_CANCELLATION",
+        lectures_attended_at_request=1,
+        same_category=False,
+        status="REJECTED",
+        rejection_reason_ar="خارج المجال",
+    )
+    return two_enrollments
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.2/6 leaves both cells empty. Under BR-080 that is a refusal.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_transfer_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"trf.open.{role.lower()}"))
+
+    assert client.get(reverse("operations:transfers")).status_code == expected
+
+
+def test_the_transfer_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Fail-closed, and it is the SERVICE that closes it: the view has no
+    ``policy.require`` of its own, ``list_transfers`` does. The polish did not
+    move that, and this test is here so nobody later mistakes the view's
+    silence for an unguarded door.
+    """
+    assert client.get(reverse("operations:transfers")).status_code == 403
+
+
+def test_the_request_action_is_offered_only_where_transfer_new_grants_create(
+    client: Client, two_transfers: object
+) -> None:
+    """
+    The button is gated on CREATE over TRANSFER_NEW (§3.2/7), not over this
+    screen — and the audit account is why that distinction has to be tested:
+    it holds VIEW on the request form and not CREATE, so the sidebar links the
+    form and this page must not offer it. The finance officer is the mirror
+    case: VIEW and EDIT here, nothing at all on §3.2/7.
+
+    Scoped past ``</nav>`` — a bare ``href in body`` is answered by the menu.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"trf.new.{role.lower()}"))
+        page = (
+            client.get(reverse("operations:transfers"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        may = Action.CREATE in allowed_actions(role, "transfer-new")
+        assert (f'href="{reverse("operations:transfer-new")}"' in page) is may, role
+
+
+def test_the_register_stayed_read_only(client: Client, two_transfers: object) -> None:
+    """
+    §3.2/6 is a list. Recommending, rejecting and executing live on the detail
+    screen behind their own gates, and the polish added no button, no form and
+    no POST target here — the view still refuses anything but GET.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "trf.readonly"))
+
+    page = (
+        client.get(reverse("operations:transfers")).content.decode("utf-8").split("</nav>", 1)[-1]
+    )
+
+    assert '<form method="post"' not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert client.post(reverse("operations:transfers")).status_code == 405
+
+
+def test_the_transfer_status_chips_count_the_rows_on_screen(
+    client: Client, two_transfers: object
+) -> None:
+    """
+    Counted over the result set this request produced, so they follow the
+    filter and can be checked against the table beneath them.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "trf.chips"))
+
+    def chips(url: str) -> dict[str, int]:
+        page = client.get(url).content.decode("utf-8").split("</nav>", 1)[-1]
+        return {
+            label.strip(): int(n)
+            for label, n in re.findall(
+                r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
+            )
+        }
+
+    everything = chips(reverse("operations:transfers"))
+    assert sum(everything.values()) == 2
+    assert "توزيع النتائج المعروضة" in client.get(reverse("operations:transfers")).content.decode(
+        "utf-8"
+    )
+
+    filtered = chips(reverse("operations:transfers") + "?status=REJECTED")
+    assert sum(filtered.values()) == 1
+    assert "مرفوض" in filtered
+
+
+def test_the_transfer_register_says_which_filters_are_narrowing_it(
+    client: Client, two_transfers: object
+) -> None:
+    """
+    Both filters were already controls on the screen; what was missing was any
+    sign, once applied, that the table is a subset — and any way back.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "trf.active"))
+    url = reverse("operations:transfers")
+
+    plain = client.get(url).content.decode("utf-8")
+    assert "نتائج مصفّاة" not in plain
+    assert "إلغاء التصفية" not in plain
+
+    for query in ("?q=TR-UIX", "?status=EXECUTED"):
+        narrowed = client.get(url + query).content.decode("utf-8")
+        assert "نتائج مصفّاة" in narrowed, query
+        assert "إلغاء التصفية" in narrowed, query
+
+    # A filter matching NOTHING still has to name itself in Arabic. There is no
+    # row to read a label off, so a chip built from the result set printed the
+    # stored code — «الحالة: EXECUTED» in front of a client. Caught in browser.
+    banner = (
+        client.get(url + "?status=EXECUTED")
+        .content.decode("utf-8")
+        .split("نتائج مصفّاة", 1)[-1]
+        .split("</div>", 1)[0]
+    )
+    assert "منفَّذ" in banner
+    assert "EXECUTED" not in banner, "the chip printed the stored code"
+
+
+def test_the_transfer_filters_are_the_two_that_were_already_there(
+    client: Client, two_transfers: object
+) -> None:
+    """
+    No filter was added. The status options are still the four the screen
+    always offered, over a field the table prints in every row.
+    """
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "trf.filters"))
+
+    page = (
+        client.get(reverse("operations:transfers")).content.decode("utf-8").split("</nav>", 1)[-1]
+    )
+
+    assert set(re.findall(r'name="(\w+)"', page)) == {"q", "status"}
+    options = set(re.findall(r'<option value="(\w*)"', page))
+    assert options == {"", "PENDING_MANAGER", "PENDING_FINANCE", "EXECUTED", "REJECTED"}
+    # The template no longer repeats the enum; the four come from the service.
+    assert TRANSFERS_TEMPLATE.read_text(encoding="utf-8").count("<option") == 2
+
+
+def test_the_two_transfer_empty_states_are_not_the_same_sentence(
+    client: Client, seeded_settings: None, two_transfers: object
+) -> None:
+    """«None yet» and «none matched» ask for opposite next actions."""
+    from apps.operations.models import Transfer
+
+    client.force_login(_user(Role.CENTER_MANAGER, "trf.empty"))
+    url = reverse("operations:transfers")
+
+    no_match = client.get(url + "?status=EXECUTED").content.decode("utf-8")
+    assert "لا طلب نقل يطابق التصفية الحالية" in no_match
+    assert "عرض كل الطلبات" in no_match
+    assert "لا طلبات نقل بعد" not in no_match
+
+    Transfer.objects.all().delete()
+    virgin = client.get(url).content.decode("utf-8")
+    assert "لا طلبات نقل بعد" in virgin
+    assert "لا طلب نقل يطابق التصفية الحالية" not in virgin
+
+
+def test_the_transfer_empty_state_offers_the_form_only_where_it_is_allowed(
+    client: Client, seeded_settings: None
+) -> None:
+    """A reader is not sent to a button that would refuse them."""
+    for role, may in ((Role.CENTER_MANAGER, True), (Role.AUDIT_ACCOUNT, False)):
+        client.force_login(_user(role, f"trf.empty.{role.lower()}"))
+        page = (
+            client.get(reverse("operations:transfers"))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        assert "لا طلبات نقل بعد" in page
+        assert ('class="btn2 primary empty-act"' in page) is may, role
+
+
+def test_the_register_prints_only_keys_the_row_already_carried(
+    client: Client, two_transfers: object
+) -> None:
+    """
+    The reason, the request date and the two enrolment codes were all in
+    ``_row`` and drawn nowhere. Printing them adds no key to the response and
+    opens no field: the detail screen shows all four to these same roles.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "trf.keys"))
+
+    page = (
+        client.get(reverse("operations:transfers")).content.decode("utf-8").split("</nav>", 1)[-1]
+    )
+
+    assert "طلب المشارك" in page and "إلغاء المركز للدورة" in page  # reason_display
+    assert "2026-03-01" in page  # requested_on
+    assert "EN-UIX-0" in page and "EN-UIX-1" in page  # from_enrollment_code
+    # A `{# … #}` comment is single-line in Django; one that wraps is text.
+    assert "#}" not in page and "{#" not in page
+
+
+@pytest.mark.parametrize(
+    "role",
+    [Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT],
+)
+def test_the_register_shows_no_partner_or_private_field(
+    client: Client, two_transfers: object, role: str
+) -> None:
+    """
+    No partner entitlement, no partner name, and none of the participant's
+    protected identity fields — the transfer row never carried them, and the
+    polish did not go looking.
+    """
+    client.force_login(_user(role, f"trf.priv.{role.lower()}"))
+
+    page = (
+        client.get(reverse("operations:transfers")).content.decode("utf-8").split("</nav>", 1)[-1]
+    )
+
+    for marker in TRANSFER_MUST_NOT_SHOW:
+        assert marker not in page, f"{role} was shown «{marker}»"
+    for field in RESTRICTED_AWAY:
+        assert field not in page, f"{role} was served «{field}»"
+    assert "9990001112" not in page, "an identity document number reached the page"
+
+
+def test_the_transfer_register_added_no_dead_class_and_no_dependency() -> None:
+    """
+    Every class it draws with already existed; the page needed no new CSS.
+
+    ``.note info`` is gone on purpose: blue is an alert, and §6.5 of the polish
+    rules says explaining a rule is not one. The words are unchanged.
+    """
+    import re
+
+    source = TRANSFERS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the transfer register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+    assert 'class="note info"' not in source
+
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    # The wide table scrolls inside its own wrapper, never the page body.
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+    # The empty row spans the table it sits in — nine columns, counted.
+    assert len(re.findall(r"<th[ >]", source)) == 9
+    assert 'colspan="9"' in source
+    # The actions column is NAMED, and not with `.sr-only`: that class is
+    # `position:absolute` with no positioned ancestor, so in RTL it resolves
+    # against the initial containing block, lands ~230px off the left edge,
+    # escapes `.tbl-wrap`'s clip and drags the whole page sideways. The
+    # attribute reaches assistive tech and occupies no box at all.
+    assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "sr-only" not in markup

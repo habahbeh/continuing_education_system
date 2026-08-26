@@ -1,13 +1,48 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{% translate "النقل بين الدورات — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  الصفحة قراءة: كل ما فيها من `list_transfers`، والطلب نفسه يُقدَّم من شاشة
+  «طلب نقل جديد» وحدها. زرّ الطلب محروس بـ CREATE على TRANSFER_NEW لا على
+  هذه الشاشة — والحساب التدقيقي يفتح النموذج ولا يقدّمه، فلا يُعرض له الزرّ.
+
+  شرائح العدّ تصف الصفوف المرسومة لا السجل كلّه، وتُحسب فوق نتيجة هذا الطلب.
+
+  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيُحسب من الكتلة الابتدائية ويقع عند
+  -٢٣٠px في RTL، ويهرب من قصّ `.tbl-wrap` فيجرّ الصفحة كلّها أفقياً. الاسم
+  يصل بالسمة، والصفحة لا تنزلق.
+
+  القواعد كانت في `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
+  (قواعد التحسين §6.5). النصّ نفسه بلا تغيير، مقسوماً إلى أسطر تُقرأ.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "نقل مشارك من دفعة إلى أخرى: الطلب يُرفع من شاشة «طلب نقل جديد»، وهذه الشاشة تتابع الطلبات القائمة وما نُفِّذ منها وما رُفض. القراءة للجميع، والأفعال بالصلاحية." %}</p>
+  </div>
+  {% if can_request %}
+    <div class="acts">
+      <a class="btn2 primary" href="{% url 'operations:transfer-new' %}">{% translate "طلب نقل جديد" %}</a>
+    </div>
+  {% endif %}
 </div>
 
 {% guided_help "transfers" %}
-<div class="note info">
-  {% translate "النقل للدورات القصيرة فقط (BR-060)، ضمن نفس المجال إلا باستثناء عند إلغاء المركز للدورة (BR-061 · BR-065)، وقبل تجاوز مهلة المحاضرات (BR-062). ثلاث أيدٍ: التسجيل يطلب · المدير ينسّب · المالية تسوّي وتنفّذ (BR-066)." %}
+
+<div class="note">
+  <div>
+    <strong>{% translate "النطاق" %}:</strong>
+    {% translate "النقل للدورات القصيرة فقط (BR-060)، ضمن نفس المجال إلا باستثناء عند إلغاء المركز للدورة (BR-061 · BR-065)، وقبل تجاوز مهلة المحاضرات (BR-062)." %}
+    <br>
+    <strong>{% translate "ثلاث أيدٍ" %}:</strong>
+    {% translate "التسجيل يطلب · المدير ينسّب · المالية تسوّي وتنفّذ (BR-066)." %}
+  </div>
 </div>
 
 <form method="get" class="filterbar" role="search">
@@ -18,35 +53,67 @@
   <div class="fld">
     <label for="f_status">{% translate "الحالة" %}</label>
     <select name="status" id="f_status">
-    <option value="">{% translate "كل الحالات" %}</option>
-    <option value="PENDING_MANAGER" {% if status == "PENDING_MANAGER" %}selected{% endif %}>{% translate "بانتظار تنسيب المدير" %}</option>
-    <option value="PENDING_FINANCE" {% if status == "PENDING_FINANCE" %}selected{% endif %}>{% translate "بانتظار تسوية المالية" %}</option>
-    <option value="EXECUTED" {% if status == "EXECUTED" %}selected{% endif %}>{% translate "منفَّذ" %}</option>
-    <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
-  </select>
+      <option value="">{% translate "كل الحالات" %}</option>
+      {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
   </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if can_request %}
-    <a class="btn2 primary" href="{% url 'operations:transfer-new' %}">{% translate "طلب نقل جديد" %}</a>
+  {% if active_filters %}
+    <a class="btn2 ghost" href="{% url 'operations:transfers' %}">{% translate "إلغاء التصفية" %}</a>
   {% endif %}
+  <span class="count">{% blocktranslate count n=transfers|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
 </form>
 
+{% if active_filters %}
+  <div class="note">
+    <div>
+      {% translate "نتائج مصفّاة" %}:
+      {% for label, value in active_filters %}
+        <span class="chip">{{ label }}: {{ value }}</span>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "سجل طلبات النقل" %}</h2>
+    {% if status_counts %}
+      <div class="acts">
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for s in status_counts %}
+          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead><tr>
         <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
         <th>{% translate "من" %}</th><th>{% translate "إلى" %}</th>
-        <th>{% translate "المحاضرات" %}</th><th>{% translate "المجال" %}</th>
-        <th>{% translate "فرق الرسوم" %}</th><th>{% translate "الحالة" %}</th><th></th>
+        <th class="num">{% translate "المحاضرات" %}</th><th>{% translate "المجال" %}</th>
+        <th class="num">{% translate "فرق الرسوم" %}</th><th>{% translate "الحالة" %}</th>
+        <th aria-label="{% translate 'إجراءات' %}"></th>
       </tr></thead>
       <tbody>
         {% for t in transfers %}
           <tr>
-            <td dir="ltr">{{ t.code }}</td>
-            <td>{{ t.participant_name }}<br><small class="muted" dir="ltr">{{ t.participant_number }}</small></td>
-            <td dir="ltr">{{ t.from_cohort_code }}<br><small class="muted">{{ t.from_program_name }}</small></td>
-            <td dir="ltr">{{ t.to_cohort_code }}<br><small class="muted">{{ t.to_program_name }}</small></td>
+            <td dir="ltr" translate="no"><strong class="num">{{ t.code }}</strong><br>
+              <small class="muted num">{{ t.requested_on|date:"Y-m-d" }}</small></td>
+            <td>{{ t.participant_name }}<br>
+              <small class="muted num" dir="ltr" translate="no">{{ t.participant_number }}</small><br>
+              <small class="muted">{{ t.reason_display }}</small></td>
+            <td><span dir="ltr" translate="no">{{ t.from_cohort_code }}</span><br>
+              <small class="muted">{{ t.from_program_name }}</small><br>
+              <small class="muted num" dir="ltr" translate="no">{{ t.from_enrollment_code }}</small></td>
+            <td><span dir="ltr" translate="no">{{ t.to_cohort_code }}</span><br>
+              <small class="muted">{{ t.to_program_name }}</small>
+              {% if t.to_enrollment_code %}<br>
+                <small class="muted num" dir="ltr" translate="no">{{ t.to_enrollment_code }}</small>
+              {% endif %}</td>
             <td class="num">{{ t.lectures_attended_at_request }}</td>
             <td>
               {% if t.same_category %}<span class="chip ok">{% translate "نفس المجال" %}</span>
@@ -55,13 +122,22 @@
             </td>
             <td class="num">{{ t.fee_difference }}</td>
             <td><span class="chip {{ t.status|status_tone }}">{{ t.status_display }}</span></td>
-            <td><a class="btn2 ghost" href="{% url 'operations:transfer-detail' t.code %}">{% translate "عرض" %}</a></td>
+            <td class="acts"><a class="btn2 ghost" href="{% url 'operations:transfer-detail' t.code %}">{% translate "عرض الطلب" %}</a></td>
           </tr>
         {% empty %}
           <tr><td colspan="9" class="empty">
-              <span class="empty-title">{% translate "لا طلبات نقل" %}</span>
+            {% if active_filters %}
+              <span class="empty-title">{% translate "لا طلب نقل يطابق التصفية الحالية" %}</span>
+              <span class="empty-body">{% translate "جرّب رمز النقل كاملاً أو جزءاً من اسم المشارك، أو وسّع الحالة إلى «كل الحالات»." %}</span>
+              <a class="btn2 empty-act" href="{% url 'operations:transfers' %}">{% translate "عرض كل الطلبات" %}</a>
+            {% else %}
+              <span class="empty-title">{% translate "لا طلبات نقل بعد" %}</span>
               <span class="empty-body">{% translate "النقل بين الدورات يبدأ بطلب، و«فحص الشروط» يعرض القرار وفرق الرسوم قبل التقديم بلا أي كتابة." %}</span>
-            </td></tr>
+              {% if can_request %}
+                <a class="btn2 primary empty-act" href="{% url 'operations:transfer-new' %}">{% translate "طلب نقل جديد" %}</a>
+              {% endif %}
+            {% endif %}
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>

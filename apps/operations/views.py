@@ -410,7 +410,7 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             "title": _("التسجيلات"),
             "active_screen": Screen.ENROLLMENTS,
             "enrollments": rows,
-            "status_counts": _enrollment_status_counts(rows),
+            "status_counts": _status_counts(rows),
             "active_filters": _enrollment_active_filters(rows, query, cohort_code, status),
             "form": form,
             "can_create": can_create,
@@ -421,7 +421,7 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
     )
 
 
-def _enrollment_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     How the rows ON SCREEN divide by status — not a registry-wide total.
 
@@ -429,6 +429,10 @@ def _enrollment_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     with the filter and can be checked against the table beneath them. Nothing
     is queried, no key is read that the row did not already carry to the page,
     and a status nobody is in simply has no chip.
+
+    Every list on this file's screens projects ``status`` beside
+    ``status_display``, so this needs to know nothing about which list it is
+    counting.
     """
     counts = Counter(str(row["status"]) for row in rows)
     labels = {str(row["status"]): row["status_display"] for row in rows}
@@ -1226,23 +1230,48 @@ TRANSFER_ACTIONS: dict[str, tuple[str, str]] = {
 @require_http_methods(["GET"])
 def transfers_view(request: HttpRequest) -> HttpResponse:
     """§3.2/6 — every transfer, whatever stage it has reached."""
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    rows = transfer_service.list_transfers(
+        actor=request.user, status=status, query=query, request=request
+    )
     return render(
         request,
         "operations/transfers.html",
         {
             "title": _("النقل بين الدورات"),
             "active_screen": Screen.TRANSFERS,
-            "transfers": transfer_service.list_transfers(
-                actor=request.user,
-                status=request.GET.get("status", "").strip(),
-                query=request.GET.get("q", "").strip(),
-                request=request,
-            ),
+            "transfers": rows,
+            "status_counts": _status_counts(rows),
+            "status_choices": transfer_service.filterable_status_choices(),
+            "active_filters": _transfer_active_filters(query, status),
             "query": request.GET.get("q", ""),
             "status": request.GET.get("status", ""),
             "can_request": policy.is_allowed(request.user, Screen.TRANSFER_NEW, Action.CREATE),
         },
     )
+
+
+def _transfer_active_filters(query: str, status: str) -> list[tuple[str, str]]:
+    """
+    The filters narrowing this list, named for the reader.
+
+    Both were already on the screen as controls; what was missing is any sign,
+    once they are applied, that the table is a subset. Neither names a field
+    the table does not already print.
+
+    The status is named from the vocabulary, not from the rows: a filter that
+    matches nothing has no row to read a label off, and «الحالة: EXECUTED» in
+    front of a client is the defect the participant registry was fixed for.
+    Unknown stays unknown rather than being dressed up as a label.
+    """
+    active: list[tuple[str, str]] = []
+    if query:
+        active.append((_("بحث"), query))
+    if status:
+        labels = dict(transfer_service.filterable_status_choices())
+        active.append((_("الحالة"), labels.get(status, status)))
+    return active
 
 
 @require_http_methods(["GET", "POST"])
