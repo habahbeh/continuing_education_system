@@ -1,54 +1,129 @@
 {% extends "base.html" %}
 {% load i18n %}
 
+{% block title %}{{ program.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  صفحة قراءة كباقي الكتالوج: لا خدمة إدخال خلفها ولا فرع POST في العرض،
+  فلا يُرسم زرّ تعديل ولو كانت `can_edit` في السياق. زرٌّ بلا مسار أسوأ من
+  غياب الزرّ.
+
+  «مجموع أسعار المواد» هو الطرف الأيسر من BR-006 وحده. الطرف الآخر — رسوم
+  الدورة ناقص المستهلكات — يأتي من قائمة الأسعار السارية، وهذه الشاشة لا
+  تقرأها. فيُعرض المجموع ويُقال من أين يأتي ما يُقارَن به، ولا يُطبع حكم
+  «مطابق» أو «فرق» لا تملك الصفحة طرفيه. الديمو يطبع الحكم؛ نحن لا نخمّنه.
+
+  ولا سعر برنامج هنا ولا حصة شريك: الديمو يعرض «حصة الجامعة» و«حصة الشريك»
+  و«قسمة 50/50» في شاشة الأونلاين، وهو شرط تجاري مع طرف ثالث لا محلّ له في
+  كتالوج.
+{% endcomment %}
+
 {% block content %}
-<div class="card2">
-  <h1>{{ program.name_ar }}</h1>
-  <p class="note" dir="ltr">{{ program.code }} · {{ program.get_program_type_display }}</p>
-
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <tbody>
-        <tr><th>{% translate "المجال" %}</th><td>{{ program.course_category.name_ar|default:"—" }}</td></tr>
-        <tr><th>{% translate "المجال المعرفي" %}</th><td>{{ program.knowledge_field.name_ar|default:"—" }}</td></tr>
-        <tr><th>{% translate "الساعات التدريبية" %}</th><td>{{ program.training_hours }}</td></tr>
-        <tr><th>{% translate "المستهلكات لكل مشارك" %}</th><td>{{ program.consumables_per_student }}</td></tr>
-        {% if program.is_leveled %}
-          <tr><th>{% translate "عدد المستويات" %}</th><td>{{ program.levels_count }}</td></tr>
-        {% endif %}
-      </tbody>
-    </table>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{{ program.name_ar }}</h1>
+    <p class="sub">
+      <span dir="ltr" translate="no">{{ program.code }}</span> ·
+      {{ program.get_program_type_display }} —
+      {% translate "بطاقة تعريف البرنامج في الكتالوج. الأسعار تُقرأ من قوائم الأسعار المؤرّخة، ولا تعديل من هذه الشاشة." %}
+    </p>
   </div>
+  <div class="acts">
+    <a class="btn2 ghost" href="{{ list_url }}">{% blocktranslate %}عودة إلى {{ list_label }}{% endblocktranslate %}</a>
+  </div>
+</div>
 
-  {% if subjects %}
-    <h2>{% translate "المواد" %}</h2>
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "بيانات البرنامج" %}</h2>
+    <div class="acts">
+      {% if program.is_active %}<span class="chip ok dot">{% translate "نشط" %}</span>
+      {% else %}<span class="chip dot">{% translate "غير نشط" %}</span>{% endif %}
+    </div>
+  </div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "الرمز" %}</dt>
+      <dd dir="ltr" translate="no"><strong class="num">{{ program.code }}</strong></dd>
+      {% if program.name_en %}
+        <dt>{% translate "الاسم بالإنجليزية" %}</dt>
+        <dd dir="ltr">{{ program.name_en }}</dd>
+      {% endif %}
+      <dt>{% translate "النوع" %}</dt>
+      <dd><span class="chip">{{ program.get_program_type_display }}</span></dd>
+      <dt>{% translate "المجال" %}</dt>
+      <dd>
+        {% if program.course_category %}<span class="chip">{{ program.course_category.name_ar }}</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </dd>
+      <dt>{% translate "المجال المعرفي" %}</dt>
+      <dd>{{ program.knowledge_field.name_ar|default:"—" }}</dd>
+      {% if program.specialization %}
+        <dt>{% translate "التخصص" %}</dt>
+        <dd>{{ program.specialization }}</dd>
+      {% endif %}
+      <dt>{% translate "الساعات التدريبية" %}</dt>
+      <dd class="num">{{ program.training_hours }}</dd>
+      <dt>{% translate "المستهلكات لكل مشارك" %}</dt>
+      <dd class="num">{{ program.consumables_per_student }}</dd>
+      <dt>{% translate "المستويات" %}</dt>
+      <dd>
+        {% if program.is_leveled %}<span class="num">{{ program.levels_count|default:"—" }}</span>
+        {% else %}<span class="muted">{% translate "بلا مستويات" %}</span>{% endif %}
+      </dd>
+    </dl>
+  </div>
+</div>
+
+{% if subjects or expects_subjects %}
+  <div class="card2">
+    <div class="card2-head">
+      <h2>{% translate "المواد" %}</h2>
+      {% if subjects %}
+        <div class="acts">
+          <span class="chip">{% blocktranslate count n=subjects|length %}مادة واحدة{% plural %}{{ n }} مواد{% endblocktranslate %}</span>
+        </div>
+      {% endif %}
+    </div>
     <div class="tbl-wrap">
       <table class="tbl">
         <thead>
           <tr>
-            <th>#</th><th>{% translate "المادة" %}</th>
-            <th>{% translate "الساعات" %}</th><th>{% translate "السعر" %}</th>
+            <th class="num">#</th><th>{% translate "المادة" %}</th>
+            <th class="num">{% translate "الساعات" %}</th><th class="num">{% translate "السعر" %}</th>
           </tr>
         </thead>
         <tbody>
           {% for s in subjects %}
             <tr>
-              <td>{{ s.sequence }}</td><td>{{ s.name_ar }}</td>
-              <td>{{ s.training_hours }}</td><td>{{ s.price }}</td>
+              <td class="num">{{ s.sequence }}</td>
+              <td>{{ s.name_ar }}</td>
+              <td class="num">{{ s.training_hours }}</td>
+              <td class="num">{{ s.price }}</td>
             </tr>
+          {% empty %}
+            <tr><td colspan="4" class="empty">
+              <span class="empty-title">{% translate "لا مواد معرَّفة لهذا الدبلوم بعد" %}</span>
+              <span class="empty-body">{% translate "الدبلوم يتكوّن من مواد لكلٍّ منها ساعاتها وسعرها، وBR-006 يزن مجموع أسعارها. سعر المادة قد يكون صفراً وهذا مقبول (BR-007)." %}</span>
+            </td></tr>
           {% endfor %}
         </tbody>
-        <tfoot>
-          <tr>
-            <th colspan="3">{% translate "مجموع أسعار المواد" %}</th>
-            <th>{{ subject_total }}</th>
-          </tr>
-        </tfoot>
+        {% if subjects %}
+          <tfoot>
+            <tr>
+              <th colspan="3">{% translate "مجموع أسعار المواد" %}</th>
+              <th class="num">{{ subject_total }}</th>
+            </tr>
+          </tfoot>
+        {% endif %}
       </table>
     </div>
-    <p class="note">
-      {% translate "BR-006: مجموع أسعار المواد يجب أن يساوي رسوم الدورة ناقص المستهلكات قبل الاعتماد." %}
-    </p>
-  {% endif %}
-</div>
+    <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "BR-006: مجموع أسعار المواد يجب أن يساوي رسوم الدورة ناقص المستهلكات قبل الاعتماد. رسوم الدورة تأتي من قائمة الأسعار السارية ولا تُقرأ في هذه الشاشة، فالمجموع أعلاه هو طرف المقارنة الذي تملكه هذه الصفحة لا نتيجتها." %}
+      </p>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

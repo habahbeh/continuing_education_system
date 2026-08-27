@@ -18,6 +18,7 @@ from typing import Any
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils.translation import gettext as _
 
 from apps.catalog.services import catalog_service, pricing_service
@@ -29,6 +30,15 @@ TYPE_BY_SCREEN: dict[str, str] = {
     Screen.PROGRAMS: "DIPLOMA",
     Screen.SHORT_COURSES: "SHORT_COURSE",
     Screen.ONLINE_COURSES: "ONLINE_COURSE",
+}
+
+#: …and the list it came from, so a detail page can offer the way back. The
+#: reader already passed this screen's VIEW gate to be here, so the link
+#: cannot send them into a refusal.
+LIST_ROUTE_BY_SCREEN: dict[str, str] = {
+    Screen.PROGRAMS: "catalog:programs",
+    Screen.SHORT_COURSES: "catalog:short-courses",
+    Screen.ONLINE_COURSES: "catalog:online-courses",
 }
 
 
@@ -123,6 +133,14 @@ def program_detail_view(request: HttpRequest, code: str) -> HttpResponse:
             "subjects": program.subjects.all(),
             "subject_total": pricing_service.subject_price_total(program),
             "screen": screen,
+            # The list this came from, named by the screen's own label so no
+            # new string is invented (Screen is a TextChoices).
+            "list_url": reverse(LIST_ROUTE_BY_SCREEN[screen]),
+            "list_label": Screen(screen).label,
+            # ``Subject`` is documented as a DIPLOMA subject (DATA_MODEL §5.4),
+            # and BR-006 weighs their sum. A short course legitimately has
+            # none, so only the diploma gets told when the section is empty.
+            "expects_subjects": screen == Screen.PROGRAMS,
             "can_edit": policy.is_allowed(request.user, screen, Action.EDIT),
         },
     )

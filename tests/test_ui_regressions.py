@@ -2187,3 +2187,242 @@ def test_the_catalogue_list_added_no_dead_class_and_no_dependency() -> None:
     # Every `{# … #}` closes on its own line — Django's tag does not span lines.
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The programme detail card — page polish
+# ---------------------------------------------------------------------------
+PROGRAM_DETAIL_TEMPLATE = Path("templates/catalog/program_detail.html")
+
+
+def _a_program(program_type: str) -> str:
+    from apps.catalog.models import Program
+
+    code = Program.objects.filter(program_type=program_type).values_list("code", flat=True).first()
+    assert code, f"no {program_type} was seeded, so this proves nothing"
+    return str(code)
+
+
+@pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.3/9–11 leave both cells empty. Under BR-080 that is a refusal.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_programme_card_opens_exactly_where_the_matrix_says(
+    client: Client, a_catalogue: None, program_type: str, role: str, expected: int
+) -> None:
+    """
+    The gate is the SCREEN THE PROGRAMME BELONGS TO, decided from its type —
+    and the view has no ``policy.require`` of its own, ``get_program`` has. The
+    polish did not move that.
+    """
+    code = _a_program(program_type)
+    client.force_login(_user(role, f"pd.{program_type}.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("catalog:program-detail", args=[code])).status_code == expected
+
+
+def test_the_programme_card_refuses_an_anonymous_visitor(client: Client, a_catalogue: None) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    code = _a_program("DIPLOMA")
+
+    assert client.get(reverse("catalog:program-detail", args=[code])).status_code == 403
+
+
+@pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
+def test_the_programme_card_stayed_read_only(
+    client: Client, a_catalogue: None, program_type: str
+) -> None:
+    """
+    ``can_edit`` is in the context and there is no editing service and no POST
+    branch behind it. The centre manager holds EDIT on all three screens, and
+    the card must still draw no form and no button.
+    """
+    from apps.catalog.views import TYPE_BY_SCREEN
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    screen = next(s for s, t in TYPE_BY_SCREEN.items() if t == program_type)
+    assert Action.EDIT in allowed_actions(Role.CENTER_MANAGER, screen)
+
+    code = _a_program(program_type)
+    client.force_login(_user(Role.CENTER_MANAGER, f"pd.ro.{program_type}".lower()))
+    page = (
+        client.get(reverse("catalog:program-detail", args=[code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    assert "<form" not in page
+    assert "<button" not in page
+    assert "csrfmiddlewaretoken" not in page
+    # The word «تعديل» DOES appear — in the subtitle, saying editing is not
+    # done here. What must not appear is a control: the only link on the page
+    # is the ghost way back, and no primary action is drawn at all.
+    assert 'class="btn2 primary"' not in page
+    assert page.count("<a class=") == page.count('<a class="btn2 ghost"') == 1
+
+
+@pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
+def test_the_programme_card_prints_no_price_and_no_partner_share(
+    client: Client, a_catalogue: None, program_type: str
+) -> None:
+    """
+    Subject prices and the consumables figure were on this page before and stay
+    — they are catalogue inputs. What must never appear is the programme's fee
+    from a price list, or anything about a third party's cut of it.
+    """
+    code = _a_program(program_type)
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"pd.pr.{program_type}.{role}".lower().replace("_", ".")))
+        page = (
+            client.get(reverse("catalog:program-detail", args=[code]))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+        for term in COMMERCIAL_TERMS_OFF_THE_CATALOGUE:
+            assert term not in page, f"{program_type}/{role} was shown «{term}»"
+        client.logout()
+
+
+def test_the_card_shows_the_subject_total_without_inventing_a_verdict(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    ``subject_total`` is Σ subject prices — the LEFT side of BR-006. The other
+    side is the course fee from the effective price list, which this view does
+    not read. The demo prints «مطابق» or «فرق N» anyway; a page that holds one
+    side of an equation may not publish its result.
+    """
+    import re
+
+    from django.template.defaultfilters import floatformat
+
+    from apps.catalog.models import Program
+    from apps.catalog.services import pricing_service
+
+    program = Program.objects.filter(program_type="DIPLOMA", subjects__isnull=False).first()
+    assert program is not None, "no diploma with subjects was seeded"
+    total = pricing_service.subject_price_total(program)
+    assert total > 0, "a zero total would make this assertion vacuous"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pd.br006"))
+    page = (
+        client.get(reverse("catalog:program-detail", args=[program.code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    # The figure the page really holds, and the rule that weighs it.
+    assert "مجموع أسعار المواد" in page
+    # USE_L10N formats the Decimal, so compare against what a template renders.
+    assert {str(total), floatformat(total, 3), floatformat(total, -3)} & set(
+        re.findall(r"[\d,.]+", page)
+    ), f"the subject total {total} is not printed"
+    assert "BR-006" in page
+    # …and no verdict it cannot compute.
+    for verdict in ("مطابق", "فرق ", "غير مطابق", "مخالف"):
+        assert verdict not in page, f"the card published «{verdict}» from one side of BR-006"
+
+
+def test_only_the_diploma_is_told_that_its_subject_list_is_empty(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    ``Subject`` is documented as a DIPLOMA subject (DATA_MODEL §5.4) and BR-006
+    weighs their sum, so an empty list is worth saying there. A short course
+    legitimately has none, and an empty section on every one of them would be
+    noise dressed as information.
+    """
+    from apps.catalog.models import Program, Subject
+
+    Subject.objects.all().delete()
+    client.force_login(_user(Role.CENTER_MANAGER, "pd.empty"))
+
+    def page_for(program_type: str) -> str:
+        code = _a_program(program_type)
+        return (
+            client.get(reverse("catalog:program-detail", args=[code]))
+            .content.decode("utf-8")
+            .split("</nav>", 1)[-1]
+        )
+
+    diploma = page_for("DIPLOMA")
+    assert "لا مواد معرَّفة لهذا الدبلوم بعد" in diploma
+    assert "BR-007" in diploma, "the empty state does not say a zero price is legal"
+
+    for other in ("SHORT_COURSE", "ONLINE_COURSE"):
+        body = page_for(other)
+        assert "لا مواد معرَّفة لهذا الدبلوم بعد" not in body, other
+        assert "مجموع أسعار المواد" not in body, other
+    assert Program.objects.exists()
+
+
+@pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
+def test_the_card_offers_the_way_back_to_its_own_list(
+    client: Client, a_catalogue: None, program_type: str
+) -> None:
+    """
+    A reader arrives here from one of three lists and the page had no way back
+    but the sidebar. The link is the screen this programme belongs to — and it
+    cannot refuse them, because they passed that same gate to be here at all.
+    """
+    from apps.catalog.views import LIST_ROUTE_BY_SCREEN, TYPE_BY_SCREEN
+
+    screen = next(s for s, t in TYPE_BY_SCREEN.items() if t == program_type)
+    code = _a_program(program_type)
+    client.force_login(_user(Role.CENTER_MANAGER, f"pd.back.{program_type}".lower()))
+
+    page = (
+        client.get(reverse("catalog:program-detail", args=[code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+    back = reverse(LIST_ROUTE_BY_SCREEN[screen])
+    assert f'href="{back}"' in page
+    assert client.get(back).status_code == 200
+    # …and not one of the other two lists.
+    for other, route in LIST_ROUTE_BY_SCREEN.items():
+        if other != screen:
+            assert f'href="{reverse(route)}"' not in page, f"{program_type} links {other}"
+
+
+def test_the_programme_card_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PROGRAM_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the programme card uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    # The key/value block is a `.dl`, not a table: one fewer thing to scroll.
+    assert 'class="dl"' in source
+    # The subject table keeps its wrapper, and its empty row spans it.
+    assert 'class="tbl-wrap"' in source
+    assert 'colspan="4"' in source
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
