@@ -13,6 +13,8 @@ Views render and delegate. Every permission question goes through
 
 from __future__ import annotations
 
+from typing import Any
+
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
@@ -30,18 +32,55 @@ TYPE_BY_SCREEN: dict[str, str] = {
 }
 
 
+#: What each of the three catalogue screens is FOR, in the reader's words.
+#: Kept here beside ``TYPE_BY_SCREEN`` so the three rows of §3.3 that differ
+#: only by programme type read differently on screen as well.
+SUBTITLE_BY_SCREEN: dict[str, Any] = {
+    Screen.PROGRAMS: _(
+        "الدبلومات المعرَّفة في الكتالوج: الرمز والمجال والساعات وحالة التفعيل. "
+        "الأسعار تُقرأ من قوائم الأسعار المؤرّخة، والتشغيل من الدفعات — ولا تعريف "
+        "ولا تعديل من هذه الشاشة."
+    ),
+    Screen.SHORT_COURSES: _(
+        "الدورات القصيرة المعرَّفة في الكتالوج. مجال الدورة ليس وصفاً: هو ما يحدّ "
+        "النقل المسموح بين دورتين (BR-061). الأسعار في قوائم الأسعار المؤرّخة، "
+        "ولا تعريف ولا تعديل من هذه الشاشة."
+    ),
+    Screen.ONLINE_COURSES: _(
+        "الدورات الأونلاين المعرَّفة في الكتالوج: الرمز والساعات وحالة التفعيل. "
+        "الأسعار تُقرأ من قوائم الأسعار المؤرّخة، ولا تعريف ولا تعديل من هذه الشاشة."
+    ),
+}
+
+
 def _program_list(request: HttpRequest, screen: str, title: str) -> HttpResponse:
     policy.require(request.user, screen, Action.VIEW, request=request)
 
-    programs = catalog_service.list_programs(
-        actor=request.user, program_type=TYPE_BY_SCREEN[screen], request=request
+    # Materialised once: the template iterates it and the counts below are read
+    # off the same list, so the chips cannot disagree with the rows.
+    programs = list(
+        catalog_service.list_programs(
+            actor=request.user, program_type=TYPE_BY_SCREEN[screen], request=request
+        )
     )
+    active = sum(1 for p in programs if p.is_active)
     return render(
         request,
         "catalog/programs.html",
         {
             "title": title,
+            "subtitle": SUBTITLE_BY_SCREEN[screen],
             "programs": programs,
+            # Counted off the rows on screen, never queried again. A bucket
+            # nobody is in gets no chip rather than a zero.
+            "counts": [
+                row
+                for row in (
+                    {"label": _("نشط"), "count": active, "active": True},
+                    {"label": _("غير نشط"), "count": len(programs) - active, "active": False},
+                )
+                if row["count"]
+            ],
             "screen": screen,
             "can_create": policy.is_allowed(request.user, screen, Action.CREATE),
             "can_edit": policy.is_allowed(request.user, screen, Action.EDIT),

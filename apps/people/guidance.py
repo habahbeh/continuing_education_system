@@ -140,6 +140,43 @@ GUIDES: dict[str, Guide] = {
         ),
         status=_GUIDED,
     ),
+    # --- §3.3 البرامج والأسعار ---------------------------------------------
+    # Three rows of the matrix that differ only by programme type, so three
+    # guides that differ only where the type actually changes the rule. None of
+    # them is a form: the catalogue has no data-entry service behind it, which
+    # is what `_READ_ONLY` says out loud.
+    "programs": Guide(
+        what=_("الدبلومات المعرَّفة في الكتالوج: رموزها وساعاتها ومجالاتها وحالة تفعيلها."),
+        who=_("مدير المركز يعرّفها، وبقية الأدوار تقرأ."),
+        after=_("السعر يُقرأ من قائمة الأسعار السارية، والتشغيل يبدأ بدفعة."),
+        links=(
+            (Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+            (Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+        ),
+        stops=_("مجموع أسعار مواد الدبلوم يجب أن يطابق رسوم الدورة قبل الاعتماد (BR-006)."),
+        status=_READ_ONLY,
+    ),
+    "short-courses": Guide(
+        what=_("الدورات القصيرة المعرَّفة في الكتالوج: رموزها وساعاتها ومجال كل دورة."),
+        who=_("مدير المركز يعرّفها، وبقية الأدوار تقرأ."),
+        after=_("السعر يُقرأ من قائمة الأسعار السارية، والتشغيل يبدأ بدفعة."),
+        links=(
+            (Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+            (Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+        ),
+        stops=_("مجال الدورة يحدّ النقل: لا نقل خارج المجال إلا باستثناء (BR-061)."),
+        status=_READ_ONLY,
+    ),
+    "online-courses": Guide(
+        what=_("الدورات الأونلاين المعرَّفة في الكتالوج: رموزها وساعاتها وحالة تفعيلها."),
+        who=_("مدير المركز يعرّفها، وبقية الأدوار تقرأ."),
+        after=_("السعر يُقرأ من قائمة الأسعار السارية، والتشغيل يبدأ بدفعة."),
+        links=(
+            (Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+            (Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+        ),
+        status=_READ_ONLY,
+    ),
     "clearance": Guide(
         what=_("إخلاء طرف المشارك، على ثلاث خطوات لا يُعاد ترتيبها."),
         who=_("المركز في الخطوتين الأولى والثالثة، والمالية في الثانية."),

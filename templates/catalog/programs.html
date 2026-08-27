@@ -1,10 +1,49 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  قالب واحد يخدم ثلاث شاشات (§3.3/9–11): الدبلومات والدورات القصيرة
+  والأونلاين صفوف مختلفة في المصفوفة لا أشياء مختلفة، فالعرض واحد
+  و`screen` هو ما يفرّق الصلاحية والعنوان والإرشاد.
+
+  الشاشة للقراءة: لا خدمة إدخال خلف الكتالوج، والعرض لا يقبل POST. لذلك لا
+  يُرسم زرّ إنشاء ولا تعديل ولا اعتماد — ولو كانت الرايات في السياق. زرٌّ بلا
+  مسار أسوأ من غياب الزرّ.
+
+  ولا سعر هنا ولا حصة شريك. الديمو يعرض في صفحة الأونلاين «حصة الجامعة»
+  و«حصة الشريك» و«قسمة 50/50»: شرطٌ تجاري مع طرف ثالث لا محلّ له في كتالوج،
+  والسعر نفسه يُقرأ من قائمة الأسعار المؤرّخة حيث يخصّه.
+
+  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
+{% endcomment %}
 
 {% block content %}
-<div class="card2">
-  <h1>{{ title }}</h1>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{{ subtitle }}</p>
+  </div>
+</div>
 
+{% guided_help screen %}
+
+<div class="card2">
+  <div class="card2-head">
+    <h2>{{ title }}</h2>
+    <div class="acts">
+      {% if counts %}
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for c in counts %}
+          <span class="chip {% if c.active %}ok{% endif %}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
+        {% endfor %}
+      {% endif %}
+      <span class="count">{% blocktranslate count n=programs|length %}برنامج واحد{% plural %}{{ n }} برامج{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -12,28 +51,38 @@
           <th>{% translate "الرمز" %}</th>
           <th>{% translate "الاسم" %}</th>
           <th>{% translate "المجال" %}</th>
-          <th>{% translate "الساعات" %}</th>
-          <th>{% translate "المستويات" %}</th>
+          <th class="num">{% translate "الساعات" %}</th>
+          <th class="num">{% translate "المستويات" %}</th>
           <th>{% translate "الحالة" %}</th>
-          <th></th>
+          <th aria-label="{% translate 'إجراءات' %}"></th>
         </tr>
       </thead>
       <tbody>
         {% for p in programs %}
           <tr>
-            <td dir="ltr">{{ p.code }}</td>
-            <td>{{ p.name_ar }}</td>
-            <td>{{ p.course_category.name_ar|default:"—" }}</td>
-            <td>{{ p.training_hours }}</td>
-            <td>{% if p.is_leveled %}{{ p.levels_count }}{% else %}—{% endif %}</td>
-            <td>
-              {% if p.is_active %}<span class="chip">{% translate "نشط" %}</span>
-              {% else %}<span class="chip">{% translate "غير نشط" %}</span>{% endif %}
+            <td dir="ltr" translate="no"><strong class="num">{{ p.code }}</strong></td>
+            <td>{{ p.name_ar }}
+              {% if p.name_en %}<br><small class="muted" dir="ltr">{{ p.name_en }}</small>{% endif %}
             </td>
-            <td><a href="{% url 'catalog:program-detail' p.code %}">{% translate "عرض" %}</a></td>
+            <td>
+              {% if p.course_category %}<span class="chip">{{ p.course_category.name_ar }}</span>
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td class="num">{{ p.training_hours }}</td>
+            <td class="num">{% if p.is_leveled %}{{ p.levels_count|default:"—" }}{% else %}—{% endif %}</td>
+            <td>
+              {% if p.is_active %}<span class="chip ok dot">{% translate "نشط" %}</span>
+              {% else %}<span class="chip dot">{% translate "غير نشط" %}</span>{% endif %}
+            </td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'catalog:program-detail' p.code %}">{% translate "عرض التفاصيل" %}</a>
+            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="7">{% translate "لا توجد برامج" %}</td></tr>
+          <tr><td colspan="7" class="empty">
+            <span class="empty-title">{% translate "لا برامج معرَّفة في هذه الفئة بعد" %}</span>
+            <span class="empty-body">{% translate "الكتالوج يُعرَّف خارج هذه الشاشة، وما يظهر هنا هو ما عُرِّف فعلاً. الأسعار تُقرأ من قوائم الأسعار المؤرّخة، والتشغيل يبدأ بدفعة على برنامج معرَّف." %}</span>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>

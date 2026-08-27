@@ -1958,3 +1958,232 @@ def test_the_special_cases_page_added_no_dead_class_and_no_dependency() -> None:
     # `.sr-only` in a table header is `position:absolute` with no positioned
     # ancestor: in RTL it lands off the left edge and drags the page sideways.
     assert "sr-only" not in source
+
+
+# ---------------------------------------------------------------------------
+# The catalogue programme lists — page polish
+# ---------------------------------------------------------------------------
+PROGRAMS_TEMPLATE = Path("templates/catalog/programs.html")
+
+#: One template, three sidebar entries: (route, screen).
+CATALOGUE_LISTS = (
+    ("catalog:programs", "programs"),
+    ("catalog:short-courses", "short-courses"),
+    ("catalog:online-courses", "online-courses"),
+)
+
+#: The demo's online-courses screen prints «حصة الجامعة», «حصة الشريك» and a
+#: «قسمة 50/50» chip. That is a commercial term agreed with a third party, and
+#: a catalogue is not where it belongs — nor is a price, which lives in the
+#: dated price list. None of this may appear on any of the three.
+COMMERCIAL_TERMS_OFF_THE_CATALOGUE = (
+    "50/50",
+    "حصة الشريك",
+    "حصة الجامعة",
+    "الإيراد يُقسم",
+    "استحقاق الشريك",
+    "partner_share",
+    "entitlement",
+)
+
+
+@pytest.fixture
+def a_catalogue(seeded_settings: None, active_semester: object) -> None:
+    """The demo catalogue, so all three lists have rows of their own type."""
+    from django.core.management import call_command
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.3/9–11 leave both cells empty. Under BR-080 that is a refusal.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_catalogue_lists_open_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, route: str, screen: str, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"cat.{screen}.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse(route)).status_code == expected
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+def test_the_catalogue_lists_refuse_an_anonymous_visitor(
+    client: Client, seeded_settings: None, route: str, screen: str
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse(route)).status_code == 403
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+def test_the_catalogue_lists_stayed_read_only(
+    client: Client, a_catalogue: None, route: str, screen: str
+) -> None:
+    """
+    There is no data-entry service behind the catalogue and the view takes no
+    POST, so a create/edit/approve button would be a button with nothing behind
+    it. The centre manager is the case that matters: §3.3 gives them C, E and A
+    on all three screens, and the page must STILL draw none of the three.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.CREATE in allowed_actions(Role.CENTER_MANAGER, screen)
+    assert Action.EDIT in allowed_actions(Role.CENTER_MANAGER, screen)
+    assert Action.APPROVE in allowed_actions(Role.CENTER_MANAGER, screen)
+
+    client.force_login(_user(Role.CENTER_MANAGER, f"cat.ro.{screen}"))
+    page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "<form" not in page
+    assert "<button" not in page
+    assert "csrfmiddlewaretoken" not in page
+    # …and the reader is told it is a reading screen rather than left to guess.
+    assert "قراءة فقط" in page
+
+    # The view carries no `require_http_methods`, so a POST is answered rather
+    # than refused — it renders the same page and writes nothing, because there
+    # is no branch that could. Asserted as it IS: 405 would be the tidier
+    # contract, and adding the decorator is a behaviour change, so it is
+    # reported rather than made in a presentation pass.
+    from apps.catalog.models import Program
+
+    before = Program.objects.count()
+    posted = client.post(reverse(route))
+    assert posted.status_code == 200
+    assert Program.objects.count() == before, "a POST to a read-only list changed the catalogue"
+    assert "<form" not in posted.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+def test_no_catalogue_list_prints_a_price_or_a_partner_share(
+    client: Client, a_catalogue: None, route: str, screen: str
+) -> None:
+    """
+    The demo's online page carries «حصة الجامعة», «حصة الشريك» and a «قسمة
+    50/50» chip. It is a term agreed with a third party; a catalogue is not
+    where it is published, and the price itself belongs to the dated price
+    list. Asserted on all three, for every role that gets through the door.
+    """
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"cat.pr.{screen}.{role}".lower().replace("_", ".")))
+        page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+        for term in COMMERCIAL_TERMS_OFF_THE_CATALOGUE:
+            assert term not in page, f"{screen}/{role} was shown «{term}»"
+        client.logout()
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+def test_the_catalogue_counts_agree_with_the_rows_beneath_them(
+    client: Client, a_catalogue: None, route: str, screen: str
+) -> None:
+    """
+    Counted off the list the template iterates, so the chips cannot disagree
+    with the table — and they describe what is on screen, not the catalogue.
+    """
+    import re
+
+    from apps.catalog.models import Program
+    from apps.catalog.views import TYPE_BY_SCREEN
+
+    client.force_login(_user(Role.CENTER_MANAGER, f"cat.n.{screen}"))
+    page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    chips = {
+        label.strip(): int(n)
+        for label, n in re.findall(
+            r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
+        )
+    }
+    expected = Program.objects.filter(program_type=TYPE_BY_SCREEN[screen]).count()
+    assert expected, f"{screen} seeded no rows, so this proves nothing"
+    assert sum(chips.values()) == expected
+    assert "توزيع النتائج المعروضة" in page
+    # Each drawn row is a real programme of THIS type and no other.
+    assert len(re.findall(r"<tr>\s*<td dir=\"ltr\"", page)) == expected
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+def test_the_catalogue_empty_state_is_honest_and_offers_nothing_it_cannot_do(
+    client: Client, seeded_settings: None, route: str, screen: str
+) -> None:
+    """
+    On an unseeded database all three are empty. The old page said «لا توجد
+    برامج» in a bare cell; the state now says what the emptiness means and
+    where definition and pricing actually live — and offers no action, because
+    there is no route behind one.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, f"cat.e.{screen}"))
+    page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "لا برامج معرَّفة في هذه الفئة بعد" in page
+    assert 'class="empty-body"' in page
+    assert "empty-act" not in page, "the empty state offers an action that has no route"
+
+
+@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
+def test_each_catalogue_screen_says_which_one_it_is(
+    client: Client, a_catalogue: None, route: str, screen: str
+) -> None:
+    """
+    One template, three screens. The eyebrow is shared, the title and the
+    subtitle are not — a page that reads identically on all three teaches the
+    reader nothing about which of the six §3.3 rows they are standing on.
+    """
+    from apps.catalog.views import SUBTITLE_BY_SCREEN
+
+    client.force_login(_user(Role.CENTER_MANAGER, f"cat.t.{screen}"))
+    page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "البرامج والأسعار" in page
+    assert str(SUBTITLE_BY_SCREEN[screen]) in page
+    for other, subtitle in SUBTITLE_BY_SCREEN.items():
+        if other != screen:
+            assert str(subtitle) not in page, f"{screen} shows {other}'s subtitle"
+
+
+def test_the_catalogue_list_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PROGRAMS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the catalogue list uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+    # Seven columns, and the empty row spans the table it sits in.
+    assert len(re.findall(r"<th[ >]", source)) == 7
+    assert 'colspan="7"' in source
+    # The actions column is named by attribute: `.sr-only` is `position:absolute`
+    # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
+    # the page sideways.
+    assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "sr-only" not in markup
+    # Every `{# … #}` closes on its own line — Django's tag does not span lines.
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
