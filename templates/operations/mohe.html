@@ -1,11 +1,41 @@
 {% extends "base.html" %}
 {% load i18n status_ui %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل قراءة: العرض يقبل GET وحده، والأفعال كلّها — الإرفاق والإرسال وتسجيل
+  القرار وإعادة الإرسال — على صفحة الملف الواحد وشاشة فتح الملف، ولكلٍّ منها
+  صلاحيتها في `MOHE_ACTIONS`. فلا يُرسم هنا زرّ فعل واحد؛ الرابط الوحيد الذي
+  يقود إلى كتابة هو «فتح ملف وزاري»، ومسارها قائم وحارسها CREATE على §3.3/15.
+
+  ولا حكم يُخترع: «مهلة التسجيل» تاريخ يُطبع كما هو، لا إنذار ولا «تجاوزت
+  المهلة» — حساب الإنذار يقع في مكان آخر ولا يمرّ في سياق هذه الصفحة. وكذلك
+  «معتمد» و«مرفوض»: قرار الوزارة كما ورد، لا استنتاج من تاريخٍ أو مرفق.
+
+  سبب الرفض يبقى بعرض الجدول لأنه نصّ يُقرأ لا خلية تُمسح: هو الدليل الوحيد
+  على ما يجب أن يتغيّر في إعادة الإرسال (BR-014). خرج من `.note warn` — الأصفر
+  تنبيه، وتسجيلُ قرارٍ ورد ليس تنبيهاً (قواعد التحسين §6.5).
+
+  خيارات المرشّح أربعة مكتوبة هنا لأن `MoheStatus` لا يصل إلى العرض: A-05
+  يمنع استيراد النماذج في طبقة العرض ولا إسقاط لهذه المفردات في الخدمة. اختبار
+  يقابل الأربعة بالنموذج، فلا تنحرف الشاشة عنه بصمت.
+
+  BR-013 وBR-016 كانا في `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
-</div>
-<div class="note info">
-  {% translate "لا يُسجَّل مشارك على دفعة لم تعتمدها الوزارة (BR-013). يُفتح الملف مسودةً، ولا يُرسَل إلا بالمرفقين الإلزاميين (BR-016)، ويُسجَّل قرار الوزارة كما ورد." %}
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "الملفات الوزارية للدفعات: ما زال مسودةً، وما أُرسل، وما اعتمدته الوزارة أو ردّته. لا يُسجَّل مشارك على دفعة لم تُعتمد (BR-013)، والملف لا يُرسَل إلا بمرفقيه الإلزاميين (BR-016). القرار يُسجَّل كما ورد من الوزارة." %}</p>
+  </div>
+  {% if can_open_file %}
+    <div class="acts">
+      <a class="btn2 primary" href="{% url 'operations:mohe-submit' %}">{% translate "فتح ملف وزاري" %}</a>
+    </div>
+  {% endif %}
 </div>
 
 <form method="get" class="filterbar" role="search">
@@ -16,56 +46,117 @@
   <div class="fld">
     <label for="f_status">{% translate "الحالة" %}</label>
     <select name="status" id="f_status">
-    <option value="">{% translate "كل الحالات" %}</option>
-    <option value="DRAFT" {% if status == "DRAFT" %}selected{% endif %}>{% translate "مسودة" %}</option>
-    <option value="SUBMITTED" {% if status == "SUBMITTED" %}selected{% endif %}>{% translate "مُرسَل للوزارة" %}</option>
-    <option value="APPROVED" {% if status == "APPROVED" %}selected{% endif %}>{% translate "معتمد" %}</option>
-    <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
-  </select>
+      <option value="">{% translate "كل الحالات" %}</option>
+      <option value="DRAFT" {% if status == "DRAFT" %}selected{% endif %}>{% translate "مسودة" %}</option>
+      <option value="SUBMITTED" {% if status == "SUBMITTED" %}selected{% endif %}>{% translate "مُرسَل للوزارة" %}</option>
+      <option value="APPROVED" {% if status == "APPROVED" %}selected{% endif %}>{% translate "معتمد" %}</option>
+      <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
+    </select>
   </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if can_open_file %}
-    <a class="btn2 primary" href="{% url 'operations:mohe-submit' %}">{% translate "فتح ملف وزاري" %}</a>
+  {% if active_filters %}
+    <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "إلغاء التصفية" %}</a>
   {% endif %}
+  <span class="count">{% blocktranslate count n=submissions|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
 </form>
 
+{% if active_filters %}
+  <div class="note">
+    <div>
+      {% translate "نتائج مصفّاة" %}:
+      {% for label, value in active_filters %}
+        <span class="chip">{{ label }}: {{ value }}</span>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الملفات الوزارية" %}</h2>
+    <div class="acts">
+      {% if status_counts %}
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for s in status_counts %}
+          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الدفعة" %}</th><th>{% translate "البرنامج" %}</th>
-        <th>{% translate "الحالة" %}</th><th>{% translate "الرقم الوزاري" %}</th>
-        <th>{% translate "أُرسل" %}</th><th>{% translate "القرار" %}</th>
-        <th>{% translate "مهلة التسجيل" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الدفعة" %}</th>
+          <th>{% translate "البرنامج" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "الرقم الوزاري" %}</th>
+          <th>{% translate "أُرسل" %}</th>
+          <th>{% translate "القرار" %}</th>
+          <th>{% translate "مهلة التسجيل" %}</th>
+          <th aria-label="{% translate 'إجراءات' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for s in submissions %}
           <tr>
-            <td dir="ltr">{{ s.cohort_code }}<br><small class="muted">{{ s.cohort_name_ar }}</small></td>
-            <td>{{ s.program_name_ar }}</td>
-            <td>
-              <span class="chip {{ s.status|status_tone }}">{{ s.status_display }}</span>
-              {% if s.resubmission_of %}<span class="chip">{% translate "إعادة إرسال" %}</span>{% endif %}
+            <td dir="ltr" translate="no"><strong class="num">{{ s.cohort_code }}</strong>
+              <br><small class="muted" dir="rtl">{{ s.cohort_name_ar }}</small>
             </td>
-            <td dir="ltr" class="num">{{ s.mohe_course_number|default:"—" }}</td>
-            <td class="num">{{ s.submitted_on|default:"—" }}</td>
-            <td class="num">{{ s.decided_on|default:"—" }}</td>
-            <td class="num">{{ s.registration_deadline|default:"—" }}</td>
-            <td><a class="btn2 ghost" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض" %}</a></td>
+            <td>{{ s.program_name_ar }}
+              <br><small class="muted" dir="ltr" translate="no">{{ s.program_code }}</small>
+            </td>
+            <td>
+              <span class="chip {{ s.status|status_tone }} dot">{{ s.status_display }}</span>
+              {% if s.resubmission_of %}<br><span class="chip">{% translate "إعادة إرسال" %}</span>{% endif %}
+            </td>
+            <td dir="ltr" class="num">
+              {% if s.mohe_course_number %}{{ s.mohe_course_number }}
+              {% else %}<span class="muted">{% translate "لم يصدر" %}</span>{% endif %}
+            </td>
+            <td class="num">
+              {% if s.submitted_on %}<span dir="ltr">{{ s.submitted_on|date:"Y/m/d" }}</span>
+              {% else %}<span class="muted">{% translate "لم يُرسل بعد" %}</span>{% endif %}
+            </td>
+            <td class="num">
+              {% if s.decided_on %}<span dir="ltr">{{ s.decided_on|date:"Y/m/d" }}</span>
+              {% else %}<span class="muted">{% translate "بلا قرار" %}</span>{% endif %}
+            </td>
+            <td class="num">
+              {% if s.registration_deadline %}<span dir="ltr">{{ s.registration_deadline|date:"Y/m/d" }}</span>
+              {% else %}<span class="muted">{% translate "غير محدَّدة" %}</span>{% endif %}
+            </td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض الملف" %}</a>
+            </td>
           </tr>
           {% if s.rejection_reason_ar %}
-            <tr><td colspan="8" class="note warn">
-              {% translate "سبب الرفض" %}: {{ s.rejection_reason_ar }}
-            </td></tr>
+            <tr>
+              <td colspan="8">
+                <p class="hint boxed">
+                  <strong>{% translate "سبب الرفض كما ورد" %}:</strong> {{ s.rejection_reason_ar }}
+                </p>
+              </td>
+            </tr>
           {% endif %}
         {% empty %}
           <tr><td colspan="8" class="empty">
+            {% if active_filters %}
+              <span class="empty-title">{% translate "لا ملف يطابق هذه التصفية" %}</span>
+              <span class="empty-body">{% translate "التصفية أعلاه هي ما ضيّق النتيجة، لا أن السجل فارغ. أزل التصفية لترى الملفات كلها — والمرفوضة تبقى معروضة، فهي وحدها ما يدلّ على ما يجب تغييره في إعادة الإرسال (BR-014)." %}</span>
+            {% else %}
               <span class="empty-title">{% translate "لا ملفات وزارية" %}</span>
-              <span class="empty-body">{% translate "الملف يُفتح مسودةً، ويحتاج مرفقيه الإلزاميين قبل الإرسال (BR-016)." %}</span>
-            </td></tr>
+              <span class="empty-body">{% translate "بلا ملف معتمد لا يُسجَّل مشارك على الدفعة (BR-013). الملف يُفتح مسودةً على دفعة قائمة، ولا يُرسَل إلا بمرفقيه الإلزاميين (BR-016)." %}</span>
+            {% endif %}
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">
+      {% translate "«مهلة التسجيل» تاريخٌ ورد في قرار الوزارة، يُعرض كما هو: هذه الشاشة لا تحكم بانقضائه ولا ترفع إنذاراً عنه. والإرفاق والإرسال وتسجيل القرار تتمّ من صفحة الملف، كلٌّ بصلاحيته." %}
+    </p>
   </div>
 </div>
 {% endblock %}

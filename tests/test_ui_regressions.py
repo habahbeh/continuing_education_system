@@ -3527,3 +3527,433 @@ def test_every_link_on_the_cohorts_register_points_at_a_real_route(
     assert hrefs == {reverse("operations:cohorts")}, hrefs
     for href in hrefs:
         assert client.get(href).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# The ministry approval register — page polish
+# ---------------------------------------------------------------------------
+MOHE_TEMPLATE = Path("templates/operations/mohe.html")
+
+
+@pytest.fixture
+def three_files(three_cohorts: object) -> object:
+    """
+    Three ministry files, one in each state the register has to tell apart.
+
+    A draft that was never sent, an approved file with a course number and a
+    registration deadline, and a rejected one carrying the reason — the row the
+    screen exists to act on (BR-014), and the only one with prose in it.
+    """
+    from datetime import date
+
+    from apps.operations.models import Cohort, MoheStatus, MoheSubmission
+
+    cohorts = {c.code: c for c in Cohort.objects.all()}
+    opener = _user(Role.CENTER_MANAGER, "moh.fixture.opener")
+    content = {
+        "training_axes_ar": "المحاور التدريبية",
+        "practical_aspects_ar": "الجوانب العملية",
+        "target_audience_ar": "الفئة المستهدفة",
+        "trainer_name": "د. سميرة العبادي",
+        "trainer_qualifications": "دكتوراه في الشبكات",
+        "training_location": "قاعة 3",
+        "responsible_entity": "مركز التعليم المستمر",
+    }
+
+    draft = MoheSubmission.objects.create(
+        cohort=cohorts["CO-UIC-1"], created_by=opener, status=MoheStatus.DRAFT, **content
+    )
+    approved = MoheSubmission.objects.create(
+        cohort=cohorts["CO-UIC-2"],
+        created_by=opener,
+        status=MoheStatus.APPROVED,
+        submitted_on=date(2026, 7, 1),
+        decided_on=date(2026, 7, 20),
+        mohe_course_number="MOHE-2026-77",
+        registration_deadline=date(2026, 9, 15),
+        **content,
+    )
+    rejected = MoheSubmission.objects.create(
+        cohort=cohorts["CO-UIC-3"],
+        created_by=opener,
+        status=MoheStatus.REJECTED,
+        submitted_on=date(2026, 7, 2),
+        decided_on=date(2026, 7, 25),
+        rejection_reason_ar="المحاور غير مطابقة للساعات المعتمدة",
+        **content,
+    )
+    return draft, approved, rejected
+
+
+def _mohe(client: Client, params: str = "") -> str:
+    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    response = client.get(reverse("operations:mohe") + params)
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.3/14 leaves these three empty. Under BR-080 that is a refusal.
+        (Role.FINANCE_OFFICER, 403),
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_ministry_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"moh.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("operations:mohe")).status_code == expected
+
+
+def test_the_ministry_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse("operations:mohe")).status_code == 403
+
+
+def test_the_ministry_register_writes_nothing_and_draws_no_action(
+    client: Client, three_files: object
+) -> None:
+    """
+    Every act on a ministry file — attach, send, decide, resubmit — happens on
+    the file's own page or on the open-file screen, each behind its own cell of
+    ``MOHE_ACTIONS``. This view answers GET only, so the register draws no
+    action form at all: the search box is the one form on the page.
+    """
+    from apps.operations.models import MoheSubmission
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.readonly"))
+    page = _mohe(client)
+
+    assert page.count("<form") == 1
+    assert 'method="get"' in page
+    assert "csrfmiddlewaretoken" not in page, "a read register was handed a write token"
+    assert page.count("<button") == 1, "the only button is the search submit"
+    for furniture in ("<dialog", "modal", "x-show", "data-bs-toggle", "aria-haspopup"):
+        assert furniture not in page, f"the register drew «{furniture}»"
+
+    # The route itself refuses a POST rather than answering it — this view
+    # carries `require_http_methods(["GET"])`, unlike the catalogue reads.
+    before = MoheSubmission.objects.count()
+    assert client.post(reverse("operations:mohe")).status_code == 405
+    assert MoheSubmission.objects.count() == before
+
+
+def test_the_open_file_link_follows_the_screen_that_owns_it(
+    client: Client, three_files: object
+) -> None:
+    """
+    «فتح ملف وزاري» is gated by CREATE on §3.3/15 — the OPEN-FILE screen, not
+    this one — because that is the screen it leads to. The audit account may
+    read both and create on neither, which is the case that proves the gate is
+    not just "can you see this page".
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.CREATE in allowed_actions(Role.CENTER_MANAGER, "mohe-submit")
+    assert Action.CREATE in allowed_actions(Role.REGISTRATION_OFFICER, "mohe-submit")
+    assert Action.CREATE not in allowed_actions(Role.AUDIT_ACCOUNT, "mohe-submit")
+
+    submit = reverse("operations:mohe-submit")
+    for role in (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER):
+        client.force_login(_user(role, f"moh.open.{role}".lower().replace("_", ".")))
+        assert f'href="{submit}"' in _mohe(client), role
+        client.logout()
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "moh.open.aud"))
+    audit = _mohe(client)
+    assert f'href="{submit}"' not in audit
+    assert 'class="btn2 primary"' not in audit
+
+
+def test_the_ministry_row_renders_the_projection_it_was_given(
+    client: Client, three_files: object
+) -> None:
+    """Every cell is a key ``_row`` already carried, printed, never derived."""
+    _draft, approved, rejected = three_files  # type: ignore[misc]
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.rows"))
+    page = _mohe(client)
+
+    assert approved.cohort.code in page
+    assert approved.cohort.name_ar in page
+    assert approved.cohort.program.name_ar in page
+    assert approved.cohort.program.code in page
+    assert approved.mohe_course_number in page
+    assert approved.submitted_on.strftime("%Y/%m/%d") in page
+    assert approved.decided_on.strftime("%Y/%m/%d") in page
+    assert approved.registration_deadline.strftime("%Y/%m/%d") in page
+    # The rejection reason is prose and keeps the width of the table: it is the
+    # only guide to what a resubmission must change (BR-014).
+    assert rejected.rejection_reason_ar in page
+    assert "سبب الرفض كما ورد" in page
+    for header in ("الرقم الوزاري", "أُرسل", "القرار", "مهلة التسجيل"):
+        assert header in page, header
+
+
+def test_an_unsent_file_says_so_instead_of_showing_a_dash(
+    client: Client, three_files: object
+) -> None:
+    """
+    Four columns are empty on a draft, and a row of dashes says nothing about
+    which of them is waiting on the centre and which on the ministry.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.blank"))
+    page = _mohe(client)
+
+    assert "لم يُرسل بعد" in page
+    assert "بلا قرار" in page
+    assert "لم يصدر" in page
+    assert "غير محدَّدة" in page
+
+
+def test_the_ministry_status_chips_count_the_rows_beneath_them(
+    client: Client, three_files: object
+) -> None:
+    """
+    Tallied off the rows the template iterates, so the chips cannot disagree
+    with the table — and they follow the filter rather than restating the
+    register.
+    """
+    import re
+
+    from apps.operations.models import MoheStatus, MoheSubmission
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.chips"))
+    page = _mohe(client)
+
+    def chips_of(body: str) -> dict[str, int]:
+        return {
+            label.strip(): int(n)
+            for label, n in re.findall(
+                r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', body
+            )
+        }
+
+    chips = chips_of(page)
+    assert sum(chips.values()) == MoheSubmission.objects.count() == 3
+    assert chips == {
+        str(MoheStatus.DRAFT.label): 1,
+        str(MoheStatus.APPROVED.label): 1,
+        str(MoheStatus.REJECTED.label): 1,
+    }
+    assert "توزيع النتائج المعروضة" in page
+
+    narrowed = chips_of(_mohe(client, f"?status={MoheStatus.APPROVED}"))
+    assert narrowed == {str(MoheStatus.APPROVED.label): 1}
+
+
+def test_the_ministry_register_says_which_filter_is_narrowing_it(
+    client: Client, three_files: object
+) -> None:
+    """
+    Both filters were read from the URL and neither was named, so a narrowed
+    register read as the whole one. Named now — by LABEL, never by the stored
+    code, which is the defect the transfer register was fixed for.
+    """
+    from apps.operations.models import MoheStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.filters"))
+
+    plain = _mohe(client)
+    assert "نتائج مصفّاة" not in plain
+    assert "إلغاء التصفية" not in plain
+
+    narrowed = _mohe(client, f"?status={MoheStatus.REJECTED}&q=CO-UIC")
+    assert "نتائج مصفّاة" in narrowed
+    assert str(MoheStatus.REJECTED.label) in narrowed
+    assert "CO-UIC" in narrowed
+    assert f"الحالة: {MoheStatus.REJECTED.value}" not in narrowed
+    assert f'href="{reverse("operations:mohe")}"' in narrowed, "no way to clear the filter"
+
+    # The status select keeps the reader's choice rather than resetting it.
+    assert f'<option value="{MoheStatus.REJECTED.value}" selected>' in narrowed
+
+
+def test_the_status_filter_options_are_the_ones_the_model_defines(
+    client: Client, three_files: object
+) -> None:
+    """
+    ``MoheStatus`` cannot reach the view — A-05 forbids importing models there
+    and no service projects the vocabulary — so the four options are written in
+    the template. This is what stops that copy drifting from the original.
+    """
+    from apps.operations.models import MoheStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.options"))
+    page = _mohe(client)
+
+    for value, label in MoheStatus.choices:
+        assert f'value="{value}"' in page, f"{value} is not offered by the filter"
+        assert str(label) in page, f"{value} is offered without its own name"
+    assert page.count("<option") == len(MoheStatus.choices) + 1, "an option the model never defined"
+
+
+def test_the_two_ministry_empty_states_are_not_the_same_sentence(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    An empty register and an empty filter result are different facts. Neither
+    offers an action the page cannot perform.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.empty"))
+
+    bare = _mohe(client)
+    assert "لا ملفات وزارية" in bare
+    assert "BR-013" in bare and "BR-016" in bare
+    assert 'class="empty-body"' in bare
+    assert "empty-act" not in bare, "the empty state offers an action with no route"
+    assert "توزيع النتائج المعروضة" not in bare
+
+    filtered = _mohe(client, "?q=لا-يوجد-ملف-بهذا-الاسم")
+    assert "لا ملف يطابق هذه التصفية" in filtered
+    assert "لا ملفات وزارية" not in filtered
+    assert "BR-014" in filtered
+
+
+def test_the_ministry_register_publishes_no_verdict_it_was_not_given(
+    client: Client, three_files: object
+) -> None:
+    """
+    The registration deadline is a date the ministry set, printed as it is.
+    Whether it has passed is computed elsewhere and is not in this context, so
+    the page raises no alert and pronounces no compliance verdict.
+
+    Checked against the page WITHOUT the rejection prose, because that prose is
+    the ministry's own words quoted back — «محاور غير مطابقة» is a finding that
+    arrived, not a judgement this screen reached, and the whole point of the
+    row is that the two are different things.
+    """
+    _draft, _approved, rejected = three_files  # type: ignore[misc]
+
+    from apps.operations.models import MoheStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.verdict"))
+    page = _mohe(client)
+    assert rejected.rejection_reason_ar in page
+    computed = page.replace(rejected.rejection_reason_ar, "")
+
+    for verdict in (
+        "انقضت المهلة",
+        "تجاوزت المهلة",
+        "متأخر",
+        "مخالف",
+        "مطابق",
+        "جاهز للإرسال",
+        "أيام متبقية",
+        "يوماً متبقياً",
+    ):
+        assert verdict not in computed, f"the register published «{verdict}»"
+    # Every state chip on screen is a state the model defines — no invented
+    # label, and none derived from a date or an attachment.
+    import re
+
+    labels = {str(label) for _v, label in MoheStatus.choices}
+    toned = set(re.findall(r'<span class="chip [a-z]+ dot">([^<]+)</span>', page))
+    assert toned, "no status chip was drawn, so this proves nothing"
+    assert toned <= labels, toned - labels
+    assert toned == {
+        str(MoheStatus.DRAFT.label),
+        str(MoheStatus.APPROVED.label),
+        str(MoheStatus.REJECTED.label),
+    }
+
+
+def test_the_ministry_register_prints_no_commercial_or_private_data(
+    client: Client, three_files: object
+) -> None:
+    """
+    One cohort here runs under an agreement carrying a 50% rate, and a ministry
+    file is not where a commercial term or a participant is published.
+    """
+    for role in (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.AUDIT_ACCOUNT):
+        client.force_login(_user(role, f"moh.pr.{role}".lower().replace("_", ".")))
+        page = _mohe(client)
+        for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "50%", "PERCENT", "نسبة"):
+            assert term not in page, f"mohe/{role} was shown «{term}»"
+        for private in ("رقم المشارك", "الهوية", "الوصل", "المخالصة", "الرصيد"):
+            assert private not in page, f"mohe/{role} was shown «{private}»"
+        client.logout()
+
+
+def test_the_ministry_register_leaks_none_of_its_own_commentary(
+    client: Client, three_files: object
+) -> None:
+    """A developer's note above a ministry file is the 8I defect verbatim."""
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.comment"))
+    page = _mohe(client)
+
+    for note in ("A-05", "MOHE_ACTIONS", "§6.5", "{%", "{{", "{#"):
+        assert note not in page, f"the template leaked «{note}»"
+
+
+def test_every_link_on_the_ministry_register_reaches_a_real_route(
+    client: Client, three_files: object
+) -> None:
+    """Three kinds of link, and every one of them opens for the reader drawing it."""
+    import re
+
+    from apps.operations.models import MoheSubmission
+
+    client.force_login(_user(Role.CENTER_MANAGER, "moh.links"))
+    page = _mohe(client, "?q=CO-UIC")
+
+    hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
+    expected = {reverse("operations:mohe"), reverse("operations:mohe-submit")} | {
+        reverse("operations:mohe-detail", args=[pk])
+        for pk in MoheSubmission.objects.values_list("pk", flat=True)
+    }
+    assert hrefs == expected, hrefs
+    for href in hrefs:
+        assert client.get(href).status_code == 200, href
+
+
+def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = MOHE_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the ministry register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+    assert len(re.findall(r"<th[ >]", source)) == 8
+    assert source.count('colspan="8"') == 2, "the reason row and the empty row both span the table"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    # The actions column is named by attribute: `.sr-only` is `position:absolute`
+    # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
+    # the page sideways.
+    assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
+    assert "sr-only" not in markup
+    # The one header with no text carries a name; none is left nameless.
+    for header in re.findall(r"<th([^>]*)>\s*</th>", markup):
+        assert "aria-label" in header, "an empty column header with no name"
+    # The rejection reason left `.note warn`: yellow is an alert, and recording
+    # a decision that arrived is not one (polish rules §6.5).
+    assert "note warn" not in markup
+    assert "note info" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

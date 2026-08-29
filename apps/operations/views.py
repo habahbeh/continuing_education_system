@@ -1030,23 +1030,61 @@ MOHE_ACTIONS: dict[str, tuple[str, str]] = {
 @require_http_methods(["GET"])
 def mohe_view(request: HttpRequest) -> HttpResponse:
     """§3.3/14 — every ministry file, whatever its status."""
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    rows = mohe_service.list_submissions(
+        actor=request.user, status=status, query=query, request=request
+    )
     return render(
         request,
         "operations/mohe.html",
         {
             "title": _("اعتماد الوزارة"),
             "active_screen": Screen.MOHE,
-            "submissions": mohe_service.list_submissions(
-                actor=request.user,
-                status=request.GET.get("status", "").strip(),
-                query=request.GET.get("q", "").strip(),
-                request=request,
-            ),
-            "query": request.GET.get("q", ""),
-            "status": request.GET.get("status", ""),
+            "submissions": rows,
+            "query": query,
+            "status": status,
+            # Both filters were already read from the URL and neither was named
+            # on screen, so a narrowed list read as the whole register.
+            "active_filters": _mohe_active_filters(rows, query, status),
+            "status_counts": _mohe_status_counts(rows),
             "can_open_file": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
         },
     )
+
+
+def _mohe_active_filters(
+    rows: list[dict[str, Any]], query: str, status: str
+) -> list[tuple[str, str]]:
+    """The filters this request is narrowing by, named for the reader."""
+    active: list[tuple[str, str]] = []
+    if query:
+        active.append((_("بحث"), query))
+    if status:
+        # The label off the drawn rows, never the stored code — the defect the
+        # transfer register was fixed for. A filter matching nothing has no row
+        # to read from, and the empty state says «filtered», not «empty».
+        labels = {str(row["status"]): str(row["status_display"]) for row in rows}
+        active.append((_("الحالة"), labels.get(status, status)))
+    return active
+
+
+def _mohe_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    The states of the files ACTUALLY DRAWN, tallied off the same rows.
+
+    Counted here rather than queried again so the chips cannot disagree with
+    the table, and so they follow the filter. A state nobody is in gets no
+    chip rather than a zero.
+    """
+    tally: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = (str(row["status"]), str(row["status_display"]))
+        tally[key] = tally.get(key, 0) + 1
+    return [
+        {"status": status, "label": label, "count": count}
+        for (status, label), count in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0][0]))
+    ]
 
 
 @require_http_methods(["GET", "POST"])
