@@ -22,7 +22,7 @@ from django.urls import reverse
 from django.utils.translation import gettext as _
 
 from apps.catalog.services import catalog_service, pricing_service
-from apps.people.constants import Action, Screen
+from apps.people.constants import PARTICIPANT_CATEGORY_CHOICES, Action, Screen
 from apps.people.permissions import policy
 
 #: Programme type → the screen that governs it (PERMISSIONS.md §3.3).
@@ -180,10 +180,24 @@ def price_lists_view(request: HttpRequest) -> HttpResponse:
 
 
 def price_list_detail_view(request: HttpRequest, code: str) -> HttpResponse:
+    """
+    One dated list: its identity, its priced items, and its fee rules.
+
+    Two absences are load-bearing here and are projected as such rather than
+    left for a truthiness test in the template. A deposit of NULL means the
+    programme carries no deposit at all (BR-096), and a fee of NULL means no
+    registration fee is charged (BR-009, and the JCPA/PMP courses of T-098) —
+    neither is a zero, and ``{% if amount %}`` cannot tell the difference.
+    """
     try:
         price_list = catalog_service.get_price_list(actor=request.user, code=code, request=request)
     except ObjectDoesNotExist:
         raise Http404(_("لا توجد قائمة أسعار بهذا الرمز")) from None
+
+    # The category is stored as a bare code, so the row has no
+    # ``get_..._display``. ``constants`` re-exports the vocabulary precisely so
+    # a view can name it without importing the models module (A-05).
+    category_labels = dict(PARTICIPANT_CATEGORY_CHOICES)
 
     return render(
         request,
@@ -191,7 +205,21 @@ def price_list_detail_view(request: HttpRequest, code: str) -> HttpResponse:
         {
             "price_list": price_list,
             "items": price_list.items.select_related("program", "deposit_policy"),
-            "fee_rules": price_list.registration_fee_rules.select_related("program"),
+            # Projected to a row the template can render without deciding
+            # anything: the scope of the rule, the category BY NAME, and the
+            # fee left as ``None`` where none is charged.
+            "fee_rules": [
+                {
+                    "program": rule.program,
+                    "category": rule.participant_category,
+                    "category_display": category_labels.get(
+                        rule.participant_category, rule.participant_category
+                    ),
+                    "fee": rule.fee,
+                    "note": rule.exception_note_ar,
+                }
+                for rule in price_list.registration_fee_rules.select_related("program")
+            ],
             "can_edit": policy.is_allowed(request.user, Screen.PRICELISTS, Action.EDIT)
             and not price_list.is_frozen,
         },

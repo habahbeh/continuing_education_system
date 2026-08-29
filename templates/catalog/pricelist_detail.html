@@ -1,75 +1,212 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
+
+{% block title %}{{ price_list.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  صفحة قراءة كباقي الكتالوج: لا خدمة تعديل خلف هذه الشاشة ولا فرع POST في
+  العرض، فلا يُرسم زرّ تعديل ولو كانت `can_edit` في السياق. والقائمة المعتمدة
+  مجمَّدة أصلاً بحكم D-14، والاعتماد نفسه يقع خارج النظام (D-31).
+
+  الفراغ هنا ليس صفراً، وهذا أهم ما تحمله الصفحة:
+
+  * تأمين فارغ = لا تأمين على هذا البرنامج أصلاً (BR-096)، لا تأمين بقيمة صفر.
+    والقيد `catalog_price_item_deposit_paired` يمنع مبلغاً بلا سياسة أو سياسة
+    بلا مبلغ، فالحالتان اللتان تُعرضان هما الحالتان الممكنتان.
+  * رسم فارغ = لا رسم تسجيل يُستوفى أصلاً (BR-009 · T-098: JCPA وPMP وتسجيل
+    الدواء)، لا رسم قيمته صفر. وصفرٌ مخزَّن قولٌ آخر: «استُوفي ولم يُحصَّل شيء».
+
+  لذلك لا يُختبر أيٌّ منهما باختبار صدقٍ عادي — الصفر يكذب فيه — بل بالمقارنة
+  مع `None` صراحةً، وتُرسم الحالتان بشكلين مختلفين لا برقمٍ وشرطة.
+
+  ولا حكم «سارية اليوم» ولا نتيجة BR-006: أولهما تحسمه خدمة التسعير بتاريخٍ
+  مُعطى، والثاني يحتاج مجموع أسعار المواد وهو ليس في سياق هذه الصفحة.
+
+  ولا حصة شريك ولا قسمة إيراد: شرطٌ تجاري مع طرف ثالث لا محلّ له في قائمة أسعار.
+
+  اسم عمود لا نصّ له يُكتب بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
+{% endcomment %}
 
 {% block content %}
-<div class="card2">
-  <h1>{{ price_list.name_ar }}</h1>
-  <p class="note" dir="ltr">
-    {{ price_list.code }} · {{ price_list.get_status_display }}
-  </p>
-  {% if price_list.is_frozen %}
-    <p class="note">
-      {% translate "هذه القائمة مجمَّدة — لا تُعدَّل بأي مسار (D-14). التغيير بإصدار قائمة جديدة." %}
-      {% if price_list.approved_by_text %}
-        <br>{% translate "الاعتماد" %}: {{ price_list.approved_by_text }} — {{ price_list.decision_reference }}
-      {% endif %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{{ price_list.name_ar }}</h1>
+    <p class="sub">
+      <span dir="ltr" translate="no">{{ price_list.code }}</span> —
+      {% translate "بنود قائمة أسعار مؤرّخة: ما يُسعَّر به كل برنامج، وما يُستوفى من رسوم تسجيل ومن تأمين. لا تعديل من هذه الشاشة." %}
     </p>
-  {% endif %}
+  </div>
+  <div class="acts">
+    <span class="chip info dot">{% translate "قراءة فقط" %}</span>
+    <a class="btn2 ghost" href="{% url 'catalog:pricelists' %}">{% translate "عودة إلى قوائم الأسعار المؤرّخة" %}</a>
+  </div>
+</div>
 
-  <h2>{% translate "بنود الأسعار" %}</h2>
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "بيانات القائمة" %}</h2>
+    <div class="acts">
+      <span class="chip {{ price_list.status|status_tone }} dot">{{ price_list.get_status_display }}</span>
+      {% if price_list.is_frozen %}
+        <span class="chip info">{% translate "مجمَّدة" %}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "الرمز" %}</dt>
+      <dd dir="ltr" translate="no"><strong class="num">{{ price_list.code }}</strong></dd>
+      <dt>{% translate "الفصل" %}</dt>
+      <dd>{{ price_list.semester.name_ar }}</dd>
+      <dt>{% translate "تاريخ الإصدار" %}</dt>
+      <dd dir="ltr" class="num">{{ price_list.issued_on|date:"Y/m/d" }}</dd>
+      <dt>{% translate "تاريخ السريان" %}</dt>
+      <dd dir="ltr" class="num">{{ price_list.effective_from|date:"Y/m/d" }}</dd>
+      <dt>{% translate "جهة التنسيب" %}</dt>
+      <dd>
+        {% if price_list.proposed_by_text %}{{ price_list.proposed_by_text }}
+        {% else %}<span class="muted">{% translate "غير مسجَّلة" %}</span>{% endif %}
+      </dd>
+      <dt>{% translate "جهة الاعتماد" %}</dt>
+      <dd>
+        {% if price_list.approved_by_text %}{{ price_list.approved_by_text }}
+        {% else %}<span class="muted">{% translate "غير مسجَّلة" %}</span>{% endif %}
+      </dd>
+      <dt>{% translate "مرجع القرار" %}</dt>
+      <dd dir="ltr">
+        {% if price_list.decision_reference %}{{ price_list.decision_reference }}
+        {% else %}<span class="muted">{% translate "غير مسجَّل" %}</span>{% endif %}
+      </dd>
+    </dl>
+  </div>
+  {% if price_list.is_frozen %}
+    <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "هذه القائمة مجمَّدة: لا تُعدَّل بأي مسار ولا من أي دور (D-14 · BR-008). التصحيح يكون بإصدار قائمة جديدة، فيبقى التسجيل الذي تمّ بأرقامه كما تمّ. والاعتماد من رئيس الجامعة خارج النظام (D-31)، فما يُسجَّل هنا هو أثره: جهة الاعتماد ومرجع القرار." %}
+      </p>
+    </div>
+  {% endif %}
+</div>
+
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "بنود الأسعار" %}</h2>
+    {% if items %}
+      <div class="acts">
+        <span class="chip">{% blocktranslate count n=items|length %}بند واحد{% plural %}{{ n }} بنود{% endblocktranslate %}</span>
+      </div>
+    {% endif %}
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
         <tr>
-          <th>{% translate "البرنامج" %}</th><th>{% translate "المستوى" %}</th>
-          <th>{% translate "رسوم الدورة" %}</th>
-          <th>{% translate "التأمين" %}</th><th>{% translate "سياسة التأمين" %}</th>
+          <th>{% translate "البرنامج" %}</th>
+          <th class="num">{% translate "المستوى" %}</th>
+          <th class="num">{% translate "رسوم الدورة" %}</th>
+          <th>{% translate "التأمين" %}</th>
+          <th>{% translate "سياسة التأمين" %}</th>
+          <th>{% translate "ملاحظات" %}</th>
         </tr>
       </thead>
       <tbody>
         {% for item in items %}
           <tr>
-            <td>{{ item.program.name_ar }}</td>
-            <td>{{ item.level|default:"—" }}</td>
-            <td>{{ item.course_fee }}</td>
-            <td>{% if item.deposit_amount %}{{ item.deposit_amount }}{% else %}—{% endif %}</td>
-            <td>{{ item.deposit_policy.name_ar|default:"—" }}</td>
+            <td>{{ item.program.name_ar }}
+              <br><small class="muted" dir="ltr" translate="no">{{ item.program.code }}</small>
+            </td>
+            <td class="num">
+              {% if item.level is None %}<span class="muted">{% translate "بلا مستويات" %}</span>
+              {% else %}{{ item.level }}{% endif %}
+            </td>
+            <td class="num">{{ item.course_fee }}</td>
+            <td>
+              {% if item.deposit_amount is None %}
+                <span class="chip">{% translate "لا تأمين" %}</span>
+              {% else %}
+                <span class="num">{{ item.deposit_amount }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if item.deposit_policy %}{{ item.deposit_policy.name_ar }}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td>
+              {% if item.notes %}{{ item.notes }}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="5">{% translate "لا توجد بنود" %}</td></tr>
+          <tr><td colspan="6" class="empty">
+            <span class="empty-title">{% translate "لا بنود على هذه القائمة" %}</span>
+            <span class="empty-body">{% translate "قائمة بلا بنود لا تُسعِّر شيئاً: البند هو ما يربط برنامجاً برسومه على هذه القائمة بالذات، والتسعير يقرأ منه بتاريخ الواقعة (BR-012)." %}</span>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">
-    {% translate "التأمين الفارغ يعني «لا تأمين على هذا البرنامج» — ويختلف عن صفر (BR-096)." %}
-  </p>
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "«لا تأمين» تعني أن البرنامج لا يحمل تأميناً أصلاً — وهي غير «تأمين بقيمة صفر» (BR-096). والمبلغ والسياسة يردان معاً أو لا يردان: مبلغٌ بلا سياسة تحكمه تأمينٌ نصف معرَّف، والقيد يمنعه." %}
+    </p>
+  </div>
+</div>
 
-  <h2>{% translate "قواعد رسوم التسجيل" %}</h2>
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "قواعد رسوم التسجيل" %}</h2>
+    {% if fee_rules %}
+      <div class="acts">
+        <span class="chip">{% blocktranslate count n=fee_rules|length %}قاعدة واحدة{% plural %}{{ n }} قواعد{% endblocktranslate %}</span>
+      </div>
+    {% endif %}
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
         <tr>
-          <th>{% translate "البرنامج" %}</th><th>{% translate "فئة المشارك" %}</th>
-          <th>{% translate "الرسم" %}</th><th>{% translate "الملاحظة" %}</th>
+          <th>{% translate "النطاق" %}</th>
+          <th>{% translate "فئة المشارك" %}</th>
+          <th>{% translate "الرسم" %}</th>
+          <th>{% translate "سبب الاستثناء" %}</th>
         </tr>
       </thead>
       <tbody>
         {% for rule in fee_rules %}
           <tr>
-            <td>{{ rule.program.name_ar|default:_("كل البرامج") }}</td>
-            <td>{{ rule.participant_category }}</td>
-            <td>{% if rule.fee is None %}{% translate "بلا رسوم" %}{% else %}{{ rule.fee }}{% endif %}</td>
-            <td>{{ rule.exception_note_ar|default:"—" }}</td>
+            <td>
+              {% if rule.program %}{{ rule.program.name_ar }}
+                <br><small class="muted" dir="ltr" translate="no">{{ rule.program.code }}</small>
+              {% else %}<span class="chip">{% translate "كل البرامج" %}</span>{% endif %}
+            </td>
+            <td>{{ rule.category_display }}</td>
+            <td>
+              {% if rule.fee is None %}
+                <span class="chip">{% translate "بلا رسوم تسجيل" %}</span>
+              {% else %}
+                <span class="num">{{ rule.fee }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if rule.note %}{{ rule.note }}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="4">{% translate "لا توجد قواعد" %}</td></tr>
+          <tr><td colspan="4" class="empty">
+            <span class="empty-title">{% translate "لا قواعد رسوم تسجيل على هذه القائمة" %}</span>
+            <span class="empty-body">{% translate "بلا قاعدة لا يُحسب رسم تسجيل لأي فئة على هذه القائمة، وهذا غير «الرسم صفر». القاعدة الأخصّ تسبق العامة: قاعدة لبرنامج وفئة تتقدّم على قاعدة الفئة لكل البرامج (BR-009)." %}</span>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="note">
-    {% translate "«بلا رسوم» تعني عدم وجود رسم تسجيل أصلاً — وتختلف عن رسم قيمته صفر." %}
-  </p>
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "«بلا رسوم تسجيل» تعني أن الرسم لا يُستوفى أصلاً — وهي غير رسمٍ قيمته صفر. الفرق موثّق في T-098: JCPA وPMP وتسجيل الدواء بلا رسم تسجيل، لا برسم صفري." %}
+    </p>
+  </div>
 </div>
 {% endblock %}

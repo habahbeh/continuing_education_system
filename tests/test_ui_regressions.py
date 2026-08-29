@@ -2678,3 +2678,429 @@ def test_the_price_list_index_added_no_dead_class_and_no_dependency() -> None:
     # Every `{# … #}` closes on its own line — Django's tag does not span lines.
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The dated price list detail — page polish
+# ---------------------------------------------------------------------------
+PRICELIST_DETAIL_TEMPLATE = Path("templates/catalog/pricelist_detail.html")
+
+
+def _a_price_list() -> str:
+    from apps.catalog.models import PriceList
+
+    code = PriceList.objects.values_list("code", flat=True).first()
+    assert code, "no price list was seeded, so this proves nothing"
+    return str(code)
+
+
+def _detail(client: Client, code: str) -> str:
+    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    response = client.get(reverse("catalog:pricelist-detail", args=[code]))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.3/13 leaves both cells empty. Under BR-080 that is a refusal, and
+        # Q-14 is explicit that the price list is not the finance manager's.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_price_list_card_opens_exactly_where_the_matrix_says(
+    client: Client, a_catalogue: None, role: str, expected: int
+) -> None:
+    """The gate is ``get_price_list``'s, not the view's. The polish did not move it."""
+    code = _a_price_list()
+    client.force_login(_user(role, f"pld.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("catalog:pricelist-detail", args=[code])).status_code == expected
+
+
+def test_the_price_list_card_refuses_an_anonymous_visitor(
+    client: Client, a_catalogue: None
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    code = _a_price_list()
+
+    assert client.get(reverse("catalog:pricelist-detail", args=[code])).status_code == 403
+
+
+def test_the_price_list_card_stayed_read_only(client: Client, a_catalogue: None) -> None:
+    """
+    ``can_edit`` is in the context and there is no editing service, no edit
+    route and no POST branch behind it. There is not even a URL to post to:
+    the catalogue exposes two routes, both GET reads.
+    """
+    from django.urls import NoReverseMatch
+
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.EDIT in allowed_actions(Role.CENTER_MANAGER, "pricelists")
+    for name in ("pricelist-edit", "pricelist-approve", "pricelist-item-new"):
+        with pytest.raises(NoReverseMatch):
+            reverse(f"catalog:{name}")
+
+    code = _a_price_list()
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.readonly"))
+    page = _detail(client, code)
+
+    assert "<form" not in page
+    assert "<button" not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert 'class="btn2 primary"' not in page, "a primary action with no route behind it"
+    # No modal, no dialog, nothing that opens over the page.
+    for furniture in ("<dialog", "modal", "x-show", "data-bs-toggle", "aria-haspopup"):
+        assert furniture not in page, f"the card drew «{furniture}»"
+    assert "قراءة فقط" in page
+
+    # The view carries no `require_http_methods`, so a POST renders the page
+    # and writes nothing, because there is no branch that could. Asserted as
+    # it IS — 405 is a behaviour change, not a presentation one.
+    from apps.catalog.models import PriceListItem
+
+    before = PriceListItem.objects.count()
+    posted = client.post(reverse("catalog:pricelist-detail", args=[code]))
+    assert posted.status_code == 200
+    assert PriceListItem.objects.count() == before, "a POST to a read-only card wrote something"
+
+
+def test_the_price_list_card_offers_the_way_back_to_the_index(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    The reader arrives from the index and had no way back but the sidebar. The
+    link cannot refuse them: it is the same screen gate they just passed.
+    """
+    code = _a_price_list()
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.back"))
+    page = _detail(client, code)
+
+    back = reverse("catalog:pricelists")
+    assert f'href="{back}"' in page
+    assert client.get(back).status_code == 200
+    # …and it is the only link on the page. Nothing else here has a route.
+    assert page.count("<a class=") == page.count('<a class="btn2 ghost"') == 1
+
+
+def test_the_price_list_identity_renders_from_the_real_row(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    The identity was scattered across an `<h1>` and two `.note` alerts. It is
+    a `.dl` now — every field read off the row, and an unrecorded one named as
+    unrecorded rather than left as an empty cell.
+    """
+    from apps.catalog.models import PriceList
+
+    price_list = PriceList.objects.first()
+    assert price_list is not None
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.identity"))
+    page = _detail(client, price_list.code)
+
+    assert 'class="dl"' in page
+    assert price_list.code in page
+    assert price_list.name_ar in page
+    assert price_list.semester.name_ar in page
+    assert price_list.issued_on.strftime("%Y/%m/%d") in page
+    assert price_list.effective_from.strftime("%Y/%m/%d") in page
+    assert str(price_list.get_status_display()) in page
+    assert price_list.proposed_by_text in page
+    assert price_list.approved_by_text in page
+    assert price_list.decision_reference in page
+    for label in ("الرمز", "الفصل", "تاريخ الإصدار", "تاريخ السريان", "مرجع القرار"):
+        assert label in page, label
+
+    # An absent field is named, not blanked.
+    price_list.decision_reference = ""
+    price_list.proposed_by_text = ""
+    price_list.save()
+    blank = _detail(client, price_list.code)
+    assert "غير مسجَّل" in blank
+
+
+def test_the_frozen_state_is_said_where_it_is_true_and_only_there(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    D-14 freezes an approved list. That is the single most consequential fact
+    on the page, and it was a `.note` — an alert box, for a rule nobody is
+    breaking. It is a chip plus a hint now, and a draft gets neither.
+    """
+    from apps.catalog.models import PriceList, PriceListStatus
+
+    price_list = PriceList.objects.first()
+    assert price_list is not None
+    assert price_list.is_frozen, "the fixture approves the list; this proves nothing otherwise"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.frozen"))
+    frozen = _detail(client, price_list.code)
+    assert "مجمَّدة" in frozen
+    assert "D-14" in frozen
+
+    price_list.status = PriceListStatus.DRAFT
+    price_list.save()
+    draft = _detail(client, price_list.code)
+    assert not price_list.is_frozen
+    assert "مجمَّدة" not in draft, "a draft was told it is frozen"
+    assert str(PriceListStatus.DRAFT.label) in draft
+
+
+def test_a_missing_deposit_is_not_drawn_as_a_zero(client: Client, a_catalogue: None) -> None:
+    """
+    BR-096 — a programme with no deposit policy carries NO deposit line, which
+    is a different statement from a deposit of zero. The old cell tested
+    ``{% if item.deposit_amount %}``, which cannot tell the two apart, and
+    printed a dash for both. Absence is now named.
+    """
+    from apps.catalog.models import PriceListItem
+
+    with_deposit = PriceListItem.objects.filter(deposit_amount__isnull=False).first()
+    without = PriceListItem.objects.filter(deposit_amount__isnull=True).first()
+    assert with_deposit is not None, "no item carries a deposit, so this proves nothing"
+    assert without is not None, "every item carries a deposit, so this proves nothing"
+    assert with_deposit.deposit_policy is not None
+    assert without.deposit_policy is None
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.br096"))
+    page = _detail(client, _a_price_list())
+
+    # The absence is a named state, not a blank and not a number.
+    assert "لا تأمين" in page
+    assert "BR-096" in page
+    # …and the present one is an amount, drawn differently from the absence.
+    assert str(with_deposit.deposit_policy.name_ar) in page
+    assert '<span class="num">' in page
+
+
+def test_a_zero_deposit_cannot_exist_so_absence_is_the_only_empty(
+    a_catalogue: None,
+) -> None:
+    """
+    The display distinction is only honest because the data cannot hold a zero
+    deposit: C-26 pairs amount with policy, and the amount must be positive.
+    Pinned here so a later migration cannot quietly make «لا تأمين» ambiguous.
+    """
+    from decimal import Decimal
+
+    from django.db import IntegrityError, transaction
+
+    from apps.catalog.models import PriceListItem
+
+    item = PriceListItem.objects.filter(deposit_amount__isnull=True).first()
+    assert item is not None
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        PriceListItem.objects.filter(pk=item.pk).update(
+            deposit_amount=Decimal("0.000"), deposit_policy=None
+        )
+
+
+def test_no_registration_fee_rule_is_not_drawn_as_a_fee_of_zero(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    BR-009 / T-098 — JCPA, PMP and drug registration charge NO registration
+    fee. A stored zero would say "we charged nothing", which is a different
+    claim, and the resolver treats the two differently. A zero is a number on
+    screen; an absence is a named state.
+    """
+    from decimal import Decimal
+
+    from apps.catalog.models import PriceList, RegistrationFeeRule
+
+    price_list = PriceList.objects.first()
+    assert price_list is not None
+    none_rule = RegistrationFeeRule.objects.filter(price_list=price_list, fee__isnull=True).first()
+    assert none_rule is not None, "no fee-less rule was seeded, so this proves nothing"
+
+    # A genuine zero, standing beside the genuine absence on the same list.
+    zero_rule = RegistrationFeeRule.objects.filter(price_list=price_list, fee__isnull=False).first()
+    assert zero_rule is not None
+    zero_rule.fee = Decimal("0.000")
+    zero_rule.exception_note_ar = "رسم صفري — اختبار"
+    zero_rule.save()
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.br009"))
+    page = _detail(client, price_list.code)
+
+    assert "بلا رسوم تسجيل" in page, "an absent registration fee was not named"
+    assert "رسم صفري — اختبار" in page, "the zero-fee row is not on the page at all"
+    # The two are drawn by different devices: the absence is a chip, the zero
+    # is a number. Neither can be mistaken for the other.
+    assert (
+        page.count('<span class="chip">بلا رسوم تسجيل</span>')
+        == RegistrationFeeRule.objects.filter(price_list=price_list, fee__isnull=True).count()
+    )
+    assert "T-098" in page
+
+
+def test_the_fee_rule_names_the_category_instead_of_printing_its_code(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    ``participant_category`` is a bare code with no choices on the model, so
+    the old cell put CENTER and UNIVERSITY in front of the client — the defect
+    the participant registry and the transfer register were both fixed for.
+    """
+    from apps.catalog.models import PriceList, RegistrationFeeRule
+    from apps.people.constants import PARTICIPANT_CATEGORY_CHOICES
+
+    price_list = PriceList.objects.first()
+    assert price_list is not None
+    codes = set(
+        RegistrationFeeRule.objects.filter(price_list=price_list).values_list(
+            "participant_category", flat=True
+        )
+    )
+    assert codes, "no fee rule was seeded, so this proves nothing"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.category"))
+    page = _detail(client, price_list.code)
+
+    labels = dict(PARTICIPANT_CATEGORY_CHOICES)
+    for code in codes:
+        assert str(labels[code]) in page, f"{code} is not named on the page"
+        assert code not in page, f"the stored code «{code}» was printed at the client"
+    # The general rule says so in words rather than leaving the cell empty.
+    assert "كل البرامج" in page
+
+
+def test_the_card_prints_only_item_fields_the_row_already_carried(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    Course fee, level, deposit, deposit policy and notes — the five the page
+    already showed, plus the programme's own code beneath its name. Nothing
+    was fetched that the view did not already hand over.
+    """
+    from apps.catalog.models import PriceListItem
+
+    item = PriceListItem.objects.select_related("program").first()
+    assert item is not None
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.items"))
+    page = _detail(client, _a_price_list())
+
+    assert item.program.name_ar in page
+    assert item.program.code in page
+    # USE_L10N formats the Decimal, so compare against what a template renders.
+    import re
+
+    from django.template.defaultfilters import floatformat
+
+    fee = item.course_fee
+    assert {str(fee), floatformat(fee, 3), floatformat(fee, -3)} & set(
+        re.findall(r"[\d,.]+", page)
+    ), f"the course fee {fee} is not printed"
+    for header in ("رسوم الدورة", "التأمين", "سياسة التأمين", "المستوى", "ملاحظات"):
+        assert header in page, header
+    # A non-levelled item says so rather than showing an empty cell.
+    assert PriceListItem.objects.filter(level__isnull=True).exists()
+    assert "بلا مستويات" in page
+    # …and no figure this page never held: no subject total, no BR-006 verdict,
+    # no "effective today", no consumables read off the programme.
+    for invented in ("مجموع أسعار المواد", "مطابق", "سارية اليوم", "المستهلكات"):
+        assert invented not in page, f"the card published «{invented}»"
+
+
+def test_both_price_list_tables_have_an_empty_state_of_their_own(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    Two tables, two different emptinesses, and the old page said «لا توجد
+    بنود» and «لا توجد قواعد» in bare cells. A list with no items prices
+    nothing; a list with no fee rules is not a list of zero fees.
+    """
+    from apps.catalog.models import PriceList, PriceListItem, RegistrationFeeRule
+
+    price_list = PriceList.objects.first()
+    assert price_list is not None
+    RegistrationFeeRule.objects.filter(price_list=price_list).delete()
+    PriceListItem.objects.filter(price_list=price_list).delete()
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.empty"))
+    page = _detail(client, price_list.code)
+
+    assert "لا بنود على هذه القائمة" in page
+    assert "لا قواعد رسوم تسجيل على هذه القائمة" in page
+    assert page.count('class="empty-body"') == 2
+    assert "empty-act" not in page, "an empty state offers an action that has no route"
+    # The counts describe rows on screen, so an empty table shows no chip.
+    assert "بند واحد" not in page and "قاعدة واحدة" not in page
+
+
+def test_the_price_list_card_prints_no_partner_or_revenue_term(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    This is the screen where a third party's cut would be most tempting to
+    print: it is the one page in the system that carries the actual prices.
+    Asserted for every role that gets through the door.
+    """
+    code = _a_price_list()
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"pld.pr.{role}".lower().replace("_", ".")))
+        page = _detail(client, code)
+        for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "partner share", "revenue"):
+            assert term not in page, f"pricelist detail/{role} was shown «{term}»"
+        client.logout()
+
+
+def test_the_price_list_card_leaks_none_of_its_own_commentary(
+    client: Client, a_catalogue: None
+) -> None:
+    """A developer's note above a client's prices is the 8I defect verbatim."""
+    client.force_login(_user(Role.CENTER_MANAGER, "pld.comment"))
+    page = _detail(client, _a_price_list())
+
+    for note in ("A-05", "catalog_price_item_deposit_paired", "{%", "{{", "{#"):
+        assert note not in page, f"the template leaked «{note}»"
+
+
+def test_the_price_list_card_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PRICELIST_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the price list card uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    # The identity is a `.dl`; only the two genuinely tabular blocks are tables,
+    # and each keeps its scroll wrapper and spans its own width when empty.
+    assert 'class="dl"' in source
+    assert source.count('class="tbl-wrap"') == 2
+    assert 'colspan="6"' in source and 'colspan="4"' in source
+    # Every `<th>` carries text, so nothing here needs `.sr-only` — which is
+    # `position:absolute` with no positioned ancestor and drags an RTL page.
+    assert "sr-only" not in source.split("{% endcomment %}", 1)[-1]
+    assert not re.search(r"<th[^>]*>\s*</th>", source)
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
