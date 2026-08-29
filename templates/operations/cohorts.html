@@ -1,8 +1,36 @@
 {% extends "base.html" %}
 {% load i18n status_ui %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  هذه الشاشة ليست للقراءة وحدها: خلف «فتح دفعة» خدمة حقيقية
+  (`cohort_service.open_cohort`) ومسار POST على هذا العنوان نفسه، والعرض
+  يرفض POST ممن لا يملك CREATE. فالنموذج يبقى — وهو الفرق بين هذه الصفحة
+  وصفحات الكتالوج التي لا خدمة إدخال خلفها فلا يُرسم فيها زرّ.
+
+  ما تعرضه الصفوف كلّه من `list_cohorts` بلا استثناء: الفصل والمدرّب والموقع
+  والمقاعد المتبقّية كانت في الإسقاط ولم تكن تُرسم. ولا رقم اتفاقية ولا شرط
+  مالي: اسم الشريك يقول مع مَن تُشغَّل الدفعة، وما وراءه من نسب واستحقاقات
+  شأن شاشات الشركاء لا شأن سجلّ تشغيل.
+
+  ولا حساب يُخترع هنا: «المتبقّي» يأتي محسوباً من الخدمة، والعدّ يُحصى فوق
+  الصفوف المرسومة لا فوق السجل كلّه — فالشريحة تصف ما على الشاشة.
+
+  مرشّح الحالة يصل من الرابط ويُحمَل مع البحث كي لا يسقط عنده، ويُسمّى في
+  شريط «نتائج مصفّاة» باسمه لا برمزه المخزَّن.
+
+  BR-013 كان في `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
+  (قواعد التحسين §6.5). النصّ نفسه، في `.hint` تحت عنوان النموذج.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "الدفعات المُشغّلة على برامج الكتالوج: فترتها ومقاعدها وحالتها ومَن يشغّلها. الدفعة تُفتح مخطَّطة، ولا يُسجَّل عليها قبل اعتماد الوزارة (BR-013). والسعر يُقرأ من قائمة الأسعار السارية لا من هذه الشاشة." %}</p>
+  </div>
 </div>
 
 <form method="get" class="filterbar" role="search">
@@ -10,37 +38,100 @@
     <label for="f_q">{% translate "بحث" %}</label>
     <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'بالرمز أو الاسم…' %}" spellcheck="false" id="f_q">
   </div>
+  {# مرشّح الحالة يصل من الرابط؛ يُحمل مع البحث كي لا يسقط عنده. #}
+  {% if request.GET.status %}<input type="hidden" name="status" value="{{ request.GET.status }}">{% endif %}
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
+  {% if active_filters %}
+    <a class="btn2 ghost" href="{% url 'operations:cohorts' %}">{% translate "إلغاء التصفية" %}</a>
+  {% endif %}
+  <span class="count">{% blocktranslate count n=cohorts|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
 </form>
 
+{% if active_filters %}
+  <div class="note">
+    <div>
+      {% translate "نتائج مصفّاة" %}:
+      {% for label, value in active_filters %}
+        <span class="chip">{{ label }}: {{ value }}</span>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الدفعات" %}</h2>
+    <div class="acts">
+      {% if status_counts %}
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for s in status_counts %}
+          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th>
-        <th>{% translate "البرنامج" %}</th><th>{% translate "الفترة" %}</th>
-        <th>{% translate "المسجّلون" %}</th><th>{% translate "الشريك" %}</th>
-        <th>{% translate "الحالة" %}</th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الدفعة" %}</th>
+          <th>{% translate "البرنامج" %}</th>
+          <th>{% translate "الفترة" %}</th>
+          <th class="num">{% translate "المقاعد" %}</th>
+          <th>{% translate "التشغيل" %}</th>
+          <th>{% translate "الشريك" %}</th>
+          <th>{% translate "الحالة" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in cohorts %}
           <tr>
-            <td dir="ltr">{{ c.code }}</td>
-            <td>{{ c.name_ar }}{% if c.level %} — {% translate "مستوى" %} {{ c.level }}{% endif %}</td>
-            <td>{{ c.program_name }}</td>
-            <td class="num">{{ c.starts_on }} — {{ c.ends_on }}</td>
-            <td class="num">{{ c.enrolled_count }} / {{ c.capacity }}</td>
-            <td>{{ c.partner_name|default:"—" }}</td>
-            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
+            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+            <td>{{ c.name_ar }}
+              {% if c.level %}<br><small class="muted">{% translate "مستوى" %} <span class="num">{{ c.level }}</span></small>{% endif %}
+            </td>
+            <td>{{ c.program_name }}
+              <br><small class="muted" dir="ltr" translate="no">{{ c.program_code }}</small>
+            </td>
+            <td>
+              <span dir="ltr" class="num">{{ c.starts_on|date:"Y/m/d" }} — {{ c.ends_on|date:"Y/m/d" }}</span>
+              <br><small class="muted">{{ c.semester }}</small>
+            </td>
+            <td class="num">
+              {# الكسر بترتيب لاتيني صراحةً: في RTL يتقدّم المقام فيُقرأ «٢٥ / ٢». #}
+              <span dir="ltr" class="num">{{ c.enrolled_count }} / {{ c.capacity }}</span>
+              <br><small class="muted">{% blocktranslate with n=c.seats_left %}متبقٍّ {{ n }}{% endblocktranslate %}</small>
+            </td>
+            <td>
+              {% if c.trainer_name %}{{ c.trainer_name }}
+              {% else %}<span class="muted">{% translate "بلا مدرّب مسجَّل" %}</span>{% endif %}
+              {% if c.location %}<br><small class="muted">{{ c.location }}</small>{% endif %}
+            </td>
+            <td>
+              {% if c.partner_name %}{{ c.partner_name }}
+              {% else %}<span class="muted">{% translate "بلا شريك" %}</span>{% endif %}
+            </td>
+            <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
           </tr>
         {% empty %}
-          <tr><td colspan="7" class="empty">
+          <tr><td colspan="8" class="empty">
+            {% if active_filters %}
+              <span class="empty-title">{% translate "لا دفعة تطابق هذه التصفية" %}</span>
+              <span class="empty-body">{% translate "التصفية أعلاه هي ما ضيّق النتيجة، لا أن السجل فارغ. أزل التصفية لترى الدفعات كلها." %}</span>
+            {% else %}
               <span class="empty-title">{% translate "لا دفعات مُشغّلة" %}</span>
-              <span class="empty-body">{% translate "الدفعة تُشغَّل على برنامج من الكتالوج، ولا تُعرض للتسجيل قبل اعتمادها وزارياً." %}</span>
-            </td></tr>
+              <span class="empty-body">{% translate "الدفعة تُشغَّل على برنامج معرَّف في الكتالوج، وتُفتح مخطَّطة: لا تُعرض للتسجيل ولا يُسجَّل عليها قبل اعتمادها وزارياً (BR-013)." %}</span>
+            {% endif %}
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">
+      {% translate "«المقاعد» تُحصي التسجيلات القائمة على الدفعة: الملغى والمنقول عنها لا يشغلان مقعداً. و«الشريك» يقول مع مَن تُشغَّل الدفعة فقط — شروط الاتفاقية ومستحقاتها تُقرأ من شاشات الشركاء." %}
+    </p>
   </div>
 </div>
 
@@ -48,9 +139,9 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "فتح دفعة جديدة" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
+      <p class="hint boxed">
         {% translate "تُفتح الدفعة مخطَّطة — التسجيل عليها يبقى ممنوعاً حتى اعتماد الوزارة (BR-013)." %}
-      </div>
+      </p>
       <form method="post">
         {% csrf_token %}
         {% include "partials/_form.html" %}

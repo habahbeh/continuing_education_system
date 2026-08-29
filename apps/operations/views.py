@@ -322,11 +322,10 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET", "POST"])
 def cohorts_view(request: HttpRequest) -> HttpResponse:
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
     rows = cohort_service.list_cohorts(
-        actor=request.user,
-        query=request.GET.get("q", "").strip(),
-        status=request.GET.get("status", "").strip(),
-        request=request,
+        actor=request.user, query=query, status=status, request=request
     )
     can_create = policy.is_allowed(request.user, Screen.COHORTS, Action.CREATE)
     form = None
@@ -358,9 +357,49 @@ def cohorts_view(request: HttpRequest) -> HttpResponse:
             "cohorts": rows,
             "form": form,
             "can_create": can_create,
-            "query": request.GET.get("q", ""),
+            "query": query,
+            # ``status`` has been reachable from the URL all along and was
+            # drawn nowhere, so a narrowed list looked like the whole register.
+            # Naming it adds no filter and opens no field: the column it names
+            # is in the table for every role that may open this screen.
+            "active_filters": _cohort_active_filters(rows, query, status),
+            "status_counts": _cohort_status_counts(rows),
         },
     )
+
+
+def _cohort_active_filters(
+    rows: list[dict[str, Any]], query: str, status: str
+) -> list[tuple[str, str]]:
+    """The filters this request is narrowing by, named for the reader."""
+    active: list[tuple[str, str]] = []
+    if query:
+        active.append((_("بحث"), query))
+    if status:
+        # The label off the drawn rows, never the stored code: a filter that
+        # matches nothing has no row to read it from, and printing the enum is
+        # the defect the transfer register was fixed for.
+        labels = {str(row["status"]): str(row["status_display"]) for row in rows}
+        active.append((_("الحالة"), labels.get(status, status)))
+    return active
+
+
+def _cohort_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    The states of the cohorts ACTUALLY DRAWN, tallied off the same rows.
+
+    Counted here rather than queried again so the chips cannot disagree with
+    the table, and so they describe this request's result rather than the
+    register. A state nobody is in gets no chip rather than a zero.
+    """
+    tally: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = (str(row["status"]), str(row["status_display"]))
+        tally[key] = tally.get(key, 0) + 1
+    return [
+        {"status": status, "label": label, "count": count}
+        for (status, label), count in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0][0]))
+    ]
 
 
 def _agreement_choices(request: HttpRequest) -> list[tuple[str, str]]:

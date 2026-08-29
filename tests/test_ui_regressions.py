@@ -3104,3 +3104,426 @@ def test_the_price_list_card_added_no_dead_class_and_no_dependency() -> None:
     assert not re.search(r"<th[^>]*>\s*</th>", source)
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The cohorts register — page polish
+# ---------------------------------------------------------------------------
+COHORTS_TEMPLATE = Path("templates/operations/cohorts.html")
+
+
+@pytest.fixture
+def three_cohorts(seeded_settings: None, active_semester: object) -> object:
+    """
+    Three cohorts that differ where the page has to show a difference.
+
+    One planned with a trainer and a place, one running with neither, and one
+    run with a partner under an agreement that carries a percentage — the
+    partner's NAME belongs on an operations register, the rate behind it does
+    not, and only a real agreement can prove the page does not follow the
+    relation into it.
+    """
+    from datetime import date
+
+    from django.core.management import call_command
+
+    from apps.catalog.models import Program
+    from apps.operations.models import Cohort, CohortStatus
+    from apps.partners.models import Agreement, Partner
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    semester = active_semester
+    programs = list(Program.objects.order_by("code")[:3])
+    assert len(programs) == 3
+
+    partner = Partner.objects.create(
+        code="PT-UIX", name_ar="شركة التدريب المتقدّم", partner_type="COMPANY"
+    )
+    agreement = Agreement.objects.create(
+        agreement_number="AG-UIX-1",
+        partner=partner,
+        title_ar="اتفاقية تشغيل مشترك",
+        signed_on=date(2026, 1, 1),
+        valid_from=date(2026, 1, 1),
+        valid_to=date(2027, 1, 1),
+        calculation_model="PERCENT",
+        percent_rate="50.00",
+    )
+
+    rows = (
+        ("CO-UIC-1", programs[0], CohortStatus.PLANNED, "د. سميرة العبادي", "قاعة 3", None),
+        ("CO-UIC-2", programs[1], CohortStatus.RUNNING, "", "", None),
+        ("CO-UIC-3", programs[2], CohortStatus.RUNNING, "", "", agreement),
+    )
+    for code, program, status, trainer, location, deal in rows:
+        Cohort.objects.create(
+            code=code,
+            program=program,
+            semester=semester,
+            name_ar=f"دفعة {code}",
+            starts_on=semester.starts_on,
+            ends_on=semester.ends_on,
+            capacity=20,
+            status=status,
+            trainer_name=trainer,
+            location=location,
+            agreement=deal,
+        )
+    return partner
+
+
+def _cohorts(client: Client, params: str = "") -> str:
+    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    response = client.get(reverse("operations:cohorts") + params)
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.3/12 leaves both cells empty. Under BR-080 that is a refusal.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_cohorts_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"coh.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("operations:cohorts")).status_code == expected
+
+
+def test_the_cohorts_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse("operations:cohorts")).status_code == 403
+
+
+def test_the_open_cohort_form_is_offered_only_where_create_is_granted(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    This screen is NOT read-only, and that is the difference from the
+    catalogue: ``open_cohort`` is a real service and the view answers POST on
+    this same URL. So the form stays — for the one role §3.3/12 grants CREATE,
+    and for nobody else.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.CREATE in allowed_actions(Role.CENTER_MANAGER, "cohorts")
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.create.mgr"))
+    manager = _cohorts(client)
+    assert "فتح دفعة جديدة" in manager
+    assert "csrfmiddlewaretoken" in manager
+    assert 'class="btn2 primary"' in manager
+
+    for role in (Role.REGISTRATION_OFFICER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT):
+        assert Action.CREATE not in allowed_actions(role, "cohorts")
+        client.logout()
+        client.force_login(_user(role, f"coh.nocreate.{role}".lower().replace("_", ".")))
+        page = _cohorts(client)
+        assert "فتح دفعة جديدة" not in page, f"{role} was offered the form"
+        assert "csrfmiddlewaretoken" not in page, f"{role} was handed a write token"
+        assert 'class="btn2 primary"' not in page
+
+
+def test_the_open_cohort_route_still_refuses_a_role_the_page_never_offered_it_to(
+    client: Client, three_cohorts: object
+) -> None:
+    """The button's absence is presentation; the refusal is the view's."""
+    from apps.operations.models import Cohort
+
+    before = Cohort.objects.count()
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "coh.post.reg"))
+
+    assert client.post(reverse("operations:cohorts"), {}).status_code == 403
+    assert Cohort.objects.count() == before
+
+
+def test_the_cohort_row_prints_the_keys_the_projection_already_carried(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    ``list_cohorts`` has projected the semester, the trainer, the place and
+    the seats remaining all along and the page drew none of them. Printing
+    them adds no query and opens no field.
+    """
+    from apps.operations.services import cohort_service
+    from apps.people.models import User
+
+    actor = User.objects.filter(role=Role.CENTER_MANAGER).first() or _user(
+        Role.CENTER_MANAGER, "coh.rows.mgr"
+    )
+    rows = {r["code"]: r for r in cohort_service.list_cohorts(actor=actor)}
+    row = rows["CO-UIC-1"]
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.rows"))
+    page = _cohorts(client)
+
+    assert row["code"] in page
+    assert row["name_ar"] in page
+    assert row["program_name"] in page
+    assert row["program_code"] in page
+    assert str(row["semester"]) in page
+    assert row["trainer_name"] in page
+    assert row["location"] in page
+    assert str(row["status_display"]) in page
+    assert row["starts_on"].strftime("%Y/%m/%d") in page
+    assert row["ends_on"].strftime("%Y/%m/%d") in page
+    # Seats are the service's figure, printed, not recomputed on the page.
+    assert row["capacity"] == 20
+    assert row["seats_left"] == 20 - row["enrolled_count"]
+    for header in ("المقاعد", "التشغيل", "الشريك", "الحالة", "الفترة"):
+        assert header in page, header
+
+
+def test_a_missing_trainer_or_partner_is_named_not_left_blank(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    A blank cell says nothing: is there no trainer, or was the column not
+    filled? Both absences are stated, and neither invents a value from a
+    neighbouring row.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.blank"))
+    page = _cohorts(client)
+
+    assert "بلا مدرّب مسجَّل" in page
+    assert "بلا شريك" in page
+    # …and the cohort that HAS them still shows them, so the states are per-row.
+    assert "د. سميرة العبادي" in page
+    assert "شركة التدريب المتقدّم" in page
+
+
+def test_the_cohort_status_chips_count_the_rows_beneath_them(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    Tallied off the rows the template iterates, so the chips cannot disagree
+    with the table — and they follow the filter, because they describe this
+    request's result rather than the register.
+    """
+    import re
+
+    from apps.operations.models import Cohort, CohortStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.chips"))
+    page = _cohorts(client)
+
+    chips = {
+        label.strip(): int(n)
+        for label, n in re.findall(
+            r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
+        )
+    }
+    assert sum(chips.values()) == Cohort.objects.count() == 3
+    assert chips[str(CohortStatus.RUNNING.label)] == 2
+    assert chips[str(CohortStatus.PLANNED.label)] == 1
+    assert "توزيع النتائج المعروضة" in page
+
+    # Narrowed, the chips narrow with it rather than restating the register.
+    narrowed = _cohorts(client, f"?status={CohortStatus.PLANNED}")
+    chips = {
+        label.strip(): int(n)
+        for label, n in re.findall(
+            r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', narrowed
+        )
+    }
+    assert chips == {str(CohortStatus.PLANNED.label): 1}
+    # No state that nothing is in gets a zero chip.
+    assert ': <span class="num">0</span>' not in narrowed
+
+
+def test_the_register_says_which_filter_is_narrowing_it(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    ``status`` is read from the URL by the view and was drawn nowhere, so a
+    narrowed register looked like the whole one. It is named now — and named
+    by its LABEL, never the stored code, which is the defect the transfer
+    register was fixed for.
+    """
+    from apps.operations.models import CohortStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.filters"))
+
+    plain = _cohorts(client)
+    assert "نتائج مصفّاة" not in plain
+    assert "إلغاء التصفية" not in plain
+
+    narrowed = _cohorts(client, f"?status={CohortStatus.PLANNED}&q=CO-UIC")
+    assert "نتائج مصفّاة" in narrowed
+    assert str(CohortStatus.PLANNED.label) in narrowed
+    assert "CO-UIC" in narrowed
+    assert reverse("operations:cohorts") in narrowed, "no way to clear the filter"
+    # The raw enum is never printed at the client.
+    assert f"الحالة: {CohortStatus.PLANNED.value}" not in narrowed
+
+    # A status matching nothing still names itself, and says the register is
+    # not empty — it is filtered.
+    empty = _cohorts(client, f"?status={CohortStatus.COMPLETED}")
+    assert "لا دفعة تطابق هذه التصفية" in empty
+    assert "لا دفعات مُشغّلة" not in empty
+
+
+def test_the_status_filter_survives_a_search(client: Client, three_cohorts: object) -> None:
+    """The GET form dropped it, so searching silently widened the result."""
+    from apps.operations.models import CohortStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.carry"))
+    page = _cohorts(client, f"?status={CohortStatus.PLANNED}")
+
+    assert f'<input type="hidden" name="status" value="{CohortStatus.PLANNED.value}">' in page
+
+
+def test_the_two_cohort_empty_states_are_not_the_same_sentence(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    An empty register and an empty filter result mean different things, and
+    the old page had one bare state for both. Neither offers an action it
+    cannot perform.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.empty"))
+
+    bare = _cohorts(client)
+    assert "لا دفعات مُشغّلة" in bare
+    assert "BR-013" in bare
+    assert 'class="empty-body"' in bare
+    assert "empty-act" not in bare, "the empty state offers an action with no route"
+    # The chips describe rows on screen, so an empty table draws none.
+    assert "توزيع النتائج المعروضة" not in bare
+
+    filtered = _cohorts(client, "?q=لا-يوجد-شيء-بهذا-الاسم")
+    assert "لا دفعة تطابق هذه التصفية" in filtered
+    assert "لا دفعات مُشغّلة" not in filtered
+
+
+def test_the_register_invents_no_total_and_no_status(client: Client, three_cohorts: object) -> None:
+    """
+    Every state on screen is a real ``CohortStatus`` label, and no money,
+    occupancy percentage or forecast is computed by the page.
+    """
+    from apps.operations.models import CohortStatus
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.invent"))
+    page = _cohorts(client)
+
+    labels = {str(label) for _value, label in CohortStatus.choices}
+    for chip in ("مكتملة", "قيد التنفيذ", "مخطَّطة"):
+        assert chip in labels, chip
+    for invented in ("نسبة الإشغال", "الإيراد", "المتوقّع", "الإجمالي", "الربح", "%"):
+        assert invented not in page, f"the register published «{invented}»"
+
+
+def test_the_cohorts_register_prints_no_partner_share_and_no_private_data(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    One cohort here runs under an agreement carrying a 50% rate. The partner's
+    NAME says who the course is run with and belongs on an operations
+    register; the rate, the calculation model and the agreement number behind
+    it do not, and the page must not follow the relation into them.
+    """
+    from apps.partners.models import Agreement
+
+    agreement = Agreement.objects.get(agreement_number="AG-UIX-1")
+    assert agreement.percent_rate is not None, "the fixture proves nothing without a rate"
+
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"coh.pr.{role}".lower().replace("_", ".")))
+        page = _cohorts(client)
+        assert "شركة التدريب المتقدّم" in page, "the partner name is part of the contract"
+        for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "50%", "PERCENT", "نسبة"):
+            assert term not in page, f"cohorts/{role} was shown «{term}»"
+        assert agreement.agreement_number not in page
+        # …and no participant is named on a register of cohorts.
+        for private in ("رقم المشارك", "الهوية", "الوصل", "المخالصة"):
+            assert private not in page, f"cohorts/{role} was shown «{private}»"
+        client.logout()
+
+
+def test_the_cohorts_register_leaks_none_of_its_own_commentary(
+    client: Client, three_cohorts: object
+) -> None:
+    """A developer's note above an operational register is the 8I defect."""
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.comment"))
+    page = _cohorts(client)
+
+    for note in ("§6.5", "list_cohorts", "{%", "{{", "{#"):
+        assert note not in page, f"the template leaked «{note}»"
+
+
+def test_the_cohorts_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = COHORTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the cohorts register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+    # Eight columns, and the empty row spans the table it sits in.
+    assert len(re.findall(r"<th[ >]", source)) == 8
+    assert 'colspan="8"' in source
+    # Every `<th>` carries text, so nothing here needs `.sr-only` — which is
+    # `position:absolute` with no positioned ancestor and drags an RTL page.
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "sr-only" not in markup
+    assert not re.search(r"<th[^>]*>\s*</th>", source)
+    # The rule explanation left `.note info`: blue is an alert, and explaining
+    # a rule is not one (polish rules §6.5).
+    assert "note info" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+def test_every_link_on_the_cohorts_register_points_at_a_real_route(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    There is no cohort detail route, so no row is clickable and no row links
+    anywhere. The only link the page draws is the one that clears the filter.
+    """
+    import re
+
+    from django.urls import NoReverseMatch
+
+    with pytest.raises(NoReverseMatch):
+        reverse("operations:cohort-detail")
+
+    client.force_login(_user(Role.CENTER_MANAGER, "coh.links"))
+    page = _cohorts(client, "?q=CO-UIC")
+
+    hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
+    assert hrefs == {reverse("operations:cohorts")}, hrefs
+    for href in hrefs:
+        assert client.get(href).status_code == 200
