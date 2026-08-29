@@ -4476,3 +4476,373 @@ def test_the_ministry_file_added_no_dead_class_and_no_dependency() -> None:
         assert "aria-label" in header, "an empty column header with no name"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The ministry submission form — page polish
+# ---------------------------------------------------------------------------
+MOHE_SUBMIT_TEMPLATE = Path("templates/operations/mohe_submit.html")
+
+#: The ministry's own form, transcribed (BR-014). Mirrors
+#: ``mohe_service.CONTENT_FIELDS`` — written out so a field quietly dropped
+#: from either side is caught rather than agreed with.
+MOHE_CONTENT_FIELDS = (
+    "training_axes_ar",
+    "practical_aspects_ar",
+    "target_audience_ar",
+    "trainer_name",
+    "trainer_qualifications",
+    "training_location",
+    "responsible_entity",
+)
+
+
+def _submit_page(client: Client) -> str:
+    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    response = client.get(reverse("operations:mohe-submit"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        # §3.3/15 «V C E A P · V C E · — · — · — · V». VIEW opens it.
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        (Role.FINANCE_OFFICER, 403),
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_submission_form_opens_exactly_where_the_matrix_says(
+    client: Client, three_cohorts: object, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"mohs.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("operations:mohe-submit")).status_code == expected
+
+
+def test_the_submission_form_refuses_an_anonymous_visitor(
+    client: Client, three_cohorts: object
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse("operations:mohe-submit")).status_code == 403
+
+
+def test_the_save_button_follows_create_while_the_fields_follow_view(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    §3.3/15 gives the audit account V and withholds C, so the form is READABLE
+    by the role that reads everything and fillable only by the two that draft.
+    That is the view's own design, and the polish kept it: the audit account
+    still sees every field and is offered no way to save one.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER):
+        assert Action.CREATE in allowed_actions(role, "mohe-submit")
+        client.force_login(_user(role, f"mohs.save.{role}".lower().replace("_", ".")))
+        page = _submit_page(client)
+        assert 'class="btn2 primary"' in page, role
+        assert "csrfmiddlewaretoken" in page, role
+        client.logout()
+
+    assert Action.CREATE not in allowed_actions(Role.AUDIT_ACCOUNT, "mohe-submit")
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "mohs.save.aud"))
+    audit = _submit_page(client)
+    assert 'class="btn2 primary"' not in audit
+    assert "للاطلاع فقط" in audit
+    # …and every field is still drawn for them, which is what V buys.
+    for name in MOHE_CONTENT_FIELDS:
+        assert f'id="id_{name}"' in audit, name
+
+
+def test_a_role_without_create_cannot_post_and_writes_nothing(
+    client: Client, three_cohorts: object
+) -> None:
+    """The button's absence is presentation; the refusal is the view's."""
+    from apps.operations.models import Cohort, MoheSubmission
+
+    before = MoheSubmission.objects.count()
+    code = Cohort.objects.values_list("code", flat=True).first()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "mohs.post.aud"))
+
+    response = client.post(reverse("operations:mohe-submit"), {"cohort_code": code})
+    assert response.status_code == 403
+    assert MoheSubmission.objects.count() == before
+
+
+def test_an_invalid_submission_creates_nothing_and_says_which_field(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    ``cohort_code`` is the one required field. A POST naming a cohort that is
+    not on the offered list is refused by the form, and the error is rendered
+    against the field rather than swallowed.
+    """
+    from apps.operations.models import MoheSubmission
+
+    before = MoheSubmission.objects.count()
+    client.force_login(_user(Role.CENTER_MANAGER, "mohs.invalid"))
+
+    response = client.post(
+        reverse("operations:mohe-submit"),
+        {"cohort_code": "CO-DOES-NOT-EXIST", "trainer_name": "د. فلان"},
+    )
+    assert response.status_code == 200
+    assert MoheSubmission.objects.count() == before
+
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+    assert 'class="err"' in page, "the field error was not rendered"
+    assert "has-error" in page
+    # What was typed survives the refusal rather than being thrown away.
+    assert "د. فلان" in page
+
+
+def test_a_valid_submission_opens_exactly_one_file_through_the_service(
+    client: Client, three_cohorts: object
+) -> None:
+    """One POST, one file, and it lands on the file's own page."""
+    from apps.operations.models import Cohort, MoheStatus, MoheSubmission
+    from apps.operations.services import mohe_service
+
+    manager = _user(Role.CENTER_MANAGER, "mohs.valid")
+    offered = mohe_service.submittable_cohort_choices(actor=manager)
+    assert offered, "no cohort was offered, so this proves nothing"
+    code = offered[0][0]
+    before = MoheSubmission.objects.count()
+
+    client.force_login(manager)
+    content = {name: f"نص {name}" for name in MOHE_CONTENT_FIELDS}
+    response = client.post(
+        reverse("operations:mohe-submit"), {"cohort_code": code, **content}, follow=True
+    )
+    assert response.status_code == 200
+    assert MoheSubmission.objects.count() == before + 1
+
+    created = MoheSubmission.objects.latest("pk")
+    assert created.cohort == Cohort.objects.get(code=code)
+    assert created.status == MoheStatus.DRAFT, "a new file is a draft, never further along"
+    for name in MOHE_CONTENT_FIELDS:
+        assert getattr(created, name) == content[name], name
+    assert response.redirect_chain[-1][0] == reverse("operations:mohe-detail", args=[created.pk])
+
+
+def test_the_cohorts_offered_are_the_services_list_and_no_wider(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    The selector is the service's projection, verbatim. Widening it to every
+    cohort would offer a choice ``create_submission`` then has to refuse.
+    """
+    import re
+
+    from apps.operations.models import Cohort
+    from apps.operations.services import mohe_service
+
+    manager = _user(Role.CENTER_MANAGER, "mohs.choices")
+    offered = mohe_service.submittable_cohort_choices(actor=manager)
+    assert offered
+
+    client.force_login(manager)
+    page = _submit_page(client)
+    drawn = set(re.findall(r'<option value="([^"]*)"', page))
+
+    assert drawn == {code for code, _label in offered}
+    assert drawn <= set(Cohort.objects.values_list("code", flat=True))
+    assert len(drawn) == Cohort.objects.count(), "the fixture leaves every cohort free"
+
+
+def test_a_cohort_that_already_holds_a_file_is_not_offered_again(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    A cohort with a draft, a sent or an approved file is off the list; one
+    whose file was rejected comes back on it. Both directions asserted, and
+    both read off the service rather than restated here.
+    """
+    import re
+
+    from apps.operations.services import mohe_service
+
+    manager = _user(Role.CENTER_MANAGER, "mohs.busy")
+    offered = {code for code, _label in mohe_service.submittable_cohort_choices(actor=manager)}
+
+    client.force_login(manager)
+    drawn = set(re.findall(r'<option value="([^"]*)"', _submit_page(client)))
+    assert drawn == offered
+
+    for key in ("bare", "ready", "sent", "approved"):
+        busy = mohe_files[key].cohort.code  # type: ignore[attr-defined]
+        assert busy not in drawn, f"{key}: a cohort with a file was offered again"
+    rejected = mohe_files["rejected"].cohort.code  # type: ignore[attr-defined]
+    assert rejected in drawn, "a rejection was treated as a dead end"
+
+
+def test_no_cohort_to_submit_is_a_stated_state_not_an_unusable_form(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    ``cohort_code`` is required with zero choices, so the old page drew an
+    empty selector and a save button that no input could ever satisfy — the
+    press would come back a validation error every time. The state is said
+    instead, and no control is offered that cannot work.
+    """
+    from apps.operations.models import Cohort, MoheStatus, MoheSubmission
+    from apps.operations.services import mohe_service
+
+    # Take the last free cohort out of the running the way the service does.
+    MoheSubmission.objects.filter(status=MoheStatus.REJECTED).update(status=MoheStatus.SUBMITTED)
+    for cohort in Cohort.objects.exclude(mohe_submissions__isnull=False):
+        MoheSubmission.objects.create(
+            cohort=cohort,
+            created_by=_user(Role.CENTER_MANAGER, f"mohs.filler.{cohort.pk}"),
+            status=MoheStatus.DRAFT,
+        )
+    manager = _user(Role.CENTER_MANAGER, "mohs.none")
+    assert mohe_service.submittable_cohort_choices(actor=manager) == []
+
+    client.force_login(manager)
+    page = _submit_page(client)
+
+    assert "لا دفعة تقبل فتح ملف الآن" in page
+    assert 'class="empty-body"' in page
+    assert "<form" not in page, "an unsubmittable form was drawn anyway"
+    assert "csrfmiddlewaretoken" not in page
+    assert 'class="btn2 primary"' not in page
+    # The way back is still offered, because it is the only thing left to do.
+    assert f'href="{reverse("operations:mohe")}"' in page
+
+
+def test_all_seven_ministry_fields_are_drawn_and_named(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    Seven fields plus the cohort. None is hidden, none is renamed, and the
+    page says out loud that they are the ministry's own form rather than an
+    internal note — which is the difference between a draft and a leak.
+    """
+    from apps.operations.forms import MoheSubmissionForm
+    from apps.operations.services import mohe_service
+
+    assert set(mohe_service.CONTENT_FIELDS) == set(MOHE_CONTENT_FIELDS)
+
+    client.force_login(_user(Role.CENTER_MANAGER, "mohs.fields"))
+    page = _submit_page(client)
+
+    blank = MoheSubmissionForm(cohort_choices=[("X", "x")])
+    for name in MOHE_CONTENT_FIELDS:
+        assert f'id="id_{name}"' in page, f"{name} is not on the page"
+        assert f'name="{name}"' in page, name
+        assert str(blank.fields[name].label) in page, f"{name} lost its own label"
+        assert "hidden" not in page.split(f'id="id_{name}"')[0][-200:], name
+    assert 'id="id_cohort_code"' in page
+    assert "نصّ النموذج الوزاري نفسه" in page
+    assert "BR-014" in page
+
+
+def test_the_submission_form_pronounces_no_verdict_of_its_own(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    Nothing here judges completeness, eligibility, sendability or a deadline.
+    Saving a draft is explicitly allowed to be incomplete, and BR-016 is
+    answered on the file page, which this one says.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "mohs.verdict"))
+    page = _submit_page(client)
+
+    assert "BR-016" in page
+    for verdict in (
+        "جاهز للإرسال",
+        "مكتمل",
+        "غير مؤهلة",
+        "مؤهلة للاعتماد",
+        "انقضت المهلة",
+        "سيُعتمد",
+    ):
+        assert verdict not in page, f"the form published «{verdict}»"
+
+
+def test_the_submission_form_prints_no_commercial_or_private_data(
+    client: Client, three_cohorts: object
+) -> None:
+    """
+    The cohorts offered include one running under an agreement with a 50%
+    rate. The selector names the cohort and says nothing of the deal.
+    """
+    for role in (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.AUDIT_ACCOUNT):
+        client.force_login(_user(role, f"mohs.pr.{role}".lower().replace("_", ".")))
+        page = _submit_page(client)
+        for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "50%", "PERCENT", "نسبة"):
+            assert term not in page, f"mohe-submit/{role} was shown «{term}»"
+        for private in ("رقم المشارك", "الوصل", "المخالصة", "الرصيد", "رقم الهوية"):
+            assert private not in page, f"mohe-submit/{role} was shown «{private}»"
+        client.logout()
+
+
+def test_the_submission_form_leaks_none_of_its_own_commentary(
+    client: Client, three_cohorts: object
+) -> None:
+    """A developer's note on the form that opens a ministry file is the 8I defect."""
+    client.force_login(_user(Role.CENTER_MANAGER, "mohs.comment"))
+    page = _submit_page(client)
+
+    for note in ("submittable_cohort_choices", "§6.5", "{%", "{{", "{#"):
+        assert note not in page, f"the template leaked «{note}»"
+
+
+def test_every_link_on_the_submission_form_reaches_a_real_route(
+    client: Client, three_cohorts: object
+) -> None:
+    """Two links, both the way back, and the form posts to this page itself."""
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "mohs.links"))
+    page = _submit_page(client)
+
+    hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
+    assert hrefs == {reverse("operations:mohe")}, hrefs
+    for href in hrefs:
+        assert client.get(href).status_code == 200
+    # The form posts to the page it is on; it names no other target.
+    assert re.search(r"<form[^>]*action=", page) is None
+
+
+def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = MOHE_SUBMIT_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "form-section", "tight"]:
+        assert f'"{dead}"' not in source, f"the submission form uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    # A form page, not a table page: it renders the shared partial whole and
+    # invents no markup of its own for the fields.
+    assert markup.count('{% include "partials/_form.html" %}') == 1
+    assert "tbl-wrap" not in markup
+    # The rule explanation left `.note info`: blue is an alert, and explaining
+    # a rule is not one (polish rules §6.5).
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

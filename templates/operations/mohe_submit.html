@@ -1,29 +1,82 @@
 {% extends "base.html" %}
 {% load i18n %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  الشاشة تُفتح بـ VIEW وتُقدَّم بـ CREATE (§3.3/15): الحساب التدقيقي يقرأ
+  النموذج ولا يملأه، فتُرسم الحقول له ولا يُرسم زرّ الحفظ — والعرض يرفض POST
+  منه على كل حال، فالزرّ الغائب عرضٌ لا حراسة.
+
+  قائمة الدفعات من `submittable_cohort_choices` وحدها: الخدمة تستبعد الدفعة
+  التي لها ملف مسودة أو مُرسل أو معتمد، وتعيد المرفوضة إلى القائمة. القالب لا
+  يوسّع القائمة ولا يضيّقها ولا يعرف لماذا خرجت دفعة منها.
+
+  وإن كانت القائمة فارغة فلا يُرسم النموذج: `cohort_code` حقل إلزامي بخيارات
+  صفر، فالحفظ لا يمكن أن ينجح مهما كُتب. زرٌّ لا يُفلح أسوأ من غيابه، فتُقال
+  الحالة بدل أن تُترك قائمةً خاوية وزرّاً يردّ خطأ تحقّق.
+
+  والحقول السبعة نصّ النموذج الوزاري نفسه (BR-014)، لا ملاحظات داخلية: تُحفظ
+  كما تُكتب وتخرج باسم المركز. وكلها اختيارية عمداً — الملف يُجمَّع على أيام،
+  والمرفقان الإلزاميان والإرسال يأتيان من صفحة الملف بعد الحفظ (BR-016). لا
+  تحكم هذه الشاشة على اكتمال شيء.
+
+  BR-013 قيل في العنوان الفرعي، وكان في `.note info`: الأزرق تنبيه، وشرحُ
+  قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5).
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
-</div>
-<div class="note info">
-  {% translate "يُحفظ الملف مسودةً ولو نقصت حقوله — فهو يُجمَّع على أيام من مصادر مختلفة. المرفقان الإلزاميان والإرسال يأتيان من صفحة الملف بعد الحفظ." %}
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "فتح ملف وزاري لدفعة قائمة: يُحفظ مسودةً باسم المركز، ثم يُرفَع مرفقاه الإلزاميان ويُرسَل من صفحة الملف (BR-016). ولا يُسجَّل مشارك على الدفعة قبل اعتماد الوزارة (BR-013)." %}</p>
+  </div>
+  <div class="acts">
+    <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "عودة إلى اعتماد الوزارة" %}</a>
+  </div>
 </div>
 
 {% if not can_create %}
-  <div class="note">
+  <p class="hint boxed">
     {% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — فتح الملفات الوزارية لمدير المركز وموظف التسجيل (§3.3/15)." %}
-  </div>
+  </p>
 {% endif %}
 
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "بيانات النموذج الوزاري" %}</h2></div>
-  <div class="card2-body">
-    <form method="post">{% csrf_token %}
-      {% include "partials/_form.html" %}
-      {% if can_create %}
-        <button class="btn2 primary" type="submit">{% translate "حفظ كمسودة" %}</button>
-      {% endif %}
-      <a href="{% url 'operations:mohe' %}">{% translate "إلغاء" %}</a>
-    </form>
+  <div class="card2-head">
+    <h2>{% translate "بيانات النموذج الوزاري" %}</h2>
+    <div class="acts">
+      <span class="chip">{% translate "دفعات بلا ملف" %}: <span class="num">{{ form.fields.cohort_code.choices|length }}</span></span>
+    </div>
   </div>
+  {% if form.fields.cohort_code.choices %}
+    <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "الحقول السبعة أدناه نصّ النموذج الوزاري نفسه، لا ملاحظات داخلية: تُحفظ كما تُكتب وتخرج باسم المركز (BR-014). وكلها اختيارية عند الحفظ — الملف يُجمَّع على أيام من مصادر مختلفة، ولا يُرسَل ناقصاً على أي حال." %}
+      </p>
+      <form method="post">{% csrf_token %}
+        {% include "partials/_form.html" %}
+        <div class="form-acts">
+          {% if can_create %}
+            <button class="btn2 primary" type="submit">{% translate "حفظ كمسودة" %}</button>
+          {% endif %}
+          <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "إلغاء" %}</a>
+        </div>
+      </form>
+    </div>
+    <div class="card2-body">
+      <p class="hint">
+        {% translate "بعد الحفظ تفتح صفحة الملف: هناك يُرفع المستندان الإلزاميان، وهناك وحدها يظهر زرّ الإرسال بعد اكتمالهما (BR-016). ولا تحكم هذه الشاشة باكتمال ملف ولا بجاهزيته." %}
+      </p>
+    </div>
+  {% else %}
+    <div class="card2-body">
+      <p class="empty">
+        <span class="empty-title">{% translate "لا دفعة تقبل فتح ملف الآن" %}</span>
+        <span class="empty-body">{% translate "القائمة تعرض الدفعات التي لا ملف وزاري قائماً لها: الدفعة التي ملفها مسودة أو مُرسل أو معتمد لا تُعرض هنا، والمرفوضة تعود إلى القائمة — والأفضل لها إعادة الإرسال من صفحة ملفها المرفوض، فيحمل الملف الجديد صلته بالرفض الذي يردّ عليه. فإما أن كل دفعة قائمة لها ملف بالفعل، وإما أن لا دفعة عُرِّفت بعد." %}</span>
+      </p>
+    </div>
+  {% endif %}
 </div>
 {% endblock %}
