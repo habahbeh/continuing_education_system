@@ -3957,3 +3957,522 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
     assert "note info" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The ministry file page — page polish
+# ---------------------------------------------------------------------------
+MOHE_DETAIL_TEMPLATE = Path("templates/operations/mohe_detail.html")
+
+#: §3.3/14 «V C E A P · V P · — · — · — · V P»
+MOHE_READERS = (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.AUDIT_ACCOUNT)
+MOHE_OUTSIDERS = (Role.FINANCE_OFFICER, Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def mohe_files(three_cohorts: object) -> dict[str, object]:
+    """
+    One ministry file in each state the page has to tell apart.
+
+    Built through the services rather than the ORM, because the states this
+    page renders — sendable, decidable, resubmittable — are the services'
+    answers, and a hand-built row could hold a combination they never produce.
+    """
+    from datetime import date
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    from apps.operations.models import Cohort
+    from apps.operations.services import mohe_service
+
+    content = {
+        "training_axes_ar": "محاور الدورة التدريبية",
+        "practical_aspects_ar": "تطبيقات مخبرية",
+        "target_audience_ar": "موظفو القطاع العام",
+        "trainer_name": "د. سامي العلي",
+        "trainer_qualifications": "دكتوراه هندسة شبكات",
+        "training_location": "مركز التعليم المستمر",
+        "responsible_entity": "جامعة البترا",
+    }
+    actor = _user(Role.CENTER_MANAGER, "mohd.fixture.actor")
+    seed = Cohort.objects.first()
+    assert seed is not None
+
+    def cohort_for(code: str) -> Cohort:
+        return Cohort.objects.create(
+            code=code,
+            program=seed.program,
+            semester=seed.semester,
+            name_ar=f"دفعة {code}",
+            starts_on=seed.starts_on,
+            ends_on=seed.ends_on,
+            capacity=20,
+        )
+
+    def attach_both(submission: object) -> None:
+        for purpose, name in (("TRAINER_CV", "cv.pdf"), ("ENTITY_LICENSE", "licence.pdf")):
+            mohe_service.attach_document(
+                actor=actor,
+                submission=submission,
+                purpose=purpose,
+                upload=SimpleUploadedFile(name, b"%PDF-1.4 body", "application/pdf"),
+            )
+
+    files: dict[str, object] = {}
+    for key, code in (
+        ("bare", "CO-MD-1"),
+        ("ready", "CO-MD-2"),
+        ("sent", "CO-MD-3"),
+        ("rejected", "CO-MD-4"),
+        ("approved", "CO-MD-5"),
+    ):
+        files[key] = mohe_service.create_submission(
+            actor=actor, cohort=cohort_for(code), data=dict(content)
+        )
+
+    for key in ("ready", "sent", "rejected", "approved"):
+        attach_both(files[key])
+    for key in ("sent", "rejected", "approved"):
+        mohe_service.submit_to_mohe(
+            actor=actor, submission=files[key], submitted_on=date(2026, 9, 1)
+        )
+    mohe_service.record_decision(
+        actor=actor,
+        submission=files["rejected"],
+        approved=False,
+        decided_on=date(2026, 9, 10),
+        rejection_reason_ar="بيان الجوانب العملية ناقص",
+    )
+    mohe_service.record_decision(
+        actor=actor,
+        submission=files["approved"],
+        approved=True,
+        decided_on=date(2026, 9, 12),
+        mohe_course_number="MOHE/2026/900",
+        registration_deadline=date(2026, 10, 5),
+    )
+    for submission in files.values():
+        submission.refresh_from_db()  # type: ignore[attr-defined]
+    return files
+
+
+def _file_page(client: Client, submission: object) -> str:
+    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    response = client.get(reverse("operations:mohe-detail", args=[submission.pk]))  # type: ignore[attr-defined]
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def _projection(actor: object, submission: object) -> dict[str, object]:
+    from apps.operations.services import mohe_service
+
+    return mohe_service.get_submission(actor=actor, submission_id=submission.pk)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        *[(role, 200) for role in MOHE_READERS],
+        *[(role, 403) for role in MOHE_OUTSIDERS],
+    ],
+)
+def test_the_ministry_file_opens_exactly_where_the_matrix_says(
+    client: Client, mohe_files: dict[str, object], role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"mohd.{role}".lower().replace("_", ".")))
+    url = reverse("operations:mohe-detail", args=[mohe_files["ready"].pk])  # type: ignore[attr-defined]
+
+    assert client.get(url).status_code == expected
+
+
+def test_the_ministry_file_refuses_an_anonymous_visitor(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    url = reverse("operations:mohe-detail", args=[mohe_files["ready"].pk])  # type: ignore[attr-defined]
+
+    assert client.get(url).status_code == 403
+
+
+def test_each_ministry_act_is_drawn_only_for_the_role_that_holds_it(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    Four acts, four different cells. Attaching is EDIT on §3.3/15, sending is
+    APPROVE on §3.3/15, deciding is APPROVE on §3.3/14, and resubmitting is
+    CREATE on §3.3/15 — which is why the registrar drafts and attaches but does
+    not send, and the audit account reads all of it and does none of it.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.EDIT in allowed_actions(Role.REGISTRATION_OFFICER, "mohe-submit")
+    assert Action.APPROVE not in allowed_actions(Role.REGISTRATION_OFFICER, "mohe-submit")
+    assert Action.APPROVE not in allowed_actions(Role.AUDIT_ACCOUNT, "mohe")
+
+    expected = {
+        Role.CENTER_MANAGER: {
+            "bare": {"attach"},
+            "ready": {"attach", "send"},
+            "sent": {"approve"},
+            "rejected": {"resubmit"},
+            "approved": set(),
+        },
+        Role.REGISTRATION_OFFICER: {
+            "bare": {"attach"},
+            "ready": {"attach"},
+            "sent": set(),
+            "rejected": {"resubmit"},
+            "approved": set(),
+        },
+        # Reads every file and acts on none of them.
+        Role.AUDIT_ACCOUNT: {
+            key: set() for key in ("bare", "ready", "sent", "rejected", "approved")
+        },
+    }
+    markers = {
+        "attach": 'value="attach"',
+        "send": 'value="send"',
+        "approve": 'value="approve"',
+        "resubmit": 'value="resubmit"',
+    }
+
+    for role, per_state in expected.items():
+        client.force_login(_user(role, f"mohd.act.{role}".lower().replace("_", ".")))
+        for key, acts in per_state.items():
+            page = _file_page(client, mohe_files[key])
+            for act, marker in markers.items():
+                drawn = marker in page
+                assert drawn is (act in acts), f"{role}/{key}: «{act}» drawn={drawn}"
+            # A page with no act draws no write token at all, and one form per
+            # act offered — «approve» and «reject» share the decision form, and
+            # are counted once because they are one control surface.
+            assert ("csrfmiddlewaretoken" in page) is bool(acts), f"{role}/{key} token mismatch"
+            assert page.count("<form") == len(acts), f"{role}/{key} form count"
+            assert ('value="reject"' in page) is ("approve" in acts), f"{role}/{key} reject"
+        client.logout()
+
+
+@pytest.mark.parametrize(
+    ("action", "role", "state"),
+    [
+        ("send", Role.REGISTRATION_OFFICER, "ready"),
+        ("approve", Role.REGISTRATION_OFFICER, "sent"),
+        ("reject", Role.REGISTRATION_OFFICER, "sent"),
+        ("attach", Role.AUDIT_ACCOUNT, "bare"),
+        ("resubmit", Role.AUDIT_ACCOUNT, "rejected"),
+    ],
+)
+def test_an_act_the_page_never_offered_is_still_refused_by_the_route(
+    client: Client, mohe_files: dict[str, object], action: str, role: str, state: str
+) -> None:
+    """The button's absence is presentation; the refusal is ``MOHE_ACTIONS``."""
+    from apps.core.models import Attachment
+    from apps.operations.models import MoheSubmission
+
+    submission = mohe_files[state]
+    before = (
+        MoheSubmission.objects.count(),
+        Attachment.objects.count(),
+        MoheSubmission.objects.get(pk=submission.pk).status,  # type: ignore[attr-defined]
+    )
+    client.force_login(_user(role, f"mohd.post.{action}.{role}".lower().replace("_", ".")))
+
+    url = reverse("operations:mohe-detail", args=[submission.pk])  # type: ignore[attr-defined]
+    assert client.post(url, {"action": action}).status_code == 403
+    assert (
+        MoheSubmission.objects.count(),
+        Attachment.objects.count(),
+        MoheSubmission.objects.get(pk=submission.pk).status,  # type: ignore[attr-defined]
+    ) == before
+
+
+def test_the_file_identity_renders_the_projection_it_was_given(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """A `.dl` of keys ``get_submission`` already returned, none of them derived."""
+    manager = _user(Role.CENTER_MANAGER, "mohd.identity")
+    row = _projection(manager, mohe_files["approved"])
+
+    client.force_login(manager)
+    page = _file_page(client, mohe_files["approved"])
+
+    assert 'class="dl"' in page
+    assert row["cohort_code"] in page
+    assert row["cohort_name_ar"] in page
+    assert row["program_name_ar"] in page
+    assert row["program_code"] in page
+    assert str(row["status_display"]) in page
+    assert str(row["created_by"]) in page
+    assert row["mohe_course_number"] in page
+    assert row["submitted_on"].strftime("%Y/%m/%d") in page  # type: ignore[attr-defined]
+    assert row["decided_on"].strftime("%Y/%m/%d") in page  # type: ignore[attr-defined]
+    assert row["registration_deadline"].strftime("%Y/%m/%d") in page  # type: ignore[attr-defined]
+
+
+def test_an_undecided_file_names_each_absence_instead_of_hiding_the_row(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    The old `.dl` wrapped four rows in ``{% if %}``, so a draft simply had no
+    «تاريخ القرار» line — and a reader could not tell a missing decision from a
+    field the screen does not show. Each absence is named in its own words.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "mohd.absent"))
+    page = _file_page(client, mohe_files["bare"])
+
+    assert "لم يُرسل بعد" in page
+    assert "بلا قرار" in page
+    assert "لم يصدر" in page
+    assert "غير محدَّدة" in page
+    assert "ملف أصلي، لا يردّ على رفض" in page
+    assert "لم يُعَد إرساله" in page
+
+
+def test_what_is_missing_is_the_services_list_and_nothing_else(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    BR-016 is computed in ``missing_attachments`` so the screen does not become
+    a second copy of the rule. The labels drawn are exactly that list — not
+    "required minus uploaded" worked out in the template.
+    """
+    manager = _user(Role.CENTER_MANAGER, "mohd.missing")
+    client.force_login(manager)
+
+    bare = _projection(manager, mohe_files["bare"])
+    assert [m["label"] for m in bare["missing_attachments"]], "nothing missing, so this is vacuous"  # type: ignore[index]
+    page = _file_page(client, mohe_files["bare"])
+    assert "ما زال ناقصاً" in page
+    for missing in bare["missing_attachments"]:  # type: ignore[attr-defined]
+        assert f'<span class="chip warn">{missing["label"]}</span>' in page
+    assert "BR-016" in page
+
+    # …and a complete file draws no missing block at all.
+    ready = _projection(manager, mohe_files["ready"])
+    assert ready["missing_attachments"] == []
+    complete = _file_page(client, mohe_files["ready"])
+    assert "ما زال ناقصاً" not in complete
+
+
+def test_required_uploaded_and_missing_stay_three_separate_statements(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    Three different facts — what the rule asks for, what is on file, and what
+    is still absent — each printed from its own key. Collapsing them would
+    make the page decide something the service already decided.
+    """
+    manager = _user(Role.CENTER_MANAGER, "mohd.three")
+    client.force_login(manager)
+
+    bare = _projection(manager, mohe_files["bare"])
+    page = _file_page(client, mohe_files["bare"])
+    # What the rule asks for is stated even when nothing is uploaded.
+    assert "ما يطلبه BR-016" in page
+    for required in bare["required_purposes"]:  # type: ignore[attr-defined]
+        assert str(required["label"]) in page
+    # What is uploaded has its own table, with its own empty state.
+    assert "لم يُرفع أي مستند بعد" in page
+    assert 'class="empty-body"' in page
+
+    ready = _projection(manager, mohe_files["ready"])
+    assert len(ready["attachments"]) == 2  # type: ignore[arg-type]
+    complete = _file_page(client, mohe_files["ready"])
+    assert "لم يُرفع أي مستند بعد" not in complete
+    for uploaded in ready["attachments"]:  # type: ignore[attr-defined]
+        assert uploaded["original_filename"] in complete
+        assert uploaded["sha256"][:12] in complete
+    assert "ما يطلبه BR-016" in complete, "the requirement disappeared once it was met"
+
+
+def test_the_readiness_chips_read_the_service_flags_not_the_viewers_permission(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    ``is_sendable`` / ``is_decidable`` / ``is_resubmittable`` are the service's
+    answers about the FILE, and ``can_send`` and friends are answers about the
+    READER. Drawing the chips from the latter would tell a registrar who just
+    completed the documents nothing about whether the file is now ready.
+
+    So the chip is asserted on a role that may not perform the act at all.
+    """
+    manager = _user(Role.CENTER_MANAGER, "mohd.flags.mgr")
+    flags = {key: _projection(manager, sub) for key, sub in mohe_files.items()}
+    assert flags["ready"]["is_sendable"] is True
+    assert flags["sent"]["is_decidable"] is True
+    assert flags["rejected"]["is_resubmittable"] is True
+
+    chips = {
+        "is_sendable": "مكتمل ويقبل الإرسال",
+        "is_decidable": "يقبل تسجيل قرار الوزارة",
+        "is_resubmittable": "يقبل فتح ملف يردّ عليه",
+    }
+    # The audit account may perform none of the four acts.
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "mohd.flags.aud"))
+    for key, submission in mohe_files.items():
+        page = _file_page(client, submission)
+        assert "<form" not in page, f"{key} drew a form for a reader who may write nothing"
+        for flag, label in chips.items():
+            assert (label in page) is bool(flags[key][flag]), f"{key}/{flag} chip disagrees"
+
+
+def test_the_rejection_is_quoted_as_a_decision_not_pronounced_as_a_verdict(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    The reason is the ministry's words, attributed to the ministry, and the
+    page adds nothing to them. It left `.note danger` — red is an alert, and a
+    decision that arrived is not one (polish rules §6.5).
+    """
+    manager = _user(Role.CENTER_MANAGER, "mohd.reject")
+    row = _projection(manager, mohe_files["rejected"])
+    reason = str(row["rejection_reason_ar"])
+    assert reason
+
+    client.force_login(manager)
+    page = _file_page(client, mohe_files["rejected"])
+
+    assert reason in page
+    assert "سبب الرفض كما ورد من الوزارة" in page
+    assert "BR-014" in page
+    assert "note danger" not in page
+    # The page states no judgement of its own — checked with the ministry's own
+    # words removed, since those are a finding that arrived, not one reached here.
+    computed = page.replace(reason, "")
+    for verdict in ("مخالف", "غير مطابق", "انقضت المهلة", "تجاوزت المهلة", "متأخر", "أيام متبقية"):
+        assert verdict not in computed, f"the file page published «{verdict}»"
+
+
+def test_the_approved_file_states_the_rule_without_judging_the_deadline(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    BR-013 and BR-019 are quoted with the ministry's own date. Whether that
+    date has passed is not computed anywhere in this context, so the page says
+    nothing about it.
+    """
+    manager = _user(Role.CENTER_MANAGER, "mohd.approved")
+    row = _projection(manager, mohe_files["approved"])
+
+    client.force_login(manager)
+    page = _file_page(client, mohe_files["approved"])
+
+    assert "BR-013" in page
+    assert "BR-019" in page
+    assert row["registration_deadline"].strftime("%Y/%m/%d") in page  # type: ignore[attr-defined]
+    for verdict in ("انقضت", "سارية اليوم", "متبقٍّ من المهلة", "منتهية"):
+        assert verdict not in page, f"the file page judged the deadline: «{verdict}»"
+
+
+def test_the_resubmission_chain_is_shown_only_where_the_service_gave_one(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """Both ends of the relation, and each end links to a file that opens."""
+    from apps.operations.models import MoheSubmission
+
+    manager = _user(Role.CENTER_MANAGER, "mohd.chain")
+    client.force_login(manager)
+
+    rejected = mohe_files["rejected"]
+    response = client.post(
+        reverse("operations:mohe-detail", args=[rejected.pk]),  # type: ignore[attr-defined]
+        {"action": "resubmit", "training_axes_ar": "محاور مصحَّحة"},
+        follow=True,
+    )
+    assert response.status_code == 200
+    reply = MoheSubmission.objects.filter(resubmission_of=rejected).first()
+    assert reply is not None, "the resubmission was not created, so this proves nothing"
+
+    child = _file_page(client, reply)
+    assert f'href="{reverse("operations:mohe-detail", args=[rejected.pk])}"' in child  # type: ignore[attr-defined]
+    assert "ملف أصلي، لا يردّ على رفض" not in child
+
+    parent = _file_page(client, rejected)
+    assert f'href="{reverse("operations:mohe-detail", args=[reply.pk])}"' in parent
+    assert "لم يُعَد إرساله" not in parent
+
+
+def test_the_ministry_file_prints_no_commercial_or_private_data(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """
+    A cohort in this fixture runs under an agreement carrying a 50% rate, and a
+    ministry file is not where a commercial term or a participant is published.
+    """
+    for role in MOHE_READERS:
+        client.force_login(_user(role, f"mohd.pr.{role}".lower().replace("_", ".")))
+        for key, submission in mohe_files.items():
+            page = _file_page(client, submission)
+            for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "50%", "PERCENT", "نسبة"):
+                assert term not in page, f"mohe file {key}/{role} was shown «{term}»"
+            for private in ("رقم المشارك", "الوصل", "المخالصة", "الرصيد", "رقم الهوية"):
+                assert private not in page, f"mohe file {key}/{role} was shown «{private}»"
+        client.logout()
+
+
+def test_the_ministry_file_leaks_none_of_its_own_commentary(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """A developer's note on a file that leaves the centre is the 8I defect."""
+    client.force_login(_user(Role.CENTER_MANAGER, "mohd.comment"))
+    page = _file_page(client, mohe_files["rejected"])
+
+    for note in ("MOHE_ACTIONS", "§6.5", "is_sendable", "{%", "{{", "{#"):
+        assert note not in page, f"the template leaked «{note}»"
+
+
+def test_every_link_on_the_ministry_file_reaches_a_real_route(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    """The way back, and the two ends of a resubmission. Nothing else."""
+    import re
+
+    client.force_login(_user(Role.CENTER_MANAGER, "mohd.links"))
+    for key, submission in mohe_files.items():
+        page = _file_page(client, submission)
+        hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
+        assert reverse("operations:mohe") in hrefs, key
+        for href in hrefs:
+            assert client.get(href).status_code == 200, f"{key} → {href}"
+
+
+def test_the_ministry_file_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = MOHE_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the ministry file page uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    # Only the uploaded documents are tabular; every other block is a `.dl` or
+    # a hint, and the one table keeps its wrapper and spans it when empty.
+    assert markup.count('class="tbl-wrap"') == 1
+    # Two key/value blocks — the file's identity and the form's content. The
+    # attachments are the only genuinely tabular thing on the page.
+    assert markup.count('class="dl"') == 2
+    assert 'colspan="5"' in markup
+    assert len(re.findall(r"<th[ >]", markup)) == 5
+    # Every alert box that was explaining a rule is gone: colour is reserved
+    # for the refusal itself (polish rules §6.5).
+    for alert in ("note danger", "note info", "note warn", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    assert "sr-only" not in markup
+    for header in re.findall(r"<th([^>]*)>\s*</th>", markup):
+        assert "aria-label" in header, "an empty column header with no name"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
