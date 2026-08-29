@@ -149,11 +149,28 @@ def program_detail_view(request: HttpRequest, code: str) -> HttpResponse:
 def price_lists_view(request: HttpRequest) -> HttpResponse:
     policy.require(request.user, Screen.PRICELISTS, Action.VIEW, request=request)
 
+    # Materialised once: the template iterates this list and the chips below are
+    # counted off the same rows, so the two cannot disagree.
+    price_lists = list(catalog_service.list_price_lists(actor=request.user, request=request))
+
+    # Tallied off the rows rather than queried again, and keyed by the raw
+    # status so the template can tone the chip the way every other list does.
+    # Encounter order is the queryset's order — newest effective date first —
+    # and a state nobody is in gets no chip rather than a zero.
+    tally: dict[tuple[str, str], int] = {}
+    for price_list in price_lists:
+        key = (str(price_list.status), str(price_list.get_status_display()))
+        tally[key] = tally.get(key, 0) + 1
+
     return render(
         request,
         "catalog/pricelists.html",
         {
-            "price_lists": catalog_service.list_price_lists(actor=request.user, request=request),
+            "price_lists": price_lists,
+            "counts": [
+                {"status": status, "label": label, "count": count}
+                for (status, label), count in tally.items()
+            ],
             # Row 13 grants no APPROVE to anyone: the president approves
             # outside the system (footnote 8, D-31). Recording that decision
             # is an edit, which is why this asks for EDIT.

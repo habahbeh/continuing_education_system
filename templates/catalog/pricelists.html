@@ -1,38 +1,101 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui %}
+
+{% block title %}{% translate "قوائم الأسعار المؤرّخة" %} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  صفحة قراءة كباقي الكتالوج: لا خدمة إدخال خلف هذه الشاشة ولا فرع POST في
+  العرض، فلا يُرسم زرّ إنشاء ولا تعديل ولا اعتماد ولو كانت الرايات في السياق.
+  زرٌّ بلا مسار أسوأ من غياب الزرّ — والاعتماد نفسه يقع خارج النظام (D-31).
+
+  ما تعرضه هذه الشاشة هو التأريخ: أي قائمة، لأي فصل، صدرت متى وتسري متى،
+  وبأي حالة وبأي مرجع قرار. أما رسوم الدورة والتأمين ورسوم التسجيل فبنودٌ
+  داخل القائمة الواحدة، وتُقرأ في صفحتها لا هنا.
+
+  ولا حكم «القائمة السارية اليوم» هنا: BR-012 يحسم السريان بتاريخ الواقعة عبر
+  خدمة التسعير، وهذا العرض لا يستدعيها ولا يمرّر نتيجتها. فيُقال من أين يأتي
+  الحكم بدل أن يُخمَّن من ترتيب الجدول.
+
+  ولا حصة شريك ولا قسمة إيراد: شرطٌ تجاري مع طرف ثالث لا محلّ له في قائمة أسعار.
+
+  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
+{% endcomment %}
 
 {% block content %}
-<div class="card2">
-  <h1>{% translate "قوائم الأسعار" %}</h1>
-  <p class="note">
-    {% translate "القائمة المعتمدة غير قابلة للتعديل — التغيير بإصدار قائمة جديدة (BR-008 · D-14). والاعتماد من رئيس الجامعة خارج النظام." %}
-  </p>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{% translate "قوائم الأسعار المؤرّخة" %}</h1>
+    <p class="sub">
+      {% translate "كل قائمة تخصّ فصلاً، ولها تاريخ إصدار وتاريخ سريان وحالة ومرجع قرار. القائمة المعتمدة لا تُعدَّل — التغيير بإصدار قائمة جديدة (BR-008 · D-14) — والاعتماد من رئيس الجامعة خارج النظام (D-31)." %}
+    </p>
+  </div>
+  <div class="acts">
+    <span class="chip info dot">{% translate "قراءة فقط" %}</span>
+  </div>
+</div>
 
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "القوائم" %}</h2>
+    <div class="acts">
+      {% if counts %}
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for c in counts %}
+          <span class="chip {{ c.status|status_tone }}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
+        {% endfor %}
+      {% endif %}
+      <span class="count">{% blocktranslate count n=price_lists|length %}قائمة واحدة{% plural %}{{ n }} قوائم{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
         <tr>
-          <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th>
-          <th>{% translate "الفصل" %}</th><th>{% translate "السريان" %}</th>
-          <th>{% translate "الحالة" %}</th><th>{% translate "مرجع القرار" %}</th><th></th>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "اسم القائمة" %}</th>
+          <th>{% translate "الفصل" %}</th>
+          <th>{% translate "تاريخ الإصدار" %}</th>
+          <th>{% translate "تاريخ السريان" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "مرجع القرار" %}</th>
+          <th aria-label="{% translate 'إجراءات' %}"></th>
         </tr>
       </thead>
       <tbody>
         {% for pl in price_lists %}
           <tr>
-            <td dir="ltr">{{ pl.code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ pl.code }}</strong></td>
             <td>{{ pl.name_ar }}</td>
             <td>{{ pl.semester.name_ar }}</td>
-            <td dir="ltr">{{ pl.effective_from|date:"Y/m/d" }}</td>
-            <td><span class="chip">{{ pl.get_status_display }}</span></td>
-            <td dir="ltr">{{ pl.decision_reference|default:"—" }}</td>
-            <td><a href="{% url 'catalog:pricelist-detail' pl.code %}">{% translate "عرض" %}</a></td>
+            <td dir="ltr" class="num">{{ pl.issued_on|date:"Y/m/d" }}</td>
+            <td dir="ltr" class="num">{{ pl.effective_from|date:"Y/m/d" }}</td>
+            <td><span class="chip {{ pl.status|status_tone }} dot">{{ pl.get_status_display }}</span></td>
+            <td dir="ltr">
+              {% if pl.decision_reference %}{{ pl.decision_reference }}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'catalog:pricelist-detail' pl.code %}">{% translate "عرض البنود" %}</a>
+            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="7">{% translate "لا توجد قوائم أسعار" %}</td></tr>
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا قوائم أسعار معرَّفة بعد" %}</span>
+            <span class="empty-body">{% translate "بلا قائمة معتمدة سارية لا يُسعَّر تسجيل جديد (BR-008). القائمة تُقترح من مدير المركز وتُعتمد من رئيس الجامعة خارج النظام، ثم تُسجَّل هنا بمرجع قرارها — ولا تُنشأ من هذه الشاشة." %}</span>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "BR-012: السعر يُقرأ من القائمة السارية بتاريخ الواقعة ثم يُنسخ على التسجيل، فإصدار قائمة جديدة لا يحرّك أرقام تسجيل قائم. تحديد «القائمة السارية اليوم» تحسمه خدمة التسعير بتاريخٍ مُعطى، وهذه الشاشة لا تستدعيها — فهي تعرض القوائم مرتّبة بتاريخ سريانها ولا تطبع حكماً لا تملكه." %}
+    </p>
+    <p class="hint">
+      {% translate "رسوم الدورة والتأمين وقواعد رسوم التسجيل بنودٌ داخل القائمة الواحدة، وتُقرأ في صفحة القائمة." %}
+    </p>
   </div>
 </div>
 {% endblock %}

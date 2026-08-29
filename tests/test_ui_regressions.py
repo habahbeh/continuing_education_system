@@ -2426,3 +2426,255 @@ def test_the_programme_card_added_no_dead_class_and_no_dependency() -> None:
     assert "sr-only" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The dated price lists — page polish
+# ---------------------------------------------------------------------------
+PRICELISTS_TEMPLATE = Path("templates/catalog/pricelists.html")
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (Role.CENTER_MANAGER, 200),
+        (Role.REGISTRATION_OFFICER, 200),
+        (Role.FINANCE_OFFICER, 200),
+        (Role.AUDIT_ACCOUNT, 200),
+        # §3.3/13 leaves both cells empty. Under BR-080 that is a refusal —
+        # and Q-14 is explicit that the price list is NOT the finance
+        # manager's to approve, so his absence here is the rule, not a gap.
+        (Role.FINANCE_MANAGER, 403),
+        (Role.CASHIER, 403),
+    ],
+)
+def test_the_price_lists_open_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    client.force_login(_user(role, f"pl.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("catalog:pricelists")).status_code == expected
+
+
+def test_the_price_lists_refuse_an_anonymous_visitor(client: Client, seeded_settings: None) -> None:
+    """Fail-closed. The polish moved presentation, never the door."""
+    assert client.get(reverse("catalog:pricelists")).status_code == 403
+
+
+def test_the_price_list_index_stayed_read_only(client: Client, a_catalogue: None) -> None:
+    """
+    §3.3/13 grants the centre manager C and E, and ``can_record_approval`` is
+    in the context — but there is no data-entry service behind this screen and
+    the view takes no POST, so a create or edit button would be a button with
+    nothing behind it. Approval is not even offered to anybody: the row grants
+    APPROVE to no role, because the President approves outside the system
+    (footnote 8, D-31).
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.CREATE in allowed_actions(Role.CENTER_MANAGER, "pricelists")
+    assert Action.EDIT in allowed_actions(Role.CENTER_MANAGER, "pricelists")
+    for role in (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.AUDIT_ACCOUNT):
+        assert Action.APPROVE not in allowed_actions(role, "pricelists")
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.readonly"))
+    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "<form" not in page
+    assert "<button" not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert 'class="btn2 primary"' not in page, "a primary action with no route behind it"
+    # …and the reader is told it is a reading screen rather than left to guess.
+    assert "قراءة فقط" in page
+
+    # The view carries no `require_http_methods`, so a POST is answered rather
+    # than refused — it renders the same page and writes nothing, because there
+    # is no branch that could. Asserted as it IS: 405 would be the tidier
+    # contract, and adding the decorator is a behaviour change, so it is
+    # reported rather than made in a presentation pass.
+    from apps.catalog.models import PriceList
+
+    before = PriceList.objects.count()
+    posted = client.post(reverse("catalog:pricelists"))
+    assert posted.status_code == 200
+    assert PriceList.objects.count() == before, "a POST to a read-only list wrote something"
+    assert "<form" not in posted.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def test_the_price_list_index_prints_no_partner_or_revenue_term(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    A price list is a commercial document, and the demo published a third
+    party's cut of it beside the price. Nothing about a partner's share is
+    this screen's to print, for any role that gets through the door.
+    """
+    for role in (
+        Role.CENTER_MANAGER,
+        Role.REGISTRATION_OFFICER,
+        Role.FINANCE_OFFICER,
+        Role.AUDIT_ACCOUNT,
+    ):
+        client.force_login(_user(role, f"pl.pr.{role}".lower().replace("_", ".")))
+        page = (
+            client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+        )
+        for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "الإيراد يُقسم", "partner share"):
+            assert term not in page, f"pricelists/{role} was shown «{term}»"
+        client.logout()
+
+
+def test_the_price_list_row_prints_the_dates_it_actually_carries(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    The old row showed one date and called it «السريان». A dated list has two —
+    issued and effective — and BR-008 turns on the difference: the list is
+    proposed on one day and comes into force on another.
+    """
+    from apps.catalog.models import PriceList
+
+    price_list = PriceList.objects.first()
+    assert price_list is not None, "no price list was seeded, so this proves nothing"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.dates"))
+    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "تاريخ الإصدار" in page
+    assert "تاريخ السريان" in page
+    assert price_list.issued_on.strftime("%Y/%m/%d") in page
+    assert price_list.effective_from.strftime("%Y/%m/%d") in page
+    assert price_list.issued_on != price_list.effective_from, "the two dates are the same row"
+    # …and every other field is one the row already carried.
+    assert price_list.code in page
+    assert price_list.name_ar in page
+    assert price_list.semester.name_ar in page
+    assert str(price_list.get_status_display()) in page
+    assert price_list.decision_reference in page
+
+
+def test_the_price_list_index_publishes_no_effective_verdict_it_cannot_compute(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    "Which list is in force today" is BR-012, and it is answered by the pricing
+    service for a GIVEN date. This view never calls it, so the page says where
+    the answer comes from instead of guessing it from the sort order.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.effective"))
+    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "BR-012" in page
+    assert 'class="hint boxed"' in page
+    for verdict in ("السارية اليوم:", "القائمة الحالية", "سارية الآن", "غير سارية"):
+        assert verdict not in page, f"the index published «{verdict}» it never computed"
+
+
+def test_the_price_list_status_chips_count_the_rows_beneath_them(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    Tallied off the list the template iterates, so the chips cannot disagree
+    with the table — and a state nobody is in gets no chip rather than a zero.
+    """
+    import re
+
+    from apps.catalog.models import PriceList
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.chips"))
+    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    chips = {
+        label.strip(): int(n)
+        for label, n in re.findall(
+            r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
+        )
+    }
+    total = PriceList.objects.count()
+    assert total, "no price list was seeded, so this proves nothing"
+    assert sum(chips.values()) == total
+    assert "توزيع النتائج المعروضة" in page
+    # Every state present in the data has a chip, and no state absent from it does.
+    present = {str(pl.get_status_display()) for pl in PriceList.objects.all()}
+    assert set(chips) == present
+    assert 0 not in chips.values(), "a zero chip was drawn for a state nothing is in"
+
+
+def test_the_price_list_empty_state_says_what_the_emptiness_costs(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    On an unseeded database the table is empty. The old page said «لا توجد
+    قوائم أسعار» in a bare cell; the state now says what cannot happen without
+    one, and offers no action, because there is no route behind one.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.empty"))
+    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "لا قوائم أسعار معرَّفة بعد" in page
+    assert 'class="empty-body"' in page
+    assert "BR-008" in page
+    assert "empty-act" not in page, "the empty state offers an action that has no route"
+    # The chips describe what is on screen, so an empty table draws none.
+    assert "توزيع النتائج المعروضة" not in page
+
+
+def test_each_price_list_row_links_to_its_own_detail_page(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    The only link the table draws is the row's own list, and the reader passed
+    this screen's gate to be here — so it cannot send them into a refusal.
+    """
+    from apps.catalog.models import PriceList
+
+    code = PriceList.objects.values_list("code", flat=True).first()
+    assert code, "no price list was seeded, so this proves nothing"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.link"))
+    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    detail = reverse("catalog:pricelist-detail", args=[code])
+    assert f'href="{detail}"' in page
+    assert client.get(detail).status_code == 200
+    # One link per row and nothing else — no clickable row, no invented action.
+    rows = PriceList.objects.count()
+    assert page.count("<a class=") == page.count('<a class="btn2 ghost"') == rows
+
+
+def test_the_price_list_index_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PRICELISTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the price list index uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    assert 'class="tbl-wrap"' in source
+    assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
+    # Eight columns, and the empty row spans the table it sits in.
+    assert len(re.findall(r"<th[ >]", source)) == 8
+    assert 'colspan="8"' in source
+    # The actions column is named by attribute: `.sr-only` is `position:absolute`
+    # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
+    # the page sideways.
+    assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "sr-only" not in markup
+    # Every `{# … #}` closes on its own line — Django's tag does not span lines.
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
