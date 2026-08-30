@@ -833,6 +833,13 @@ GUIDED_HELP_SCREENS = [
     ("catalog:programs", "programs", "programs"),
     ("catalog:short-courses", "short-courses", "short-courses"),
     ("catalog:online-courses", "online-courses", "online-courses"),
+    # Sprint 8I-1 — the six polished screens joined the taught set. The two
+    # detail pages need an object to open and are proved next to their own
+    # fixtures in ``tests/test_ui_regressions.py``.
+    ("catalog:pricelists", "pricelists", "pricelists"),
+    ("operations:cohorts", "cohorts", "cohorts"),
+    ("operations:mohe", "mohe", "mohe"),
+    ("operations:mohe-submit", "mohe-submit", "mohe-submit"),
     ("operations:clearances", "clearance", "clearance"),
     ("operations:certificates", "certificates", "certificates"),
     ("partners:partners", "partners", "partners"),

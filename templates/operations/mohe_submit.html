@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -36,6 +36,8 @@
     <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "عودة إلى اعتماد الوزارة" %}</a>
   </div>
 </div>
+
+{% guided_help "mohe-submit" %}
 
 {% if not can_create %}
   <p class="hint boxed">

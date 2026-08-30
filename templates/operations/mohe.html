@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -37,6 +37,8 @@
     </div>
   {% endif %}
 </div>
+
+{% guided_help "mohe" %}
 
 <form method="get" class="filterbar" role="search">
   <div class="fld">

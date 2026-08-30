@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 
 {% block title %}{{ title }} — {{ submission.cohort_code }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -38,6 +38,8 @@
     <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "عودة إلى اعتماد الوزارة" %}</a>
   </div>
 </div>
+
+{% guided_help "mohe-detail" %}
 
 <div class="card2">
   <div class="card2-head">

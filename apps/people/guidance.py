@@ -177,6 +177,96 @@ GUIDES: dict[str, Guide] = {
         ),
         status=_READ_ONLY,
     ),
+    # --- §3.3 الأسعار والتشغيل واعتماد الوزارة ------------------------------
+    # The dated price list, the cohort that opens on it and the ministry file
+    # that unlocks enrolment on it: one chain, three registers. Each guide says
+    # what its own screen decides and, more usefully, what it does not: which
+    # list applies, whether a blank deposit is a zero, and whether a file may
+    # be sent are all answered elsewhere, and saying so is the whole teaching.
+    "pricelists": Guide(
+        what=_("سجل قوائم الأسعار المؤرّخة: أي قائمة، لأي فصل، صدرت متى وتسري متى."),
+        who=_("مدير المركز يعرّفها، وبقية الأدوار تقرأ."),
+        after=_("بنود كل قائمة — رسوم الدورة والتأمين ورسم التسجيل — في صفحة القائمة نفسها."),
+        links=(
+            (Screen.PROGRAMS, "catalog:programs", _("الدبلومات")),
+            (Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+        ),
+        stops=_(
+            "القائمة المعتمدة لا تُعدَّل؛ التغيير بإصدار قائمة جديدة (BR-008). وهذه الشاشة "
+            "تؤرّخ ولا تحسم أيّ قائمة تنطبق: ذلك يُحسم بتاريخ الواقعة في خدمة التسعير (BR-012)."
+        ),
+        status=_READ_ONLY,
+    ),
+    "pricelist-detail": Guide(
+        what=_("بنود قائمة أسعار واحدة: ما يُسعَّر به كل برنامج، وما عليه من تأمين ومن رسم تسجيل."),
+        who=_("مدير المركز والموظف المالي وموظف التسجيل، قراءةً."),
+        after=_("بقية القوائم وتأريخها في سجل قوائم الأسعار."),
+        links=(
+            (Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+            (Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+        ),
+        stops=_(
+            "الفراغ ليس صفراً: تأمين فارغ يعني ألّا تأمين على البرنامج (BR-096)، ورسم فارغ "
+            "يعني ألّا رسم تسجيل يُستوفى (BR-009). ولا تُقارَن هنا أسعار المواد برسوم الدورة."
+        ),
+        status=_READ_ONLY,
+    ),
+    "cohorts": Guide(
+        what=_("الدفعات المُشغّلة على برامج الكتالوج: فترتها ومقاعدها وحالتها ومَن يشغّلها."),
+        who=_("مدير المركز يفتح الدفعة، وبقية الأدوار تقرأ."),
+        after=_("الدفعة تُفتح مخطَّطة، ثم يُفتح لها ملف وزاري."),
+        links=(
+            (Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
+            (Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+        ),
+        stops=_(
+            "لا يُسجَّل مشارك على دفعة لم تعتمدها الوزارة (BR-013)، والسعر يُقرأ من قائمة "
+            "الأسعار السارية لا من هذا السجل."
+        ),
+    ),
+    "mohe": Guide(
+        what=_(
+            "سجل الملفات الوزارية للدفعات: ما زال مسودةً، وما أُرسل، وما اعتمدته الوزارة أو ردّته."
+        ),
+        who=_("مدير المركز وموظف التسجيل يفتحان الملفات، وحساب التدقيق يقرأ."),
+        after=_("الإرفاق والإرسال وتسجيل القرار كلّها على صفحة الملف الواحد."),
+        # No link to «فتح ملف وزاري» here. The register draws that button off
+        # CREATE on §3.3/15 and the audit account has VIEW without it — a link
+        # filtered on VIEW would hand the reader a page they may open and not
+        # use, and put back the very offer the register's polish removed.
+        links=((Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),),
+        stops=_(
+            "لا تسجيل على دفعة لم تُعتمد (BR-013)، ولا إرسال قبل استكمال محتوى الملف "
+            "ومرفقيه الإلزاميين (BR-016). والقرار يُسجَّل كما ورد من الوزارة."
+        ),
+    ),
+    "mohe-detail": Guide(
+        what=_(
+            "ملف دفعة واحدة لدى الوزارة: محتواه، وما يطلبه من مرفقات وما رُفع منها وما ينقص، "
+            "وما جرى عليه."
+        ),
+        who=_("مدير المركز يرسل ويسجّل القرار، وموظف التسجيل يرفق ويهيّئ، وبقية الأدوار تقرأ."),
+        after=_("باعتماد الوزارة تُفتح الدفعة للتسجيل."),
+        links=(
+            (Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+        ),
+        stops=_(
+            "قبول الإرسال يأتي محسوباً من الخدمة لا من خلوّ قائمة النقص، ولا تستنتج الصفحة "
+            "نقصاً من عندها. وسبب الرفض نصّ الوزارة كما ورد (BR-016)."
+        ),
+    ),
+    "mohe-submit": Guide(
+        what=_("فتح ملف وزاري لدفعة قائمة: يُحفظ مسودةً باسم المركز."),
+        who=_("مدير المركز وموظف التسجيل."),
+        after=_("المرفقان الإلزاميان والإرسال من صفحة الملف بعد الحفظ."),
+        links=((Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),),
+        stops=_(
+            "الدفعات المعروضة هي القابلة للتقديم وحدها، وإن لم تكن هناك دفعة فلا نموذج. "
+            "والحقول السبعة نصّ النموذج الوزاري لا ملاحظات داخلية، وحفظ المسودة لا يعني "
+            "أن الملف صار جاهزاً للإرسال (BR-014 · BR-016)."
+        ),
+    ),
     "clearance": Guide(
         what=_("إخلاء طرف المشارك، على ثلاث خطوات لا يُعاد ترتيبها."),
         who=_("المركز في الخطوتين الأولى والثالثة، والمالية في الثانية."),

@@ -3511,7 +3511,8 @@ def test_every_link_on_the_cohorts_register_points_at_a_real_route(
 ) -> None:
     """
     There is no cohort detail route, so no row is clickable and no row links
-    anywhere. The only link the page draws is the one that clears the filter.
+    anywhere. The page draws the link that clears the filter, and the two
+    next-step links the guided-help block offers this reader — nothing else.
     """
     import re
 
@@ -3524,7 +3525,11 @@ def test_every_link_on_the_cohorts_register_points_at_a_real_route(
     page = _cohorts(client, "?q=CO-UIC")
 
     hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
-    assert hrefs == {reverse("operations:cohorts")}, hrefs
+    assert hrefs == {
+        reverse("operations:cohorts"),
+        reverse("operations:mohe"),
+        reverse("catalog:pricelists"),
+    }, hrefs
     for href in hrefs:
         assert client.get(href).status_code == 200
 
@@ -3899,7 +3904,10 @@ def test_the_ministry_register_leaks_none_of_its_own_commentary(
 def test_every_link_on_the_ministry_register_reaches_a_real_route(
     client: Client, three_files: object
 ) -> None:
-    """Three kinds of link, and every one of them opens for the reader drawing it."""
+    """
+    Three kinds of link, and every one of them opens for the reader drawing it
+    — plus the next step the guided-help block offers, filtered the same way.
+    """
     import re
 
     from apps.operations.models import MoheSubmission
@@ -3908,7 +3916,11 @@ def test_every_link_on_the_ministry_register_reaches_a_real_route(
     page = _mohe(client, "?q=CO-UIC")
 
     hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
-    expected = {reverse("operations:mohe"), reverse("operations:mohe-submit")} | {
+    expected = {
+        reverse("operations:mohe"),
+        reverse("operations:mohe-submit"),
+        reverse("operations:cohorts"),
+    } | {
         reverse("operations:mohe-detail", args=[pk])
         for pk in MoheSubmission.objects.values_list("pk", flat=True)
     }
@@ -4844,5 +4856,171 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
     for alert in ("note info", "note warn", "note danger", "note ok"):
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The guided-help slice — the six screens the polish pass left untaught
+# ---------------------------------------------------------------------------
+# Each of the six polish slices closed with the same note: the screen was
+# correct and silent. It carried no entry in the guidance registry and drew no
+# ``{% guided_help %}``, while the screens around it did — so a reader arriving
+# at the dated price list or the ministry file learned nothing about what the
+# page decides and, more to the point, what it does not.
+#
+# ``tests/test_demo_readiness.py`` walks the four arg-less routes with the rest
+# of the taught set. The two detail pages need an object to open, so they are
+# proved here, beside the fixtures that build one.
+GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
+    ("pricelists", PRICELISTS_TEMPLATE),
+    ("pricelist-detail", PRICELIST_DETAIL_TEMPLATE),
+    ("cohorts", COHORTS_TEMPLATE),
+    ("mohe", MOHE_TEMPLATE),
+    ("mohe-detail", MOHE_DETAIL_TEMPLATE),
+    ("mohe-submit", MOHE_SUBMIT_TEMPLATE),
+)
+
+#: A verdict none of these six screens computes. The guidance may say the
+#: question is answered elsewhere; it may not answer it.
+VERDICTS_THE_GUIDANCE_MAY_NOT_PRONOUNCE = (
+    "سارية اليوم",
+    "السارية اليوم",
+    "تلقائي",
+    "تلقائياً",
+    "BR-006",
+    "قسمة",
+    "الإيراد",
+)
+
+
+@pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
+def test_each_polished_screen_now_has_guidance_of_its_own(key: str, template: Path) -> None:
+    from apps.people.guidance import GUIDES
+
+    assert key in GUIDES, f"{template} renders «{key}», which the registry does not define"
+    guide = GUIDES[key]
+    assert str(guide.what).strip()
+    assert str(guide.who).strip()
+
+
+def test_no_screen_is_taught_twice() -> None:
+    """
+    A repeated key in the literal loses silently — the second wins and the
+    first screen quietly inherits the wrong help. Counting the written keys
+    against the built registry is the only place that shows.
+    """
+    import re
+
+    source = Path("apps/people/guidance.py").read_text(encoding="utf-8")
+    body = source.split("GUIDES: dict[str, Guide] = {", 1)[1].split("\ndef guide_for", 1)[0]
+    written = re.findall(r'^    "([a-z-]+)": Guide\(', body, flags=re.MULTILINE)
+
+    from apps.people.guidance import GUIDES
+
+    assert len(written) == len(set(written)), "a guidance key is written twice"
+    assert set(written) == set(GUIDES)
+
+
+@pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
+def test_the_six_templates_carry_the_tag_where_every_taught_screen_does(
+    key: str, template: Path
+) -> None:
+    """
+    Directly under ``.page-head`` and nowhere else: the block explains the
+    screen before the screen starts, the way it does on the twenty-six that
+    had it already.
+    """
+    source = template.read_text(encoding="utf-8")
+
+    assert "guided_help" in source.split("\n", 2)[1], f"{template} does not load the tag"
+    tag = '{% guided_help "' + key + '" %}'
+    assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
+    assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+
+
+def test_the_price_list_detail_page_teaches_before_it_lists(
+    client: Client, a_catalogue: None
+) -> None:
+    from apps.catalog.models import PriceList
+    from apps.people.guidance import GUIDES
+
+    code = PriceList.objects.values_list("code", flat=True).first()
+    assert code, "no price list was seeded, so this proves nothing"
+    client.force_login(_user(Role.CENTER_MANAGER, "gh.pl.detail"))
+
+    page = (
+        client.get(reverse("catalog:pricelist-detail", args=[code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    assert str(GUIDES["pricelist-detail"].what) in page
+    assert str(GUIDES["pricelist-detail"].stops) in page
+    assert page.index(str(GUIDES["pricelist-detail"].what)) < page.index('class="card2"')
+
+
+def test_the_ministry_file_page_teaches_before_it_lists(
+    client: Client, mohe_files: dict[str, object]
+) -> None:
+    from apps.people.guidance import GUIDES
+
+    client.force_login(_user(Role.CENTER_MANAGER, "gh.mohe.detail"))
+
+    page = _file_page(client, mohe_files["ready"])
+
+    assert str(GUIDES["mohe-detail"].what) in page
+    assert str(GUIDES["mohe-detail"].stops) in page
+    assert page.index(str(GUIDES["mohe-detail"].what)) < page.index('class="card2"')
+
+
+@pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
+def test_the_new_guidance_carries_no_commercial_term(key: str, template: Path) -> None:
+    """
+    The same rule the six screens themselves were held to: a share agreed with
+    a third party has no place on a price list, an operations register or a
+    ministry file — and none in the sentence printed above them either.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES[key]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+    for term in COMMERCIAL_TERMS_OFF_THE_CATALOGUE:
+        assert term not in text, f"the «{key}» guidance says «{term}»"
+
+
+@pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
+def test_the_new_guidance_pronounces_no_verdict_its_screen_does_not_compute(
+    key: str, template: Path
+) -> None:
+    """
+    The teaching must not out-claim the page. Which list applies is settled by
+    the pricing service on the event date, whether a file may be sent is the
+    ministry service's answer, and the ministry's decision is recorded as it
+    arrived — so the help says where each is decided, never what it decided.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES[key]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+    for verdict in VERDICTS_THE_GUIDANCE_MAY_NOT_PRONOUNCE:
+        assert verdict not in text, f"the «{key}» guidance claims «{verdict}»"
+
+
+@pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
+def test_the_six_templates_kept_their_structural_guarantees(key: str, template: Path) -> None:
+    """
+    The block was inserted and nothing else moved: no style attribute, no
+    script, no external address, no unbalanced comment and no `.sr-only` —
+    the guarantees each of the six slices closed on.
+    """
+    source = template.read_text(encoding="utf-8")
+
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "sr-only" not in markup
+    assert "{% comment %}" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

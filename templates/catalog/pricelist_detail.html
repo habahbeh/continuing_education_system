@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 
 {% block title %}{{ price_list.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -43,6 +43,8 @@
     <a class="btn2 ghost" href="{% url 'catalog:pricelists' %}">{% translate "عودة إلى قوائم الأسعار المؤرّخة" %}</a>
   </div>
 </div>
+
+{% guided_help "pricelist-detail" %}
 
 <div class="card2">
   <div class="card2-head">

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 
 {% block title %}{% translate "قوائم الأسعار المؤرّخة" %} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -35,6 +35,8 @@
     <span class="chip info dot">{% translate "قراءة فقط" %}</span>
   </div>
 </div>
+
+{% guided_help "pricelists" %}
 
 <div class="card2">
   <div class="card2-head">

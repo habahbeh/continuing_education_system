@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -32,6 +32,8 @@
     <p class="sub">{% translate "الدفعات المُشغّلة على برامج الكتالوج: فترتها ومقاعدها وحالتها ومَن يشغّلها. الدفعة تُفتح مخطَّطة، ولا يُسجَّل عليها قبل اعتماد الوزارة (BR-013). والسعر يُقرأ من قائمة الأسعار السارية لا من هذه الشاشة." %}</p>
   </div>
 </div>
+
+{% guided_help "cohorts" %}
 
 <form method="get" class="filterbar" role="search">
   <div class="fld">
