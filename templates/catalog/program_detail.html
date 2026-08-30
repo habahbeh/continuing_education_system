@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
 
 {% block title %}{{ program.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -33,6 +33,8 @@
     <a class="btn2 ghost" href="{{ list_url }}">{% blocktranslate %}عودة إلى {{ list_label }}{% endblocktranslate %}</a>
   </div>
 </div>
+
+{% guided_help "program-detail" %}
 
 <div class="card2">
   <div class="card2-head">

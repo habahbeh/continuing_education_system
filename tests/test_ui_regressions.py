@@ -4863,16 +4863,18 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
 # ---------------------------------------------------------------------------
 # The guided-help slice — the six screens the polish pass left untaught
 # ---------------------------------------------------------------------------
-# Each of the six polish slices closed with the same note: the screen was
-# correct and silent. It carried no entry in the guidance registry and drew no
+# Each polish slice closed with the same note: the screen was correct and
+# silent. It carried no entry in the guidance registry and drew no
 # ``{% guided_help %}``, while the screens around it did — so a reader arriving
 # at the dated price list or the ministry file learned nothing about what the
 # page decides and, more to the point, what it does not.
 #
-# ``tests/test_demo_readiness.py`` walks the four arg-less routes with the rest
-# of the taught set. The two detail pages need an object to open, so they are
-# proved here, beside the fixtures that build one.
+# The seven close the §3.3 chain end to end: programme → price list → cohort →
+# ministry file. ``tests/test_demo_readiness.py`` walks the four arg-less
+# routes with the rest of the taught set; the three detail pages need an object
+# to open, so they are proved here, beside the fixtures that build one.
 GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
+    ("program-detail", PROGRAM_DETAIL_TEMPLATE),
     ("pricelists", PRICELISTS_TEMPLATE),
     ("pricelist-detail", PRICELIST_DETAIL_TEMPLATE),
     ("cohorts", COHORTS_TEMPLATE),
@@ -4891,6 +4893,11 @@ VERDICTS_THE_GUIDANCE_MAY_NOT_PRONOUNCE = (
     "BR-006",
     "قسمة",
     "الإيراد",
+    # The programme card holds one side of BR-006 and the page is already
+    # forbidden its result; the sentence above the page may not supply it
+    # either. «مطابق» covers «مطابقة» as a substring.
+    "مطابق",
+    "مجموع أسعار المواد",
 )
 
 
@@ -4923,7 +4930,7 @@ def test_no_screen_is_taught_twice() -> None:
 
 
 @pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
-def test_the_six_templates_carry_the_tag_where_every_taught_screen_does(
+def test_the_slice_templates_carry_the_tag_where_every_taught_screen_does(
     key: str, template: Path
 ) -> None:
     """
@@ -4937,6 +4944,73 @@ def test_the_six_templates_carry_the_tag_where_every_taught_screen_does(
     tag = '{% guided_help "' + key + '" %}'
     assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
     assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+
+
+@pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
+def test_the_programme_card_teaches_whichever_list_it_was_opened_from(
+    client: Client, a_catalogue: None, program_type: str
+) -> None:
+    """
+    One template serves the diploma, the short course and the online course, so
+    the help is one entry and has to read correctly for all three. It teaches
+    above the first card, and it points on down the chain — the price list, the
+    cohort and the ministry file — never sideways at the other two catalogues,
+    which is the guarantee ``test_the_card_offers_the_way_back_to_its_own_list``
+    holds.
+    """
+    from apps.catalog.views import LIST_ROUTE_BY_SCREEN
+    from apps.people.guidance import GUIDES
+
+    code = _a_program(program_type)
+    client.force_login(_user(Role.CENTER_MANAGER, f"gh.pd.{program_type}".lower()))
+
+    page = (
+        client.get(reverse("catalog:program-detail", args=[code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    guide = GUIDES["program-detail"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for _screen, route, _label in guide.links:
+        assert f'href="{reverse(route)}"' in page
+        assert client.get(reverse(route)).status_code == 200
+    for route in LIST_ROUTE_BY_SCREEN.values():
+        assert route not in {r for _s, r, _l in guide.links}
+
+
+@pytest.mark.parametrize(
+    ("role", "offered"),
+    [
+        (Role.CENTER_MANAGER, ("catalog:pricelists", "operations:cohorts", "operations:mohe")),
+        (
+            Role.REGISTRATION_OFFICER,
+            ("catalog:pricelists", "operations:cohorts", "operations:mohe"),
+        ),
+        # §3.3/14 leaves the finance officer's ministry cell empty, so the help
+        # offers them the two they may open and not the one they may not.
+        (Role.FINANCE_OFFICER, ("catalog:pricelists", "operations:cohorts")),
+    ],
+)
+def test_the_programme_card_offers_only_the_next_steps_the_reader_may_open(
+    client: Client, a_catalogue: None, role: str, offered: tuple[str, ...]
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.guidance import GUIDES
+
+    code = _a_program("DIPLOMA")
+    client.force_login(_user(role, f"gh.pd.links.{role}".lower().replace("_", ".")))
+
+    page = (
+        client.get(reverse("catalog:program-detail", args=[code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+
+    for _screen, route, _label in GUIDES["program-detail"].links:
+        assert (f'href="{reverse(route)}"' in page) is (route in offered), f"{role} · {route}"
 
 
 def test_the_price_list_detail_page_teaches_before_it_lists(
@@ -5008,11 +5082,11 @@ def test_the_new_guidance_pronounces_no_verdict_its_screen_does_not_compute(
 
 
 @pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
-def test_the_six_templates_kept_their_structural_guarantees(key: str, template: Path) -> None:
+def test_the_slice_templates_kept_their_structural_guarantees(key: str, template: Path) -> None:
     """
     The block was inserted and nothing else moved: no style attribute, no
     script, no external address, no unbalanced comment and no `.sr-only` —
-    the guarantees each of the six slices closed on.
+    the guarantees each of these slices closed on.
     """
     source = template.read_text(encoding="utf-8")
 

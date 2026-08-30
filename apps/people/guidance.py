@@ -178,11 +178,31 @@ GUIDES: dict[str, Guide] = {
         status=_READ_ONLY,
     ),
     # --- §3.3 الأسعار والتشغيل واعتماد الوزارة ------------------------------
-    # The dated price list, the cohort that opens on it and the ministry file
-    # that unlocks enrolment on it: one chain, three registers. Each guide says
+    # The programme card, the dated price list, the cohort that opens on it and
+    # the ministry file that unlocks enrolment on it: one chain, and each guide
+    # hands the reader on to the next link of it. Each guide says
     # what its own screen decides and, more usefully, what it does not: which
     # list applies, whether a blank deposit is a zero, and whether a file may
     # be sent are all answered elsewhere, and saying so is the whole teaching.
+    "program-detail": Guide(
+        what=_("بطاقة برنامج واحد في الكتالوج: بياناته الأساسية، ومواده حين تكون له مواد."),
+        who=_("مدير المركز والموظف المالي وموظف التسجيل، قراءةً."),
+        after=_(
+            "التسعير في قوائم الأسعار المؤرّخة، والتشغيل يبدأ بدفعة لا يُسجَّل عليها "
+            "قبل اعتماد الوزارة (BR-013)."
+        ),
+        links=(
+            (Screen.PRICELISTS, "catalog:pricelists", _("قوائم الأسعار المؤرّخة")),
+            (Screen.COHORTS, "operations:cohorts", _("الدفعات المُشغّلة")),
+            (Screen.MOHE, "operations:mohe", _("اعتماد الوزارة")),
+        ),
+        stops=_(
+            "لا تعديل من هذه الشاشة ولا فتح دفعة ولا ملف وزاري. والسعر الذي يُطبَّق تحسمه "
+            "خدمة التسعير من قائمة الأسعار بتاريخ الواقعة (BR-012)، والمواد المعروضة لا "
+            "تُصدر بذاتها حكماً مالياً."
+        ),
+        status=_READ_ONLY,
+    ),
     "pricelists": Guide(
         what=_("سجل قوائم الأسعار المؤرّخة: أي قائمة، لأي فصل، صدرت متى وتسري متى."),
         who=_("مدير المركز يعرّفها، وبقية الأدوار تقرأ."),
