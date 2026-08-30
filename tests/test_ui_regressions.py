@@ -4987,9 +4987,15 @@ def test_the_daily_closing_teaches_the_separation_it_enforces(
     assert str(guide.who) in page
     assert str(guide.stops) in page
     assert "BR-028" in str(guide.stops)
-    # …above everything the screen itself says, including its own BR-027 note.
-    assert page.index(str(guide.what)) < page.index('class="note info"')
+    # …above everything the screen itself says.
     assert page.index(str(guide.what)) < page.index('class="card2"')
+    # BR-027 is still taught, and no longer as a blue alert: it explains the
+    # columns from a `.hint` under the table they describe (polish rules §6.5),
+    # so the two rules no longer stack as two framed boxes above the page.
+    assert "BR-027" in page
+    assert "note info" not in page
+    assert '<p class="hint">' in page, "BR-027 no longer sits in a neutral hint"
+    assert page.index("BR-027") > page.index('class="tbl"'), "the rule left its columns behind"
 
 
 @pytest.mark.parametrize(("role", "_may_approve"), CLOSING_READERS)
@@ -5012,6 +5018,141 @@ def test_the_daily_closing_offers_only_a_next_step_the_reader_may_open(
         assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
         if may_open:
             assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_daily_closing_head_reads_like_every_polished_screen(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    It was an ``<h1>`` alone — no section, no sentence saying what the rows
+    are. The head now carries the three the other registers carry, off the
+    view's own ``title`` and no new context.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "cl.head"))
+
+    page = client.get(reverse("cashbox:closing")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    # The count describes the rows drawn, not the register behind them.
+    assert 'class="count"' in page
+
+
+def test_the_daily_closing_table_names_its_action_column(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Nine columns and the ninth had no name at all. It is named by
+    ``aria-label`` rather than `.sr-only`: the latter is ``position:absolute``
+    with no positioned ancestor, so in RTL it lands off the left edge and drags
+    the page sideways — the defect three earlier slices were fixed for.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "cl.head.col"))
+
+    page = client.get(reverse("cashbox:closing")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    # Nine headers for nine cells, still inside the wrapper that scrolls.
+    import re
+
+    assert len(re.findall(r"<th[\s>]", page)) == 9
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_daily_closing_empty_state_says_what_a_closing_is(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «لا إقفالات» and nothing else told a reader on a quiet morning neither what
+    the screen is for nor how a row ever appears. The empty state now carries a
+    body like every other register — and still offers no action, because the
+    reader may not hold the one that opens a closing.
+    """
+    from apps.cashbox.models import DailyClosing
+
+    assert not DailyClosing.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "cl.empty"))
+
+    page = client.get(reverse("cashbox:closing")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "BR-026" in page
+    assert "empty-act" not in page, "the empty state offers an action that has no route"
+
+
+@pytest.mark.parametrize(
+    ("role", "may_create", "may_approve"),
+    [
+        (Role.CENTER_MANAGER, False, True),
+        (Role.FINANCE_OFFICER, True, True),
+        (Role.CASHIER, True, False),
+        (Role.AUDIT_ACCOUNT, False, False),
+    ],
+)
+def test_the_daily_closing_polish_moved_no_control(
+    client: Client, seeded_settings: None, role: str, may_create: bool, may_approve: bool
+) -> None:
+    """
+    The polish is presentation. Both forms are still drawn off the same two
+    flags the view computes from §3.4/18, and the audit account — who holds
+    neither — still gets a page with no form, no button and no CSRF token on
+    it at all.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "closing")) is may_create
+    assert (Action.APPROVE in allowed_actions(role, "closing")) is may_approve
+    client.force_login(_user(role, f"cl.ctl.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("cashbox:closing"))
+    assert response.status_code == 200
+    assert response.context["can_create"] is may_create
+    assert response.context["can_approve"] is may_approve
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    # «فتح إقفال» is the only form an empty register can draw; the approve form
+    # lives on a row and there are none.
+    assert ('name="action" value="open"' in page) is may_create
+    if not may_create:
+        assert "<form" not in page
+        assert "<button" not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_the_daily_closing_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = CLOSING_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the daily closing uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert "sr-only" not in markup
+    # A rule is explained, not alerted (polish rules §6.5).
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
 
 
 def test_the_daily_closing_guidance_invents_no_action_the_screen_lacks() -> None:

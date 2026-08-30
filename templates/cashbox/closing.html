@@ -1,49 +1,94 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  شاشة الإقفال اليومي، وهي الوحيدة على المسار اليومي التي لم تمرّ بجولة تحسين.
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا رايةٌ أُعيد حسابها، والأفعال هي نفسها
+  بنفس حرّاسها — «فتح إقفال» على CREATE و«اعتماد» على APPROVE، كلاهما من العرض.
+
+  BR-027 خرج من `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً (قواعد
+  التحسين §6.5). النصّ نفسه لم يتغيّر حرفاً، وانتقل إلى `.hint` أسفل الجدول
+  حيث الأعمدة التي يشرحها — فلا تتراكم كتلتان مؤطَّرتان فوق الصفحة.
+
+  وBR-028 ليس هنا: كتلة الإرشاد أعلاه تقوله مرّة واحدة، وقاعدةٌ تُقال مرّتين
+  على شاشة واحدة تُقرأ مرّةً واحدة على أي حال.
+
+  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
+
+  العدّ يُحصى فوق الصفوف المرسومة لا فوق السجل كلّه، فالشريحة تصف ما على الشاشة.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "يوم صندوقٍ واحد في كل صف: ما تقوله السندات الصادرة، وما عُدّ فعلاً، والفرق بينهما وحالته." %}</p>
+  </div>
 </div>
 
 {% guided_help "cashbox-closing" %}
 
-<div class="note info">
-  {% translate "الإجمالي النظامي محتسب من السندات الصادرة — لا يُدخَل يدوياً. والفرق يُغلق بتسوية مكتوبة لا صامتاً (BR-027)." %}
-</div>
-
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الإقفالات" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=closings|length %}إقفال واحد{% plural %}{{ n }} إقفالات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "الصندوق" %}</th>
-        <th>{% translate "النظامي" %}</th><th>{% translate "المعدود" %}</th><th>{% translate "الفرق" %}</th>
-        <th>{% translate "السندات" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "التاريخ" %}</th>
+          <th>{% translate "الصندوق" %}</th>
+          <th>{% translate "النظامي" %}</th>
+          <th>{% translate "المعدود" %}</th>
+          <th>{% translate "الفرق" %}</th>
+          <th>{% translate "السندات" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in closings %}
           <tr>
-            <td dir="ltr">{{ c.code }}</td>
-            <td class="num">{{ c.closing_date }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+            <td class="num"><span dir="ltr">{{ c.closing_date|date:"Y/m/d" }}</span></td>
             <td>{{ c.cashier }}</td>
             <td class="num">{{ c.system_total }}</td>
             <td class="num">{{ c.counted_total }}</td>
             <td class="num">{{ c.variance }}</td>
             <td class="num">{{ c.receipt_count }}</td>
-            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
-            <td>
+            <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
+            <td class="acts">
               {% if can_approve and c.status != "RECONCILED" %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="action" value="reconcile">
                   <input type="hidden" name="code" value="{{ c.code }}">
-                  <input name="variance_resolution_ar" placeholder="{% translate 'تسوية الفرق إن وُجد…' %}">
+                  <input name="variance_resolution_ar" aria-label="{% translate 'تسوية الفرق' %}" placeholder="{% translate 'تسوية الفرق إن وُجد…' %}">
                   <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
                 </form>
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty"><span class="empty-title">{% translate "لا إقفالات" %}</span></td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا إقفالات" %}</span>
+            <span class="empty-body">{% translate "الإقفال يُفتح ليوم أمين صندوق: يُحتسب النظامي من سنداته الصادرة، ويُدخَل المعدود، فيظهر الصف بفرقه وحالته. ولا يُعدَّل إقفال بعد اعتماده (BR-026)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">
+      {% translate "الإجمالي النظامي محتسب من السندات الصادرة — لا يُدخَل يدوياً. والفرق يُغلق بتسوية مكتوبة لا صامتاً (BR-027)." %}
+    </p>
   </div>
 </div>
 
@@ -54,7 +99,9 @@
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="open">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "فتح الإقفال" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "فتح الإقفال" %}</button>
+        </div>
       </form>
     </div>
   </div>
