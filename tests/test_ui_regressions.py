@@ -4870,12 +4870,13 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
 # page decides and, more to the point, what it does not.
 #
 # Seven of them close the §3.3 chain end to end: programme → price list →
-# cohort → ministry file. The eighth is the daily closing, which sits on the
-# §3.4 cash path between two screens that were taught already.
+# cohort → ministry file. The last two are on the §3.4 cash path: the daily
+# closing, and the receipt a collection redirects to.
 # ``tests/test_demo_readiness.py`` walks the arg-less routes with the rest of
 # the taught set; the three detail pages need an object to open, so they are
 # proved here, beside the fixtures that build one.
 CLOSING_TEMPLATE = Path("templates/cashbox/closing.html")
+RECEIPT_DETAIL_TEMPLATE = Path("templates/cashbox/receipt_detail.html")
 
 GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("program-detail", PROGRAM_DETAIL_TEMPLATE),
@@ -4886,6 +4887,7 @@ GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("mohe-detail", MOHE_DETAIL_TEMPLATE),
     ("mohe-submit", MOHE_SUBMIT_TEMPLATE),
     ("cashbox-closing", CLOSING_TEMPLATE),
+    ("receipt-detail", RECEIPT_DETAIL_TEMPLATE),
 )
 
 #: A verdict none of these six screens computes. The guidance may say the
@@ -4949,6 +4951,273 @@ def test_the_slice_templates_carry_the_tag_where_every_taught_screen_does(
     tag = '{% guided_help "' + key + '" %}'
     assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
     assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+
+
+#: §3.4/16 «V P · V E P · V A X P · V P · V C P · V P» — every role may open a
+#: receipt, and (role, may request a void, may approve one). Δ-06 puts the two
+#: in different hands on purpose, and no role holds both.
+RECEIPT_READERS = (
+    (Role.CENTER_MANAGER, False, False),
+    (Role.REGISTRATION_OFFICER, False, False),
+    (Role.FINANCE_OFFICER, False, True),
+    (Role.FINANCE_MANAGER, False, False),
+    (Role.CASHIER, True, False),
+    (Role.AUDIT_ACCOUNT, False, False),
+)
+
+
+@pytest.fixture
+def a_receipt(seeded_settings: None, active_semester: object, participant_data: dict) -> object:
+    """
+    One issued receipt with its stored allocations, built through the services.
+
+    Through ``take_payment`` rather than the ORM because the allocations this
+    page prints are BR-022's stored split, and a hand-built row could hold a
+    breakdown the algorithm never produces.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.core.management import call_command
+
+    from apps.billing.services import charge_service
+    from apps.cashbox.models import PaymentMethod
+    from apps.cashbox.services import payment_service
+    from apps.catalog.models import PriceList, PriceListStatus, Program
+    from apps.catalog.services import pricing_service
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.services import participant_service
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    actor = _user(Role.CENTER_MANAGER, "rc.fixture.actor")
+    program = Program.objects.get(code="SC-NET")
+    cohort = Cohort.objects.create(
+        code="CO-RC-1",
+        program=program,
+        semester=active_semester,
+        name_ar=f"دفعة {program.name_ar}",
+        starts_on=date(2026, 9, 20),
+        ends_on=date(2026, 12, 20),
+        capacity=25,
+    )
+    participant = participant_service.create_participant(actor=actor, data=participant_data)
+    quote = pricing_service.resolve_price(
+        program=program, participant_category="UNIVERSITY", as_of=date(2026, 9, 20)
+    )
+    enrollment = Enrollment.objects.create(
+        code="EN-RC-1",
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=date(2026, 9, 20),
+        price_list=PriceList.objects.get(status=PriceListStatus.APPROVED),
+    )
+    charge_service.charge_lines_from_quote(
+        actor=actor, enrollment=enrollment, quote=quote, charged_on=date(2026, 9, 20)
+    )
+    method, _created = PaymentMethod.objects.get_or_create(
+        code="CASH", defaults={"name_ar": "نقداً"}
+    )
+    return payment_service.take_payment(
+        actor=_user(Role.CASHIER, "rc.fixture.cashier"),
+        enrollment=enrollment,
+        amount=Decimal("50.000"),
+        payment_method=method,
+        received_on=date(2026, 9, 20),
+    )
+
+
+def _receipt_page(client: Client, receipt: object) -> str:
+    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    url = reverse("cashbox:receipt-detail", args=[receipt.internal_receipt_number])  # type: ignore[attr-defined]
+    response = client.get(url)
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "may_request", "may_approve"), RECEIPT_READERS)
+def test_the_receipt_teaches_the_void_split_it_enforces(
+    client: Client, a_receipt: object, role: str, may_request: bool, may_approve: bool
+) -> None:
+    """
+    Every role may read a receipt and no role may do both halves of a void.
+    The block says the split to all six — including the four who do neither
+    and would otherwise never learn that a receipt is cancelled, not erased.
+    """
+    from apps.people.guidance import GUIDES
+
+    client.force_login(_user(role, f"gh.rc.{role}".lower().replace("_", ".")))
+
+    page = _receipt_page(client, a_receipt)
+    guide = GUIDES["receipt-detail"]
+
+    assert str(guide.what) in page
+    assert str(guide.who) in page
+    assert str(guide.stops) in page
+    assert "BR-025" in str(guide.stops)
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+
+
+def test_the_receipt_head_reads_like_every_polished_screen(
+    client: Client, a_receipt: object
+) -> None:
+    """It was an ``<h1>`` alone; it now says its section and what a row is."""
+    client.force_login(_user(Role.FINANCE_OFFICER, "rc.head"))
+
+    page = _receipt_page(client, a_receipt)
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert a_receipt.internal_receipt_number in page  # type: ignore[attr-defined]
+
+
+def test_a_recorded_void_request_is_not_an_alert(client: Client, a_receipt: object) -> None:
+    """
+    A request that was recorded, with its reason, is a fact — the same shape
+    the ministry rejection was moved out of `.note danger` for. Amber is for
+    the moment something is refused (polish rules §6.5), and nothing is being
+    refused by a request that went through.
+    """
+    from apps.cashbox.services import payment_service
+
+    cashier = _user(Role.CASHIER, "rc.void.asks")
+    payment_service.request_void(
+        actor=cashier, receipt=a_receipt, reason_ar="خطأ في المبلغ المستوفى"
+    )
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rc.void.reads"))
+    page = _receipt_page(client, a_receipt)
+
+    # Still taught, still attributed, and still carrying its reason…
+    assert "خطأ في المبلغ المستوفى" in page
+    assert "BR-025" in page
+    assert 'class="hint boxed"' in page
+    # …but no longer in amber, and no longer floating outside a card.
+    assert "note warn" not in page
+    assert "note danger" not in page
+
+
+def test_the_allocations_empty_state_says_what_an_allocation_is(
+    client: Client, a_receipt: object
+) -> None:
+    """
+    «لا تخصيصات» alone told a reader nothing. The body says what the stored
+    split is — and it offers no action, because there is none to offer.
+    """
+    from apps.cashbox.models import PaymentAllocation
+
+    PaymentAllocation.objects.all().delete()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rc.alloc.empty"))
+
+    page = _receipt_page(client, a_receipt)
+
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "BR-022" in page
+    assert "empty-act" not in page
+
+
+@pytest.mark.parametrize(("role", "may_request", "may_approve"), RECEIPT_READERS)
+def test_the_receipt_polish_moved_no_control(
+    client: Client, a_receipt: object, role: str, may_request: bool, may_approve: bool
+) -> None:
+    """
+    Δ-06 puts the asking and the deciding in different hands, and the polish
+    did not move either. The four roles that hold neither get a page with no
+    form, no button and no CSRF token on it at all.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "payments")) is may_request
+    assert (Action.VOID in allowed_actions(role, "payments")) is may_approve
+    assert not (may_request and may_approve), "one role would hold both halves of a void"
+
+    client.force_login(_user(role, f"rc.ctl.{role}".lower().replace("_", ".")))
+    url = reverse("cashbox:receipt-detail", args=[a_receipt.internal_receipt_number])  # type: ignore[attr-defined]
+    response = client.get(url)
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["can_request_void"] is may_request
+    assert response.context["can_approve_void"] is may_approve
+    # No void exists yet, so only the request form can be drawn at all.
+    assert ('name="action" value="request"' in page) is may_request
+    assert 'name="action" value="approve"' not in page
+    if not may_request:
+        assert "<form" not in page
+        assert "<button" not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_the_approve_control_appears_only_for_the_role_that_decides(
+    client: Client, a_receipt: object
+) -> None:
+    """The other half of Δ-06: the button exists, and for one role only."""
+    from apps.cashbox.services import payment_service
+
+    payment_service.request_void(
+        actor=_user(Role.CASHIER, "rc.appr.asks"), receipt=a_receipt, reason_ar="سبب مسجَّل"
+    )
+
+    for role, _may_request, may_approve in RECEIPT_READERS:
+        client.force_login(_user(role, f"rc.appr.{role}".lower().replace("_", ".")))
+        page = _receipt_page(client, a_receipt)
+        assert ('name="action" value="approve"' in page) is may_approve, role
+        client.logout()
+
+
+def test_the_receipt_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen reads a receipt and carries the two halves of a void. The help
+    may not imply the receipt is edited or deleted, nor that a price, a
+    participant or an allocation is recalculated from here.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["receipt-detail"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "لا يُعدَّل سند صادر ولا يُحذف" in text
+    assert "BR-025" in text
+    # The register's guide says the same rule; two screens may not say it two
+    # ways, so the shared clause is quoted from it word for word.
+    assert "الإلغاء يكتب قيداً عكسياً ويُبقي الأصل" in str(GUIDES["payments"].stops)
+    assert "الإلغاء يكتب قيداً عكسياً ويُبقي الأصل" in text
+    # …and no rule that belongs on a different screen.
+    for elsewhere in ("BR-020", "BR-028", "أقل دفعة أولى"):
+        assert elsewhere not in text, f"the receipt guidance repeats «{elsewhere}»"
+
+
+def test_the_receipt_detail_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = RECEIPT_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the receipt page uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="dl"' in markup
+    assert 'class="tbl-wrap"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a fact is still being alerted in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
 
 
 #: §3.4/18 «V A P · — · V C E A P · — · V C · V P» — everyone who may open the

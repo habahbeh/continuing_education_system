@@ -1,56 +1,140 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} {{ receipt.internal_receipt_number }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  صفحة السند الواحد، وعليها فعلان حقيقيان: طلب الإلغاء واعتماده. كلٌّ منهما
+  نموذج POST خلفه خدمة، وحارسه خليةٌ في §3.4/16 يفحصها العرض قبل أن يعمل —
+  `can_request_void` على CREATE و`can_approve_void` على VOID، وهما لدورين
+  مختلفين عمداً (Δ-06). فالرايات تُرسم كما جاءت ولا يُعاد حسابها هنا.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس، ولا زرّ أُضيف ولا رُفع.
+
+  طلب الإلغاء خرج من `.note warn`: الأصفر تنبيه، وطلبٌ سُجِّل بسببه ليس تنبيهاً
+  (قواعد التحسين §6.5). النصّ نفسه، في `.hint boxed` داخل بطاقة تحمل عنوانها،
+  حيث الفعل الذي يخصّه.
+
+  ولا حكم يُخترع: «معتمَد» تُقرأ من `void_is_approved` كما هي، والسند الأصل
+  يبقى بقيمته ورقمه — الإلغاء يكتب تخصيصات عكسية ولا يمسح شيئاً (BR-025).
+
+  وزرّ الاعتماد صار داخل بطاقة بـ `.form-acts` كبقية أفعال المسار المالي، بعد
+  أن كان يقف عارياً تحت الكتلة الصفراء بلا عنوان يقول ما الذي يُعتمد.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ receipt.internal_receipt_number }}</span></h1>
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ receipt.internal_receipt_number }}</span></h1>
+    <p class="sub">{% translate "سند صادر بقيمته وتخصيصاته: ما استُوفي، وعلى أي بنود وُزّع. لا تعديل من هذه الشاشة." %}</p>
+  </div>
+  <div class="acts">
+    <span class="chip {{ receipt.status|status_tone }} dot">{{ receipt.status_display }}</span>
+  </div>
 </div>
-<div class="card2"><div class="card2-body">
-  <dl class="dl">
-    <dt>{% translate "المشارك" %}</dt><dd>{{ receipt.participant_name }} <span dir="ltr">({{ receipt.participant_number }})</span></dd>
-    <dt>{% translate "التاريخ" %}</dt><dd class="num">{{ receipt.received_on }}</dd>
-    <dt>{% translate "المبلغ" %}</dt><dd class="num">{{ receipt.amount }}</dd>
-    <dt>{% translate "الطريقة" %}</dt><dd>{{ receipt.payment_method }}</dd>
-    <dt>{% translate "الصندوق" %}</dt><dd>{{ receipt.cashier }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd><span class="chip {{ receipt.status|status_tone }}">{{ receipt.status_display }}</span></dd>
-    {% if receipt.external_receipt_ref %}
-      <dt>{% translate "سند الدائرة المالية" %}</dt><dd dir="ltr">{{ receipt.external_receipt_ref }}</dd>
-    {% endif %}
-  </dl>
-</div></div>
+
+{% guided_help "receipt-detail" %}
 
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "التخصيصات" %}</h2></div>
+  <div class="card2-head"><h2>{% translate "بيانات السند" %}</h2></div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "رقم السند" %}</dt>
+      <dd dir="ltr" translate="no"><strong class="num">{{ receipt.internal_receipt_number }}</strong></dd>
+      <dt>{% translate "المشارك" %}</dt>
+      <dd>{{ receipt.participant_name }} <small class="muted" dir="ltr" translate="no">{{ receipt.participant_number }}</small></dd>
+      <dt>{% translate "التاريخ" %}</dt>
+      <dd class="num"><span dir="ltr">{{ receipt.received_on|date:"Y/m/d" }}</span></dd>
+      <dt>{% translate "المبلغ" %}</dt>
+      <dd class="num">{{ receipt.amount }}</dd>
+      <dt>{% translate "الطريقة" %}</dt>
+      <dd>{{ receipt.payment_method }}</dd>
+      <dt>{% translate "الصندوق" %}</dt>
+      <dd>{{ receipt.cashier }}</dd>
+      <dt>{% translate "الحالة" %}</dt>
+      <dd><span class="chip {{ receipt.status|status_tone }} dot">{{ receipt.status_display }}</span></dd>
+      {% if receipt.external_receipt_ref %}
+        <dt>{% translate "سند الدائرة المالية" %}</dt>
+        <dd dir="ltr" translate="no">{{ receipt.external_receipt_ref }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "التخصيصات" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=receipt.allocations|length %}تخصيص واحد{% plural %}{{ n }} تخصيصات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "مقابل" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "التسجيل" %}</th>
+          <th>{% translate "مقابل" %}</th>
+          <th>{% translate "المبلغ" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for a in receipt.allocations %}
-          <tr><td dir="ltr">{{ a.enrollment_code }}</td><td>{{ a.against }}</td><td class="num">{{ a.amount }}</td></tr>
-        {% empty %}<tr><td colspan="3" class="empty"><span class="empty-title">{% translate "لا تخصيصات" %}</span></td></tr>{% endfor %}
+          <tr>
+            <td dir="ltr" translate="no"><strong class="num">{{ a.enrollment_code }}</strong></td>
+            <td>{{ a.against }}</td>
+            <td class="num">{{ a.amount }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="3" class="empty">
+            <span class="empty-title">{% translate "لا تخصيصات" %}</span>
+            <span class="empty-body">{% translate "التخصيص يُكتب مع السند ويُخزَّن كما هو: مجموع التخصيصات يساوي قيمة السند تماماً، ولا يُعاد اشتقاقه عند كل قراءة (BR-022)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
 {% if receipt.void_id %}
-  <div class="note warn">
-    {% translate "طلب إلغاء" %}: {{ receipt.void_reason_ar }}
-    {% if receipt.void_is_approved %} — <strong>{% translate "معتمَد" %}</strong>{% endif %}
+  <div class="card2">
+    <div class="card2-head">
+      <h2>{% translate "طلب إلغاء السند" %}</h2>
+      <div class="acts">
+        {% if receipt.void_is_approved %}<span class="chip ok dot">{% translate "معتمَد" %}</span>
+        {% else %}<span class="chip dot">{% translate "بانتظار الاعتماد" %}</span>{% endif %}
+      </div>
+    </div>
+    <div class="card2-body">
+      <p class="hint boxed">
+        <strong>{% translate "سبب الإلغاء كما سُجِّل" %}:</strong> {{ receipt.void_reason_ar }}
+      </p>
+      <p class="hint">
+        {% translate "الاعتماد يكتب تخصيصات عكسية تُلغي أثر السند، ويبقى السند نفسه بقيمته ورقمه في السجل (BR-025)." %}
+      </p>
+      {% if can_approve_void and not receipt.void_is_approved %}
+        <form method="post">{% csrf_token %}
+          <input type="hidden" name="action" value="approve">
+          <div class="form-acts">
+            <button class="btn2 primary" type="submit">{% translate "اعتماد الإلغاء" %}</button>
+          </div>
+        </form>
+      {% endif %}
+    </div>
   </div>
-  {% if can_approve_void and not receipt.void_is_approved %}
-    <form method="post">{% csrf_token %}
-      <input type="hidden" name="action" value="approve">
-      <button class="btn2 primary" type="submit">{% translate "اعتماد الإلغاء" %}</button>
-    </form>
-  {% endif %}
 {% elif can_request_void %}
   <div class="card2">
     <div class="card2-head"><h2>{% translate "طلب إلغاء السند" %}</h2></div>
     <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "السبب إلزامي، والطلب لا يُلغي شيئاً بنفسه: الاعتماد للموظف المالي وحده (BR-025 · Δ-06)." %}
+      </p>
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="request">
         {% include "partials/_form.html" %}
-        <button class="btn2" type="submit">{% translate "تسجيل الطلب" %}</button>
+        <div class="form-acts">
+          <button class="btn2" type="submit">{% translate "تسجيل الطلب" %}</button>
+        </div>
       </form>
     </div>
   </div>
