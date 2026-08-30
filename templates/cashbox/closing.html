@@ -1,9 +1,12 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
 {% block content %}
 <div class="page-head">
   <h1>{{ title }}</h1>
 </div>
+
+{% guided_help "cashbox-closing" %}
+
 <div class="note info">
   {% translate "الإجمالي النظامي محتسب من السندات الصادرة — لا يُدخَل يدوياً. والفرق يُغلق بتسوية مكتوبة لا صامتاً (BR-027)." %}
 </div>

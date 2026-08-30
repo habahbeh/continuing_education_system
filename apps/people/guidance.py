@@ -110,6 +110,20 @@ GUIDES: dict[str, Guide] = {
         links=((Screen.PAYMENTS, "cashbox:payments", _("الدفعات وسندات القبض")),),
         stops=_("للدبلوم حدّ أدنى للدفعة الأولى تُرفض دونه (BR-020)."),
     ),
+    "cashbox-closing": Guide(
+        what=_("إقفال يوم الصندوق: الإجمالي النظامي والمعدود والفرق بينهما، وحالة كل إقفال."),
+        who=_("أمين الصندوق يفتح إقفال يومه ويُدخل المعدود، والموظف المالي أو مدير المركز يعتمده."),
+        after=_("السندات التي يضمّها الإقفال تُقرأ في سجل الدفعات."),
+        links=((Screen.PAYMENTS, "cashbox:payments", _("الدفعات وسندات القبض")),),
+        # BR-027 is printed on the page itself one line below this block, so it
+        # is not repeated here. BR-028 is said nowhere on the screen — the
+        # approve button is simply absent for the cashier — and a rule a reader
+        # meets only as a missing button is a rule they never learn.
+        stops=_(
+            "لا يعتمد أمين الصندوق إقفال يومه: الاعتماد لغيره (BR-028). والتصحيح يكون على "
+            "السند نفسه في سجل الدفعات، لا على ملخّص الإقفال."
+        ),
+    ),
     "transfers": Guide(
         what=_("طلبات النقل بين الدورات: فحصها واعتمادها وتنفيذها."),
         who=_("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده (BR-066)."),

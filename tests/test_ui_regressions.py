@@ -4869,10 +4869,14 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
 # at the dated price list or the ministry file learned nothing about what the
 # page decides and, more to the point, what it does not.
 #
-# The seven close the §3.3 chain end to end: programme → price list → cohort →
-# ministry file. ``tests/test_demo_readiness.py`` walks the four arg-less
-# routes with the rest of the taught set; the three detail pages need an object
-# to open, so they are proved here, beside the fixtures that build one.
+# Seven of them close the §3.3 chain end to end: programme → price list →
+# cohort → ministry file. The eighth is the daily closing, which sits on the
+# §3.4 cash path between two screens that were taught already.
+# ``tests/test_demo_readiness.py`` walks the arg-less routes with the rest of
+# the taught set; the three detail pages need an object to open, so they are
+# proved here, beside the fixtures that build one.
+CLOSING_TEMPLATE = Path("templates/cashbox/closing.html")
+
 GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("program-detail", PROGRAM_DETAIL_TEMPLATE),
     ("pricelists", PRICELISTS_TEMPLATE),
@@ -4881,6 +4885,7 @@ GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("mohe", MOHE_TEMPLATE),
     ("mohe-detail", MOHE_DETAIL_TEMPLATE),
     ("mohe-submit", MOHE_SUBMIT_TEMPLATE),
+    ("cashbox-closing", CLOSING_TEMPLATE),
 )
 
 #: A verdict none of these six screens computes. The guidance may say the
@@ -4944,6 +4949,88 @@ def test_the_slice_templates_carry_the_tag_where_every_taught_screen_does(
     tag = '{% guided_help "' + key + '" %}'
     assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
     assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+
+
+#: §3.4/18 «V A P · — · V C E A P · — · V C · V P» — everyone who may open the
+#: daily closing, and whether the matrix lets them approve one.
+CLOSING_READERS = (
+    (Role.CENTER_MANAGER, True),
+    (Role.FINANCE_OFFICER, True),
+    (Role.CASHIER, False),
+    (Role.AUDIT_ACCOUNT, False),
+)
+
+
+@pytest.mark.parametrize(("role", "may_approve"), CLOSING_READERS)
+def test_the_daily_closing_teaches_the_separation_it_enforces(
+    client: Client, seeded_settings: None, role: str, may_approve: bool
+) -> None:
+    """
+    BR-028 is enforced in ``closing_service.reconcile`` and said nowhere on the
+    screen: the cashier simply finds no approve button, which teaches them the
+    button is missing and not why. The block says it, to every reader — the
+    cashier included, who is the one the rule is about.
+    """
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.APPROVE in allowed_actions(role, "closing")) is may_approve
+    client.force_login(_user(role, f"gh.cl.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("cashbox:closing"))
+    assert response.status_code == 200, role
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    guide = GUIDES["cashbox-closing"]
+    assert str(guide.what) in page
+    assert str(guide.who) in page
+    assert str(guide.stops) in page
+    assert "BR-028" in str(guide.stops)
+    # …above everything the screen itself says, including its own BR-027 note.
+    assert page.index(str(guide.what)) < page.index('class="note info"')
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+
+
+@pytest.mark.parametrize(("role", "_may_approve"), CLOSING_READERS)
+def test_the_daily_closing_offers_only_a_next_step_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_approve: bool
+) -> None:
+    """
+    §3.4/16 gives every one of these four readers VIEW on the receipts
+    register, so the one link is offered to all four — and it has to open.
+    """
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"gh.cl.link.{role}".lower().replace("_", ".")))
+    page = client.get(reverse("cashbox:closing")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for screen, route, _label in GUIDES["cashbox-closing"].links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_daily_closing_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The block explains; it never promises. The closing screen opens a closing
+    and approves one, and the help may not imply a cashier approves their own
+    or that a receipt is corrected on the summary — which is exactly what the
+    rule and the correction route in ``stops`` say the other way round.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["cashbox-closing"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "لا يعتمد أمين الصندوق إقفال يومه" in text
+    assert "سجل الدفعات" in text
+    # No act this screen does not perform, and no participant on a till page.
+    for absent in ("تعديل السند", "حذف", "المشارك", "الرسوم الدراسية"):
+        assert absent not in text, f"the closing guidance offers «{absent}»"
 
 
 @pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
