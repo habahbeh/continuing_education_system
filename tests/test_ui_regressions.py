@@ -5247,6 +5247,116 @@ def test_the_till_head_reads_like_every_polished_screen(
     assert 'class="card2-head"' in page
 
 
+def test_the_first_payment_minimum_is_read_from_its_setting(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    BR-020's figure was prose. The rule is enforced from the effective-dated
+    ``diploma_minimum_first_payment``, so a centre that raised the minimum was
+    left with a screen quoting a number the save no longer refused below.
+    """
+    from datetime import date
+
+    from apps.core.services.settings_service import get_setting
+
+    configured = get_setting("diploma_minimum_first_payment", as_of=date(2026, 9, 20))
+    assert configured is not None, "the setting is not seeded, so this proves nothing"
+
+    client.force_login(_user(Role.CASHIER, "pn.min.seeded"))
+    response = client.get(reverse("cashbox:payment-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["minimum_first_payment"] == configured
+    assert "أقل دفعة أولى للدبلوم" in page
+    # The seeded value still reads the way it always did…
+    assert "400" in page
+    # …and the arithmetic that only held for 400 is no longer asserted on
+    # screen: it explains the current value, and its place is the setting's
+    # own note, not a sentence that outlives the value.
+    assert "300 تسجيل" not in page
+
+
+def test_changing_the_setting_changes_the_figure_on_screen(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The point of the slice, proved the only way that counts — and proved
+    through the settings service, closing the open period before opening the
+    next one, because a value is superseded here and never overwritten
+    (ADR-009).
+    """
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.core.models import SettingValueType
+    from apps.core.services.settings_service import close_setting, set_setting
+
+    client.force_login(_user(Role.CASHIER, "pn.min.raised"))
+    before = client.get(reverse("cashbox:payment-new")).content.decode("utf-8")
+    assert "400" in before
+
+    today = timezone.localdate()
+    close_setting("diploma_minimum_first_payment", effective_to=today - timedelta(days=1))
+    set_setting(
+        "diploma_minimum_first_payment",
+        Decimal("575.000"),
+        value_type=SettingValueType.DECIMAL,
+        effective_from=today,
+        note="BR-020 — raised for the regression test.",
+    )
+
+    response = client.get(reverse("cashbox:payment-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["minimum_first_payment"] == Decimal("575.000")
+    assert "575" in page
+    assert "أقل دفعة أولى للدبلوم" in page
+    assert "400" not in page, "the old figure is still on screen"
+
+
+def test_the_minimum_is_left_unsaid_when_it_is_not_configured(client: Client, db: None) -> None:
+    """
+    No settings seeded at all. A guessed figure would be worse than a missing
+    line, so the sentence is absent and the form is untouched.
+    """
+    from apps.core.models import EffectiveSetting
+
+    assert not EffectiveSetting.objects.filter(key="diploma_minimum_first_payment").exists()
+    client.force_login(_user(Role.CASHIER, "pn.min.absent"))
+
+    response = client.get(reverse("cashbox:payment-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.status_code == 200
+    assert response.context["minimum_first_payment"] is None
+    assert "أقل دفعة أولى للدبلوم" not in page
+    # The screen still works: same form, same button, same door.
+    assert page.count("<form") == 1
+    assert page.count("<button") == 1
+
+
+def test_the_screen_quotes_the_setting_the_service_enforces(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    One key, read in two places, and they must be the same key. The service
+    owns the rule; the screen only repeats what the service would read.
+    """
+    from datetime import date
+
+    from apps.cashbox.services import payment_service
+    from apps.core.services.settings_service import get_setting
+
+    assert payment_service.MIN_FIRST_PAYMENT_KEY == "diploma_minimum_first_payment"
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "pn.min.samekey"))
+    shown = client.get(reverse("cashbox:payment-new")).context["minimum_first_payment"]
+
+    assert shown == get_setting(payment_service.MIN_FIRST_PAYMENT_KEY, as_of=date.today())
+
+
 def test_the_first_payment_minimum_is_explained_and_not_alerted(
     client: Client, seeded_settings: None
 ) -> None:
@@ -5262,7 +5372,7 @@ def test_the_first_payment_minimum_is_explained_and_not_alerted(
 
     page = client.get(reverse("cashbox:payment-new")).content.decode("utf-8").split("</nav>", 1)[-1]
 
-    assert "أقل دفعة أولى للدبلوم 400 دينار" in page
+    assert "أقل دفعة أولى للدبلوم" in page
     assert "note info" not in page
     assert 'class="hint boxed"' in page
     assert page.index("أقل دفعة أولى") < page.index("<form")

@@ -15,17 +15,20 @@ who arrives at the URL another way.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.cashbox.forms import ClosingForm, PaymentForm, ReconcileForm, VoidRequestForm
 from apps.cashbox.services import closing_service, payment_service
+from apps.core.services.settings_service import get_setting
 from apps.operations.services import enrollment_service
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
@@ -182,7 +185,33 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "cashbox/payment_new.html",
-        {"title": _("استيفاء دفعة"), "active_screen": Screen.PAYMENT_NEW, "form": form},
+        {
+            "title": _("استيفاء دفعة"),
+            "active_screen": Screen.PAYMENT_NEW,
+            "form": form,
+            # BR-020's figure, read rather than written on the screen. The
+            # template printed «400» as prose while the rule is enforced from
+            # this effective-dated setting, so changing the setting left the
+            # page stating a number the system no longer refused below.
+            "minimum_first_payment": _minimum_first_payment_today(),
+        },
+    )
+
+
+def _minimum_first_payment_today() -> Decimal | None:
+    """
+    The diploma minimum in effect TODAY, for display only.
+
+    ``as_of`` is today because the reader has not chosen a payment date yet;
+    the rule itself is checked in ``payment_service`` against the date on the
+    receipt, and a diploma may carry its own higher override (Q-15). So this
+    is what the screen SAYS, never what the save decides.
+
+    Returns None when the setting is not configured, and the sentence is then
+    left out entirely rather than guessing a figure.
+    """
+    return get_setting(
+        payment_service.MIN_FIRST_PAYMENT_KEY, as_of=timezone.localdate(), default=None
     )
 
 
