@@ -1,19 +1,49 @@
 {% extends "base.html" %}
 {% load i18n guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  شاشة استيفاء الدفعة، وعليها فعل واحد: إصدار سند القبض. §3.4/17 لا يفتحها
+  إلا لأمين الصندوق والموظف المالي، وكلاهما يملك CREATE — فلا رايةَ في السياق
+  تحجب الزرّ ولا حاجة إليها، والباب نفسه هو الحارس (`policy.require` على VIEW).
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس.
+
+  حدّ الدفعة الأولى خرج من `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
+  (قواعد التحسين §6.5). النصّ نفسه، في `.hint boxed` داخل البطاقة فوق الحقول
+  التي يخصّها — فلا تتراكم كتلتان مؤطَّرتان فوق الصفحة تحت كتلة الإرشاد.
+
+  والرقم فيه مكتوبٌ نصاً، والقاعدة تُفرَض في الخدمة عند الحفظ لا هنا (BR-020):
+  من يغيّر الإعداد يغيّر هذه الجملة معه.
+
+  والتوزيع على بنود الرسوم يجري في الخدمة (BR-022) بعد الحفظ، ويُقرأ في صفحة
+  السند. لا تحسب هذه الشاشة شيئاً ولا تعرض تخصيصاً قبل إصداره.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "قبض مبلغ على تسجيل قائم وإصدار سنده. التوزيع على بنود الرسوم يجري عند الحفظ، ويُقرأ في صفحة السند." %}</p>
+  </div>
 </div>
 
 {% guided_help "payment-new" %}
-<div class="note info">
-  {% translate "أقل دفعة أولى للدبلوم 400 دينار (300 تسجيل + 100 أول مادة) — يفرضها النظام عند الحفظ." %}
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "بيانات الدفعة" %}</h2></div>
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "أقل دفعة أولى للدبلوم 400 دينار (300 تسجيل + 100 أول مادة) — يفرضها النظام عند الحفظ." %}
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      {% include "partials/_form.html" %}
+      <div class="form-acts">
+        <button class="btn2 primary" type="submit">{% translate "إصدار سند القبض" %}</button>
+      </div>
+    </form>
+  </div>
 </div>
-<div class="card2"><div class="card2-body">
-  <form method="post">
-    {% csrf_token %}
-    {% include "partials/_form.html" %}
-    <button class="btn2 primary" type="submit">{% translate "إصدار سند القبض" %}</button>
-  </form>
-</div></div>
 {% endblock %}

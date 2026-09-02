@@ -4870,13 +4870,14 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
 # page decides and, more to the point, what it does not.
 #
 # Seven of them close the §3.3 chain end to end: programme → price list →
-# cohort → ministry file. The last two are on the §3.4 cash path: the daily
-# closing, and the receipt a collection redirects to.
+# cohort → ministry file. The last three are the §3.4 cash path: the till, the
+# receipt a collection redirects to, and the daily closing that gathers them.
 # ``tests/test_demo_readiness.py`` walks the arg-less routes with the rest of
 # the taught set; the three detail pages need an object to open, so they are
 # proved here, beside the fixtures that build one.
 CLOSING_TEMPLATE = Path("templates/cashbox/closing.html")
 RECEIPT_DETAIL_TEMPLATE = Path("templates/cashbox/receipt_detail.html")
+PAYMENT_NEW_TEMPLATE = Path("templates/cashbox/payment_new.html")
 
 GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("program-detail", PROGRAM_DETAIL_TEMPLATE),
@@ -4888,6 +4889,7 @@ GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("mohe-submit", MOHE_SUBMIT_TEMPLATE),
     ("cashbox-closing", CLOSING_TEMPLATE),
     ("receipt-detail", RECEIPT_DETAIL_TEMPLATE),
+    ("payment-new", PAYMENT_NEW_TEMPLATE),
 )
 
 #: A verdict none of these six screens computes. The guidance may say the
@@ -4951,6 +4953,159 @@ def test_the_slice_templates_carry_the_tag_where_every_taught_screen_does(
     tag = '{% guided_help "' + key + '" %}'
     assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
     assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+
+
+#: §3.4/17 «— · — · V C · — · V C · —» — the till opens for two roles only,
+#: and both of them hold CREATE, so no flag in the context gates the button.
+TILL_ROLES = (
+    (Role.FINANCE_OFFICER, 200),
+    (Role.CASHIER, 200),
+    (Role.CENTER_MANAGER, 403),
+    (Role.REGISTRATION_OFFICER, 403),
+    (Role.FINANCE_MANAGER, 403),
+    (Role.AUDIT_ACCOUNT, 403),
+)
+
+
+@pytest.mark.parametrize(("role", "expected"), TILL_ROLES)
+def test_the_till_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, expected: int
+) -> None:
+    """
+    BR-081 — the centre manager never takes cash, and §3.4/17 withholds the
+    screen from four of the six roles entirely. The polish moved presentation,
+    never the door.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_open = Action.VIEW in allowed_actions(role, "payment-new")
+    assert may_open is (expected == 200)
+    # Whoever may open it may also save: there is no read-only reader here, and
+    # so no flag the template could get wrong.
+    assert may_open == (Action.CREATE in allowed_actions(role, "payment-new"))
+
+    client.force_login(_user(role, f"pn.door.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("cashbox:payment-new")).status_code == expected
+
+
+def test_the_till_refuses_an_anonymous_visitor(client: Client, seeded_settings: None) -> None:
+    """Fail-closed."""
+    assert client.get(reverse("cashbox:payment-new")).status_code == 403
+
+
+@pytest.mark.parametrize("role", [Role.FINANCE_OFFICER, Role.CASHIER])
+def test_the_till_polish_moved_no_control(client: Client, seeded_settings: None, role: str) -> None:
+    """
+    One form, one submit button, one POST to this same address — exactly what
+    was there before the head and the card were built around it.
+    """
+    import re
+
+    client.force_login(_user(role, f"pn.ctl.{role}".lower().replace("_", ".")))
+
+    page = client.get(reverse("cashbox:payment-new")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert page.count("<form") == 1
+    assert page.count("<button") == 1
+    assert "csrfmiddlewaretoken" in page
+    assert 'type="submit"' in page
+    # The form posts to the page it is on; it names no other target.
+    assert re.search(r"<form[^>]*action=", page) is None
+    # …and the button now sits in the same acts row every other cash form uses.
+    assert 'class="form-acts"' in page
+    assert page.index('class="form-acts"') > page.index("<form")
+
+
+@pytest.mark.parametrize("role", [Role.FINANCE_OFFICER, Role.CASHIER])
+def test_the_till_keeps_every_field_it_had(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The fields are the form's, not the template's: the shared partial is
+    rendered whole, and the names the view reads are the names on screen.
+    """
+    client.force_login(_user(role, f"pn.fld.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("cashbox:payment-new"))
+    page = response.content.decode("utf-8")
+
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page, f"{role} is not shown the «{name}» field"
+
+
+def test_the_till_head_reads_like_every_polished_screen(
+    client: Client, seeded_settings: None
+) -> None:
+    """It was an ``<h1>`` alone, under a blue box, under the guided help."""
+    client.force_login(_user(Role.CASHIER, "pn.head"))
+
+    page = client.get(reverse("cashbox:payment-new")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="card2-head"' in page
+
+
+def test_the_first_payment_minimum_is_explained_and_not_alerted(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    BR-020's figure is still on screen, word for word — it is the one thing the
+    guide does not carry, which names the rule without the number. It is no
+    longer blue: explaining a rule is not an alert (polish rules §6.5), and it
+    now sits above the fields it constrains rather than above the whole page.
+    """
+    from apps.people.guidance import GUIDES
+
+    client.force_login(_user(Role.CASHIER, "pn.br020"))
+
+    page = client.get(reverse("cashbox:payment-new")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "أقل دفعة أولى للدبلوم 400 دينار" in page
+    assert "note info" not in page
+    assert 'class="hint boxed"' in page
+    assert page.index("أقل دفعة أولى") < page.index("<form")
+    # The guide names the rule; the page carries the figure. Neither repeats
+    # the other, and BR-020 is said on this screen and no other.
+    assert "BR-020" in str(GUIDES["payment-new"].stops)
+    assert "400" not in str(GUIDES["payment-new"].stops)
+
+
+def test_the_till_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PAYMENT_NEW_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the till uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    # A form page: it renders the shared partial whole and invents no markup of
+    # its own for the fields.
+    assert markup.count('{% include "partials/_form.html" %}') == 1
+    assert "tbl-wrap" not in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
 
 
 #: §3.4/16 «V P · V E P · V A X P · V P · V C P · V P» — every role may open a
