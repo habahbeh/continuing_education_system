@@ -149,11 +149,14 @@ def _handle_void(request: HttpRequest, number: str, form: VoidRequestForm) -> Ht
 def payment_new_view(request: HttpRequest) -> HttpResponse:
     policy.require(request.user, Screen.PAYMENT_NEW, Action.VIEW, request=request)
 
+    # Materialised once: the form is built from these and the Q-15 lookup below
+    # checks the posted code against the same list, so the two cannot disagree.
+    enrollment_choices = enrollment_service.payable_enrollment_choices(
+        actor=request.user, request=request
+    )
     form = PaymentForm(
         request.POST or None,
-        enrollment_choices=enrollment_service.payable_enrollment_choices(
-            actor=request.user, request=request
-        ),
+        enrollment_choices=enrollment_choices,
         method_choices=payment_service.payment_method_choices(),
     )
 
@@ -197,8 +200,46 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
             # page stating a number the system no longer refused below.
             "minimum_first_payment": minimum_first_payment,
             "minimum_breakdown_holds": minimum_first_payment == _BREAKDOWN_HOLDS_AT,
+            # Q-15 — the selected diploma's own floor, when one was chosen and
+            # it carries one. A field read, not a verdict: whether BR-020
+            # applies to THIS payment is the service's call, on the receipt's
+            # date and on whether a first payment was already taken.
+            "selected_program_minimum": _selected_program_minimum(request, enrollment_choices),
         },
     )
+
+
+def _selected_program_minimum(
+    request: HttpRequest, enrollment_choices: list[tuple[str, str]]
+) -> Decimal | None:
+    """
+    ``minimum_first_payment_override`` of the enrolment the reader picked.
+
+    Only ever answers on a POST that came back — a GET has no selection, and
+    guessing a programme's floor before one is chosen would be inventing a
+    figure. The posted code is checked against the very list the form was built
+    from before it is resolved, so raw POST input never reaches a lookup, and
+    the enrolment is read through the same service accessor the save path uses.
+
+    Returns None when nothing was selected, when the code is not one of the
+    offered choices, when it resolves to nothing, or when the programme has no
+    override — all of which mean the same thing on screen: say nothing extra.
+    """
+    if request.method != "POST":
+        return None
+
+    code = (request.POST.get("enrollment_code") or "").strip()
+    offered = {offered_code for offered_code, _label in enrollment_choices}
+    if not code or code not in offered:
+        return None
+
+    try:
+        enrollment = enrollment_service.payable_enrollment(
+            actor=request.user, code=code, request=request
+        )
+    except ObjectDoesNotExist:
+        return None
+    return enrollment.cohort.program.minimum_first_payment_override
 
 
 #: The published split — 300 registration plus 100 for the first subject — is

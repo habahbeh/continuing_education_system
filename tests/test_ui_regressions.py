@@ -5322,6 +5322,219 @@ def test_changing_the_setting_changes_the_figure_on_screen(
     assert "csrfmiddlewaretoken" in page
 
 
+@pytest.fixture
+def a_payable_diploma(seeded_settings: None, active_semester: object, participant_data: dict):  # type: ignore[no-untyped-def]
+    """
+    A diploma enrolment with an outstanding balance, so the till offers it.
+
+    Built through the pricing and charge services for the same reason the
+    receipt fixture is: the balance that decides whether an enrolment is
+    offered at all is the billing layer's answer, not a number typed here.
+    """
+    from datetime import date
+
+    from django.core.management import call_command
+
+    from apps.billing.services import charge_service
+    from apps.catalog.models import PriceList, PriceListStatus, Program, ProgramType
+    from apps.catalog.services import pricing_service
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.services import participant_service
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    actor = _user(Role.CENTER_MANAGER, "q15.fixture.actor")
+    program = Program.objects.filter(program_type=ProgramType.DIPLOMA).order_by("code").first()
+    assert program is not None, "no diploma was seeded, so this proves nothing"
+    assert program.minimum_first_payment_override is None, "the seed already carries an override"
+
+    cohort = Cohort.objects.create(
+        code="CO-Q15-1",
+        program=program,
+        semester=active_semester,
+        name_ar=f"دفعة {program.name_ar}",
+        starts_on=date(2026, 9, 20),
+        ends_on=date(2026, 12, 20),
+        capacity=25,
+    )
+    participant = participant_service.create_participant(actor=actor, data=participant_data)
+    quote = pricing_service.resolve_price(
+        program=program, participant_category="UNIVERSITY", as_of=date(2026, 9, 20)
+    )
+    enrollment = Enrollment.objects.create(
+        code="EN-Q15-1",
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=date(2026, 9, 20),
+        price_list=PriceList.objects.get(status=PriceListStatus.APPROVED),
+    )
+    charge_service.charge_lines_from_quote(
+        actor=actor, enrollment=enrollment, quote=quote, charged_on=date(2026, 9, 20)
+    )
+    return enrollment
+
+
+def _post_selecting(client: Client, enrollment: object, **extra: str) -> str:
+    """
+    Re-render the till with an enrolment selected, without saving anything.
+
+    The amount is left blank so the form fails validation and the page comes
+    back — the only way a selection exists on this screen, since a GET carries
+    none and there is no script on the page.
+    """
+    payload = {"enrollment_code": enrollment.code, "amount": "", **extra}  # type: ignore[attr-defined]
+    response = client.post(reverse("cashbox:payment-new"), payload)
+    assert response.status_code == 200, "the page saved or redirected instead of coming back"
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def test_no_selection_shows_the_general_minimum_and_guesses_no_override(
+    client: Client, a_payable_diploma: object
+) -> None:
+    """
+    A GET carries no selection, so the screen has no programme to read. It says
+    the general figure and the rule's scope, and invents nothing.
+    """
+    client.force_login(_user(Role.CASHIER, "q15.none"))
+
+    response = client.get(reverse("cashbox:payment-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["selected_program_minimum"] is None
+    assert "أقل دفعة أولى للدبلوم" in page
+    assert "400" in page
+    assert "حدّ أدنى خاص للدفعة الأولى" not in page
+    # …and the reader is told the rule's scope instead of a guessed figure.
+    assert "القاعدة تخصّ الدبلومات وحدها" in page
+    assert "Q-15" in page
+
+
+def test_a_selected_programme_without_an_override_says_nothing_extra(
+    client: Client, a_payable_diploma: object
+) -> None:
+    """
+    The general setting stands on its own. A programme with no override adds no
+    second figure — silence is the honest answer, not a repeat of the general
+    one dressed as a programme rule.
+    """
+    client.force_login(_user(Role.CASHIER, "q15.plain"))
+
+    page = _post_selecting(client, a_payable_diploma)
+
+    assert "حدّ أدنى خاص للدفعة الأولى" not in page
+    assert "القاعدة تخصّ الدبلومات وحدها" in page
+    assert "400" in page
+
+
+def test_a_selected_programme_with_an_override_names_its_own_floor(
+    client: Client, a_payable_diploma: object
+) -> None:
+    """
+    Q-15 — a diploma may carry a higher floor than the general setting, and the
+    till said only the general one. Now it names the programme's own, and says
+    which of the two takes precedence.
+    """
+    from decimal import Decimal
+
+    program = a_payable_diploma.cohort.program  # type: ignore[attr-defined]
+    program.minimum_first_payment_override = Decimal("650.000")
+    program.save(update_fields=["minimum_first_payment_override"])
+
+    client.force_login(_user(Role.CASHIER, "q15.override"))
+    page = _post_selecting(client, a_payable_diploma)
+
+    assert "حدّ أدنى خاص للدفعة الأولى" in page
+    assert "650" in page
+    assert "يتقدّم على الحدّ العام" in page
+    assert "Q-15" in page
+    # The general figure is still shown; the page names both and ranks them
+    # rather than replacing one with the other.
+    assert "400" in page
+    # …and it does not claim this payment WILL be checked against it: whether
+    # BR-020 applies at all is the service's call, on the receipt's date and on
+    # whether a first payment was already taken.
+    assert "سيُفحص" not in page
+
+
+def test_an_unoffered_code_is_never_resolved(client: Client, a_payable_diploma: object) -> None:
+    """
+    The posted code is checked against the very list the form was built from,
+    so a code the reader was not offered reaches no lookup at all.
+    """
+    client.force_login(_user(Role.CASHIER, "q15.unoffered"))
+
+    response = client.post(
+        reverse("cashbox:payment-new"), {"enrollment_code": "EN-NOT-OFFERED", "amount": ""}
+    )
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.status_code == 200
+    assert response.context["selected_program_minimum"] is None
+    assert "حدّ أدنى خاص للدفعة الأولى" not in page
+
+
+@pytest.mark.parametrize("role", [Role.FINANCE_OFFICER, Role.CASHIER])
+def test_the_q15_line_moved_no_control(
+    client: Client, a_payable_diploma: object, role: str
+) -> None:
+    """
+    A sentence was added and nothing else: same fields, same names, same single
+    form and button, same POST target, on both branches of the new condition.
+    """
+    from decimal import Decimal
+
+    client.force_login(_user(role, f"q15.ctl.{role}".lower().replace("_", ".")))
+
+    plain = _post_selecting(client, a_payable_diploma)
+
+    program = a_payable_diploma.cohort.program  # type: ignore[attr-defined]
+    program.minimum_first_payment_override = Decimal("650.000")
+    program.save(update_fields=["minimum_first_payment_override"])
+    with_override = _post_selecting(client, a_payable_diploma)
+
+    for page in (plain, with_override):
+        assert page.count("<form") == 1
+        assert page.count("<button") == 1
+        assert "csrfmiddlewaretoken" in page
+        for name in (
+            "enrollment_code",
+            "amount",
+            "payment_method",
+            "received_on",
+            "external_receipt_ref",
+            "breakdown_text_ar",
+        ):
+            assert f'name="{name}"' in page
+
+
+def test_the_override_is_read_and_never_enforced_by_the_screen() -> None:
+    """
+    BR-020 stays in one place. The view reads a field for display; the rule —
+    diploma only, first payment only, override before setting — is decided in
+    ``payment_service`` and is not re-derived in the view.
+    """
+    from pathlib import Path
+
+    source = Path("apps/cashbox/views.py").read_text(encoding="utf-8")
+    service = Path("apps/cashbox/services/payment_service.py").read_text(encoding="utf-8")
+
+    # The service still owns every part of the decision…
+    assert "def check_minimum_first_payment" in service
+    assert "ProgramType.DIPLOMA" in service
+    assert "minimum_first_payment_override" in service
+    assert "BR-020" in service
+    # …and the view neither raises for it nor re-tests the programme type.
+    # The function's own source, not everything after it in the module.
+    import inspect
+
+    from apps.cashbox.views import _selected_program_minimum
+
+    body = inspect.getsource(_selected_program_minimum)
+    assert "ProgramType" not in source, "the view re-tests the programme type"
+    assert "ValidationError" not in body
+    assert "raise" not in body
+    assert "minimum_first_payment_override" in body
+
+
 @pytest.mark.parametrize(
     ("configured", "shows_breakdown"),
     [
