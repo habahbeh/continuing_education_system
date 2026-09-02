@@ -4870,14 +4870,16 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
 # page decides and, more to the point, what it does not.
 #
 # Seven of them close the §3.3 chain end to end: programme → price list →
-# cohort → ministry file. The last three are the §3.4 cash path: the till, the
-# receipt a collection redirects to, and the daily closing that gathers them.
+# cohort → ministry file. The last four are the §3.4 cash path end to end: the
+# till, the register, the receipt a collection redirects to, and the daily
+# closing that gathers them.
 # ``tests/test_demo_readiness.py`` walks the arg-less routes with the rest of
 # the taught set; the three detail pages need an object to open, so they are
 # proved here, beside the fixtures that build one.
 CLOSING_TEMPLATE = Path("templates/cashbox/closing.html")
 RECEIPT_DETAIL_TEMPLATE = Path("templates/cashbox/receipt_detail.html")
 PAYMENT_NEW_TEMPLATE = Path("templates/cashbox/payment_new.html")
+PAYMENTS_TEMPLATE = Path("templates/cashbox/payments.html")
 
 GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("program-detail", PROGRAM_DETAIL_TEMPLATE),
@@ -4890,6 +4892,7 @@ GUIDED_HELP_SLICE: tuple[tuple[str, Path], ...] = (
     ("cashbox-closing", CLOSING_TEMPLATE),
     ("receipt-detail", RECEIPT_DETAIL_TEMPLATE),
     ("payment-new", PAYMENT_NEW_TEMPLATE),
+    ("payments", PAYMENTS_TEMPLATE),
 )
 
 #: A verdict none of these six screens computes. The guidance may say the
@@ -4953,6 +4956,200 @@ def test_the_slice_templates_carry_the_tag_where_every_taught_screen_does(
     tag = '{% guided_help "' + key + '" %}'
     assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
     assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+
+
+#: §3.4/16 «V P · V E P · V A X P · V P · V C P · V P» — the register opens for
+#: everyone, and (role, whether §3.4/17 lets them start a collection from it).
+REGISTER_READERS = (
+    (Role.CENTER_MANAGER, False),
+    (Role.REGISTRATION_OFFICER, False),
+    (Role.FINANCE_OFFICER, True),
+    (Role.FINANCE_MANAGER, False),
+    (Role.CASHIER, True),
+    (Role.AUDIT_ACCOUNT, False),
+)
+
+
+@pytest.mark.parametrize(("role", "may_collect"), REGISTER_READERS)
+def test_the_register_offers_the_till_exactly_where_the_matrix_says(
+    client: Client, a_receipt: object, role: str, may_collect: bool
+) -> None:
+    """
+    BR-081 — the centre manager reads the register and never opens the till,
+    and the polish moved the button's markup, never its guard. The flag is the
+    view's, off §3.4/17, and the template still draws off it and nothing else.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "payment-new")) is may_collect
+    client.force_login(_user(role, f"pl.till.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("cashbox:payments"))
+    assert response.status_code == 200, role
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["can_create"] is may_collect
+    assert (f'href="{reverse("cashbox:payment-new")}"' in page) is may_collect
+    # A read-only register whichever way it is read: the acts all live on the
+    # receipt's own page, so no POST is drawn here for anyone.
+    assert '<form method="post"' not in page
+    assert "csrfmiddlewaretoken" not in page
+
+
+def test_every_link_on_the_register_reaches_a_real_route(client: Client, a_receipt: object) -> None:
+    """
+    Three kinds of link and no fourth: the filter's own address, the till, and
+    one «عرض» per row — each of which opens for the reader drawing it.
+    """
+    import re
+
+    from apps.cashbox.models import Receipt
+
+    client.force_login(_user(Role.CASHIER, "pl.links"))
+    page = client.get(reverse("cashbox:payments")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
+    expected = {reverse("cashbox:payment-new"), reverse("cashbox:closing")} | {
+        reverse("cashbox:receipt-detail", args=[n])
+        for n in Receipt.objects.values_list("internal_receipt_number", flat=True)
+    }
+    assert hrefs == expected, hrefs
+    for href in hrefs:
+        assert client.get(href).status_code == 200, href
+    # One «عرض» per row and nothing else clickable in the table.
+    assert page.count('<a class="btn2 ghost"') == Receipt.objects.count()
+
+
+def test_the_register_filters_keep_their_names_and_their_values(
+    client: Client, a_receipt: object
+) -> None:
+    """
+    The view reads ``q`` and ``on`` off the query string; a renamed input would
+    silently stop filtering while still looking like it worked. Both names, and
+    both values echoed back, are asserted here rather than eyeballed.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "pl.filters"))
+
+    response = client.get(reverse("cashbox:payments"), {"q": "R-2026", "on": "2026-09-20"})
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.status_code == 200
+    assert 'name="q"' in page and 'value="R-2026"' in page
+    assert 'name="on"' in page and 'value="2026-09-20"' in page
+    assert response.context["query"] == "R-2026"
+    assert response.context["on_date"] == "2026-09-20"
+    # A GET form that posts nowhere: the filter is the address bar.
+    assert 'method="get"' in page
+    assert 'role="search"' in page
+
+
+def test_the_register_head_reads_like_every_polished_screen(
+    client: Client, a_receipt: object
+) -> None:
+    """It was an ``<h1>`` alone; it now says its section and what a row is."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pl.head"))
+
+    page = client.get(reverse("cashbox:payments")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="card2-head"' in page
+    # The count describes the rows drawn, not the register behind them.
+    assert 'class="count"' in page
+
+
+def test_the_register_table_names_its_action_column_and_keeps_its_order(
+    client: Client, a_receipt: object
+) -> None:
+    """
+    Nine columns in the order they were in, and the ninth finally named. By
+    ``aria-label`` rather than `.sr-only`, which in RTL lands off the left edge
+    and drags the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.CASHIER, "pl.cols"))
+
+    page = client.get(reverse("cashbox:payments")).content.decode("utf-8").split("</nav>", 1)[-1]
+    head = page.split("<thead>", 1)[1].split("</thead>", 1)[0]
+
+    assert len(re.findall(r"<th[\s>]", head)) == 9
+    assert 'aria-label="الإجراء"' in head
+    assert "sr-only" not in page
+    labels = re.findall(r"<th[^>]*>([^<]*)</th>", head)
+    assert [label.strip() for label in labels] == [
+        "رقم السند",
+        "سند الدائرة المالية",
+        "المشارك",
+        "التاريخ",
+        "المبلغ",
+        "الطريقة",
+        "الصندوق",
+        "الحالة",
+        "",
+    ]
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_register_empty_state_kept_its_words(client: Client, seeded_settings: None) -> None:
+    """
+    The empty state was already right and is not what this slice was for: the
+    same title, the same body, the same rule, and still no action offered.
+    """
+    from apps.cashbox.models import Receipt
+
+    assert not Receipt.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pl.empty"))
+
+    page = client.get(reverse("cashbox:payments")).content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "لا سندات قبض في هذا النطاق" in page
+    assert "BR-022" in page
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "empty-act" not in page
+    assert 'colspan="9"' in page
+
+
+def test_the_register_added_no_dead_class_and_no_dependency() -> None:
+    """
+    Every class it draws with already existed — and one it drew with did not
+    work: `.spacer` is defined for `.toolbar` and `.action-bar`, never inside
+    `.filterbar`, where the design system already pushes the primary link out
+    with ``margin-inline-start: auto``.
+    """
+    import re
+
+    source = PAYMENTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert "spacer" not in markup, "an inert `.spacer` is back inside the filterbar"
+    assert ".filterbar > a.btn2.primary { margin-inline-start: auto; }" in css
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    assert 'class="tbl-wrap"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is being alerted in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
 
 
 #: §3.4/17 «— · — · V C · — · V C · —» — the till opens for two roles only,

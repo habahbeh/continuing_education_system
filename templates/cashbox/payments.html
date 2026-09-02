@@ -1,11 +1,39 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل السندات الصادرة. العرض يقبل GET وحده: الأفعال كلّها — طلب الإلغاء
+  واعتماده — على صفحة السند الواحد، ولكلٍّ منها حارسه هناك. فلا يُرسم هنا زرّ
+  فعل واحد؛ الرابطان الوحيدان هما «استيفاء دفعة» بحارسه CREATE على §3.4/17،
+  و«عرض» على كل صف، وقد مرّ قارئه من بوّابة هذه الشاشة ليصل إليها.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا مرشّح ولا حارس، ولا عمود بدّل موضعه.
+
+  `<span class="spacer">` حُذف: `.spacer` معرَّفة لـ `.toolbar` و`.action-bar`
+  ولا أثر لها داخل `.filterbar` — والدفع إلى الطرف يفعله النظام نفسه بـ
+  `.filterbar > a.btn2.primary { margin-inline-start: auto }`. صنفٌ لا يعمل
+  أسوأ من غيابه لأنه يوهم من يقرأ القالب أن الإزاحة منه.
+
+  والعدّ يُحصى فوق الصفوف المرسومة لا فوق السجل كلّه، فالشريحة تصف ما على
+  الشاشة — و`.filterbar > a.btn2.primary ~ .count` مكانها المعرَّف سلفاً.
+
+  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "السندات الصادرة بقيمها وحالاتها. السند لا يُعدَّل من هنا ولا من صفحته: التصحيح بإلغاء يُطلب ويُعتمد، أو بسند جديد." %}</p>
+  </div>
 </div>
 
 {% guided_help "payments" %}
+
 <form method="get" class="filterbar" role="search">
   <div class="fld">
     <label for="f_q">{% translate "بحث" %}</label>
@@ -16,36 +44,51 @@
     <input type="date" name="on" value="{{ on_date }}" id="f_on">
   </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  <span class="spacer"></span>
   {% if can_create %}<a class="btn2 primary" href="{% url 'cashbox:payment-new' %}">{% translate "استيفاء دفعة" %}</a>{% endif %}
+  <span class="count">{% blocktranslate count n=receipts|length %}سند واحد{% plural %}{{ n }} سندات{% endblocktranslate %}</span>
 </form>
+
 <div class="card2">
+  <div class="card2-head"><h2>{% translate "سندات القبض" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "رقم السند" %}</th><th>{% translate "سند الدائرة المالية" %}</th>
-        <th>{% translate "المشارك" %}</th><th>{% translate "التاريخ" %}</th>
-        <th>{% translate "المبلغ" %}</th><th>{% translate "الطريقة" %}</th>
-        <th>{% translate "الصندوق" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "رقم السند" %}</th>
+          <th>{% translate "سند الدائرة المالية" %}</th>
+          <th>{% translate "المشارك" %}</th>
+          <th>{% translate "التاريخ" %}</th>
+          <th>{% translate "المبلغ" %}</th>
+          <th>{% translate "الطريقة" %}</th>
+          <th>{% translate "الصندوق" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for r in receipts %}
           <tr>
-            <td dir="ltr">{{ r.internal_receipt_number }}</td>
-            <td dir="ltr">{{ r.external_receipt_ref|default:"—" }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ r.internal_receipt_number }}</strong></td>
+            <td dir="ltr" translate="no">{{ r.external_receipt_ref|default:"—" }}</td>
             <td>{{ r.participant_name }}</td>
-            <td class="num">{{ r.received_on }}</td>
+            <td class="num"><span dir="ltr">{{ r.received_on|date:"Y/m/d" }}</span></td>
             <td class="num">{{ r.amount }}</td>
             <td>{{ r.payment_method }}</td>
             <td>{{ r.cashier }}</td>
-            <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span>
-                {% if r.is_closed %}<span class="chip ok">{% translate "مقفل" %}</span>{% endif %}</td>
-            <td><a class="btn2 ghost" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}">{% translate "عرض" %}</a></td>
+            <td>
+              <span class="chip {{ r.status|status_tone }} dot">{{ r.status_display }}</span>
+              {% if r.is_closed %}<span class="chip ok">{% translate "مقفل" %}</span>{% endif %}
+            </td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty">
-              <span class="empty-title">{% translate "لا سندات قبض في هذا النطاق" %}</span>
-              <span class="empty-body">{% translate "السند يصدر عند استيفاء دفعة، ويوزّعها آلياً على رسم التسجيل والرسوم الدراسية (BR-022)." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا سندات قبض في هذا النطاق" %}</span>
+            <span class="empty-body">{% translate "السند يصدر عند استيفاء دفعة، ويوزّعها آلياً على رسم التسجيل والرسوم الدراسية (BR-022)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
