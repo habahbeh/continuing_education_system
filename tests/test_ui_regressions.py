@@ -5268,12 +5268,10 @@ def test_the_first_payment_minimum_is_read_from_its_setting(
 
     assert response.context["minimum_first_payment"] == configured
     assert "أقل دفعة أولى للدبلوم" in page
-    # The seeded value still reads the way it always did…
+    # The seeded value reads the way it always did, breakdown included.
     assert "400" in page
-    # …and the arithmetic that only held for 400 is no longer asserted on
-    # screen: it explains the current value, and its place is the setting's
-    # own note, not a sentence that outlives the value.
-    assert "300 تسجيل" not in page
+    assert "300 تسجيل + 100 أول مادة" in page
+    assert response.context["minimum_breakdown_holds"] is True
 
 
 def test_changing_the_setting_changes_the_figure_on_screen(
@@ -5314,6 +5312,75 @@ def test_changing_the_setting_changes_the_figure_on_screen(
     assert "575" in page
     assert "أقل دفعة أولى للدبلوم" in page
     assert "400" not in page, "the old figure is still on screen"
+    # The split belonged to 400 and nothing records how 575 divides, so it goes.
+    assert response.context["minimum_breakdown_holds"] is False
+    assert "300 تسجيل" not in page
+    assert "100 أول مادة" not in page
+    # …and the screen is otherwise the screen it was: same form, same button.
+    assert page.count("<form") == 1
+    assert page.count("<button") == 1
+    assert "csrfmiddlewaretoken" in page
+
+
+@pytest.mark.parametrize(
+    ("configured", "shows_breakdown"),
+    [
+        # The split the centre published, beside the value it was published for.
+        ("400.000", True),
+        # A raised minimum: nothing in the system says how it divides…
+        ("575.000", False),
+        # …and neither does a lowered one, nor one that merely looks near 400.
+        ("250.000", False),
+        ("400.500", False),
+    ],
+)
+def test_the_breakdown_is_shown_only_beside_the_value_it_explains(
+    client: Client, seeded_settings: None, configured: str, shows_breakdown: bool
+) -> None:
+    """
+    «300 تسجيل + 100 أول مادة» is the reasoning behind 400 and no other figure.
+    Printed beside a different minimum it would be arithmetic that does not add
+    up, so it is dropped rather than guessed at — while the amount itself keeps
+    tracking the setting either way.
+    """
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.core.models import SettingValueType
+    from apps.core.services.settings_service import close_setting, set_setting
+
+    today = timezone.localdate()
+    if configured != "400.000":
+        close_setting("diploma_minimum_first_payment", effective_to=today - timedelta(days=1))
+        set_setting(
+            "diploma_minimum_first_payment",
+            Decimal(configured),
+            value_type=SettingValueType.DECIMAL,
+            effective_from=today,
+            note="BR-020 — regression fixture.",
+        )
+
+    client.force_login(_user(Role.CASHIER, f"pn.split.{configured}".replace(".", "-")))
+    response = client.get(reverse("cashbox:payment-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["minimum_first_payment"] == Decimal(configured)
+    assert response.context["minimum_breakdown_holds"] is shows_breakdown
+    assert ("300 تسجيل + 100 أول مادة" in page) is shows_breakdown
+    # The figure itself is on screen whichever branch was taken — compared
+    # against what a template really renders, since USE_L10N formats the
+    # Decimal and 400.500 reaches the page as «400,500».
+    from django.template.defaultfilters import floatformat
+
+    assert "أقل دفعة أولى للدبلوم" in page
+    assert floatformat(Decimal(configured), -3) in page
+    # And the till is the till, in both branches.
+    assert page.count("<form") == 1
+    assert page.count("<button") == 1
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page
 
 
 def test_the_minimum_is_left_unsaid_when_it_is_not_configured(client: Client, db: None) -> None:

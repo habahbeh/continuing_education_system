@@ -157,6 +157,8 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
         method_choices=payment_service.payment_method_choices(),
     )
 
+    minimum_first_payment = _minimum_first_payment_today()
+
     if request.method == "POST" and form.is_valid():
         data = form.cleaned_data
         try:
@@ -193,9 +195,17 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
             # template printed «400» as prose while the rule is enforced from
             # this effective-dated setting, so changing the setting left the
             # page stating a number the system no longer refused below.
-            "minimum_first_payment": _minimum_first_payment_today(),
+            "minimum_first_payment": minimum_first_payment,
+            "minimum_breakdown_holds": minimum_first_payment == _BREAKDOWN_HOLDS_AT,
         },
     )
+
+
+#: The published split — 300 registration plus 100 for the first subject — is
+#: the reasoning behind ONE value and holds for no other. Nothing in the system
+#: records how a different minimum divides, so the breakdown is shown beside
+#: this figure and dropped beside any other rather than guessed at.
+_BREAKDOWN_HOLDS_AT = Decimal("400")
 
 
 def _minimum_first_payment_today() -> Decimal | None:

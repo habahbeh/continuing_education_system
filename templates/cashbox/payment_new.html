@@ -15,9 +15,12 @@
 
   والرقم يُقرأ من الإعداد المؤرّخ `diploma_minimum_first_payment` لا من نصّ
   القالب: كان مكتوباً «400» فيبقى على الشاشة بعد أن يتغيّر الإعداد، فتقول
-  الصفحة حدّاً لا يرفضه الحفظ. وسقط معه التفصيل «300 تسجيل + 100 أول مادة»:
-  هو تعليل القيمة الحالية — وموضعه ملاحظة الإعداد نفسه — لا جزءٌ من القاعدة،
-  ويكذب مع أول تعديل للقيمة.
+  الصفحة حدّاً لا يرفضه الحفظ.
+
+  أما التفصيل «300 تسجيل + 100 أول مادة» فيظهر مع قيمته وحدها: هو تعليل الـ400
+  ولا يصحّ لغيرها، ولا يعرف النظام كيف ينقسم حدٌّ آخر. فإن تغيّر الإعداد بقي
+  المبلغ وحده بلا تفصيل — والقسمة تُحذف ولا تُخمَّن. والشرط يُحسَب في العرض
+  مرّة واحدة (`_BREAKDOWN_HOLDS_AT`) لا في القالب.
 
   والقراءة بتاريخ اليوم لأن القارئ لم يختر تاريخ الاستيفاء بعد. أما الفحص
   فيجري في الخدمة بتاريخ السند، وقد يكون للدبلوم حدٌّ خاص أعلى (Q-15) — فهذا
@@ -44,7 +47,11 @@
   <div class="card2-body">
     {% if minimum_first_payment is not None %}
       <p class="hint boxed">
-        {% blocktranslate with minimum=minimum_first_payment|floatformat:"-3" %}أقل دفعة أولى للدبلوم {{ minimum }} ديناراً — يفرضها النظام عند الحفظ.{% endblocktranslate %}
+        {% if minimum_breakdown_holds %}
+          {% blocktranslate with minimum=minimum_first_payment|floatformat:"-3" %}أقل دفعة أولى للدبلوم {{ minimum }} ديناراً (300 تسجيل + 100 أول مادة) — يفرضها النظام عند الحفظ.{% endblocktranslate %}
+        {% else %}
+          {% blocktranslate with minimum=minimum_first_payment|floatformat:"-3" %}أقل دفعة أولى للدبلوم {{ minimum }} ديناراً — يفرضها النظام عند الحفظ.{% endblocktranslate %}
+        {% endif %}
       </p>
     {% endif %}
     <form method="post">
