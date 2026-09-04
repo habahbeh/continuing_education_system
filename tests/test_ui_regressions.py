@@ -9394,3 +9394,265 @@ def test_the_partner_card_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a fact is still being alerted in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The new-partner form — page polish (Wave 1)
+# ---------------------------------------------------------------------------
+# §3.5/23 gives CREATE to the centre manager alone, and the view guards it on
+# GET as well as POST: there is no PARTNER_NEW matrix row, so the officer and
+# the auditor are refused the page rather than shown a form they could not
+# submit. The screen was already the closest to polished in the wave — it had
+# a title block, a boxed hint and `.form-acts` — and was missing the section,
+# the sentence, the way back and any teaching.
+PARTNER_NEW_TEMPLATE = Path("templates/partners/partner_new.html")
+
+
+def _partner_new_page(client: Client) -> str:
+    response = client.get(reverse("partners:partner-new"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "may_create"), PARTNER_READERS)
+def test_the_new_partner_form_opens_for_create_and_refuses_mere_readers(
+    client: Client, seeded_settings: None, role: str, may_create: bool
+) -> None:
+    """
+    Reading the partners register is not permission to open its form. The
+    officer and the auditor hold VIEW and are refused here — in both
+    directions, and on GET, which is where the view puts the guard.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "partners")) is may_create
+    client.force_login(_user(role, f"pn.open.{role}".lower().replace("_", ".")))
+
+    expected = 200 if may_create else 403
+    assert client.get(reverse("partners:partner-new")).status_code == expected
+
+
+@pytest.mark.parametrize("role", PARTNER_NON_READERS)
+def test_the_new_partner_form_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    client.force_login(_user(role, f"pn.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:partner-new")).status_code == 403
+
+
+def test_the_new_partner_form_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("partners:partner-new")).status_code in (302, 403)
+
+
+def test_a_role_without_create_cannot_post_a_partner(client: Client, seeded_settings: None) -> None:
+    """The page was never offered; the route still refuses the POST and writes nothing."""
+    from apps.partners.models import Partner
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "pn.post"))
+
+    response = client.post(
+        reverse("partners:partner-new"),
+        {"code": "PN-X", "name_ar": "محاولة", "partner_type": "COMPANY", "status": "ACTIVE"},
+    )
+
+    assert response.status_code == 403
+    assert not Partner.objects.filter(code="PN-X").exists()
+
+
+def test_the_new_partner_form_kept_every_field_it_carried(
+    client: Client, seeded_settings: None
+) -> None:
+    """Presentation only: same fields, same names, one form, one submit."""
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.fields"))
+
+    response = client.get(reverse("partners:partner-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page, name
+    assert page.count("<form") == 1
+    assert page.count("<button") == 1
+    assert "csrfmiddlewaretoken" in page
+    assert 'class="form-acts"' in page
+
+
+def test_the_new_partner_form_still_saves_and_lands_on_the_card(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The polish touched no submit behaviour: a valid post still creates the
+    partner through the service and redirects to its card.
+    """
+    from apps.partners.models import Partner
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.save"))
+
+    response = client.post(
+        reverse("partners:partner-new"),
+        {
+            "code": "PN-NEW-1",
+            "name_ar": "شركة اختبار العرض",
+            "partner_type": "COMPANY",
+            "status": "ACTIVE",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response["Location"] == reverse("partners:partner-detail", args=["PN-NEW-1"])
+    assert Partner.objects.filter(code="PN-NEW-1").exists()
+
+
+def test_an_invalid_partner_is_refused_and_says_which_field(
+    client: Client, seeded_settings: None
+) -> None:
+    """A refusal still renders the form with its error, and writes nothing."""
+    from apps.partners.models import Partner
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.invalid"))
+
+    response = client.post(reverse("partners:partner-new"), {"code": "", "name_ar": ""})
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.status_code == 200
+    assert not Partner.objects.exists()
+    assert 'class="fld has-error' in page or 'class="err"' in page
+    assert response.context["form"].errors
+
+
+def test_the_new_partner_head_reads_like_every_polished_form(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The head gained the section, the sentence and the way back — and the title
+    is read from the view's own ``title`` rather than retyped in the template,
+    so one screen cannot end up with two names that drift apart.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.head"))
+
+    response = client.get(reverse("partners:partner-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'class="eyebrow"' in page
+    assert "الشركاء والمخالصات" in page
+    assert 'class="sub"' in page
+    assert f"<h1>{response.context['title']}</h1>" in page
+
+    source = PARTNER_NEW_TEMPLATE.read_text(encoding="utf-8")
+    assert "{{ title }}" in source
+    assert "شريك جديد" not in source, "the screen still carries a second, hand-typed name"
+
+
+def test_the_new_partner_form_offers_the_way_back_and_the_cancel_it_had(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Two links to the same register — the head's way back and the form's
+    cancel. Both are safe: whoever opened this page holds VIEW there too.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.back"))
+
+    page = _partner_new_page(client)
+    href = reverse("partners:partners")
+
+    # Three links point there and each is doing a different job: the head's way
+    # back, the guided help's next step, and the form's cancel. The two that
+    # belong to this screen's own chrome are asserted where they sit.
+    acts = page[page.index('class="page-head"') : page.index('class="card2"')]
+    cancel = page[page.index('class="form-acts"') :]
+
+    assert f'href="{href}"' in acts, "the head lost its way back"
+    assert f'href="{href}"' in cancel, "the form lost its cancel"
+    assert "إلغاء" in cancel
+    assert client.get(href).status_code == 200
+
+
+def test_the_new_partner_form_names_no_commercial_term(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    There is no rate on this form and there should be no promise of one. The
+    hint and the guidance both send the reader to the agreement instead.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.terms"))
+
+    response = client.get(reverse("partners:partner-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for field in ("percent_rate", "settlement_cycle", "exclude_registration_fee"):
+        assert f'name="{field}"' not in page, field
+        assert field not in response.context["form"].fields, field
+    assert "شروط القسمة تُسجَّل على الاتفاقية لا هنا" in page
+
+
+def test_the_new_partner_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The form records a party. The help may not imply it starts an obligation
+    or carries a term — which is exactly the mistake the empty rate field
+    invites, and there is no field here for a validation message to land on.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["partner-new"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "لا ينشئ التزاماً ولا يبدأ شرطاً" in text
+    assert "§3.5/23" in text
+    for absent in ("حذف", "مطالبة", "مخالصة نقدية", "تفعيل"):
+        assert absent not in text, f"the partner-new guidance offers «{absent}»"
+
+
+def test_the_new_partner_guidance_points_only_where_its_reader_may_go(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Only the manager reaches this page, and they hold VIEW on the register —
+    so the one link is drawn and it opens.
+    """
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pn.links"))
+    page = _partner_new_page(client)
+
+    guide = GUIDES["partner-new"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        assert Action.VIEW in allowed_actions(Role.CENTER_MANAGER, screen)
+        assert f'href="{reverse(route)}"' in page
+        assert client.get(reverse(route)).status_code == 200
+
+
+def test_the_new_partner_form_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PARTNER_NEW_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the new-partner form uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

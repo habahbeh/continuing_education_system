@@ -437,6 +437,19 @@ GUIDES: dict[str, Guide] = {
             "مخالصة — تلك كلّها على الاتفاقية، ولا تبدأ قبل سريانها."
         ),
     ),
+    "partner-new": Guide(
+        what=_("تسجيل الطرف المتعاقد باسمه وبياناته التعريفية، لا بشروطه المالية."),
+        who=_("مدير المركز وحده — §3.5/23 لا تمنح غيره الإنشاء."),
+        after=_("تُفتح بطاقة الشريك، ومنها تُسجَّل اتفاقيته الموقّعة."),
+        links=((Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),),
+        # The mistake this form invites is looking for the rate on it. Saying
+        # where the terms live is more use than any validation message would
+        # be, because there is no field here to refuse.
+        stops=_(
+            "لا نسبة على هذا النموذج ولا استثناء ولا دورة مخالصة: تسجيل الشريك لا "
+            "ينشئ التزاماً ولا يبدأ شرطاً — الاتفاقية الموقّعة وحدها تفعل ذلك."
+        ),
+    ),
     "partner-detail": Guide(
         what=_("بطاقة الطرف المتعاقد: بياناته التعريفية والاتفاقيات المعقودة معه."),
         who=_("مدير المركز والموظف المالي وحساب التدقيق يقرؤونها."),
