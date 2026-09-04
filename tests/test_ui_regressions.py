@@ -7395,15 +7395,22 @@ def test_the_screen_prints_no_fee_amount_of_its_own(client: Client, seeded_setti
     defect, on a second screen. On an empty register the page now names no
     amount at all.
     """
+    import re
     from decimal import Decimal
 
     from apps.core.services.settings_service import get_setting
 
     client.force_login(_user(Role.FINANCE_OFFICER, "xf.amounts"))
     page = _extra_fees_page(client)
+    # Attribute VALUES are stripped before searching. The page carries a CSRF
+    # token — 64 random alphanumerics — and a bare `"75" not in page` matched
+    # it roughly once in sixty renders, which is a test that fails on a coin
+    # toss rather than on a regression. What the guarantee is about is the
+    # text a reader sees, so that is what is searched.
+    visible = re.sub(r'\s(?:value|name|id|for|class|href|action)="[^"]*"', " ", page)
 
-    assert "75" not in page
-    assert "15 " not in page
+    assert "75" not in visible
+    assert "15 " not in visible
     # The settings are still where the service reads them from; the screen
     # simply no longer duplicates them.
     from datetime import date
@@ -9651,6 +9658,443 @@ def test_the_new_partner_form_added_no_dead_class_and_no_dependency() -> None:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     markup = source.split("{% endcomment %}", 1)[-1]
     assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The agreements register — page polish (Wave 1)
+# ---------------------------------------------------------------------------
+# §3.5/24 «V C E A P · — · V P · — · — · V P». Three roles read it. The create
+# LINK, though, is drawn off VIEW on §3.5/25 and not off CREATE — deliberately:
+# the editor opens on VIEW and submits on CREATE, so the audit account may read
+# it without being able to fill it in. That asymmetry is pinned below in both
+# directions, because it looks like a bug until you read the view.
+AGREEMENTS_TEMPLATE = Path("templates/partners/agreements.html")
+
+#: role, sees the «تسجيل اتفاقية موقّعة» link — VIEW on §3.5/25, not CREATE.
+AGREEMENT_READERS = (
+    (Role.CENTER_MANAGER, True),
+    (Role.FINANCE_OFFICER, False),
+    (Role.AUDIT_ACCOUNT, True),
+)
+
+#: The roles §3.5/24 leaves empty. An empty cell is an explicit deny (BR-080).
+AGREEMENT_NON_READERS = (Role.REGISTRATION_OFFICER, Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def three_agreements(seeded_settings: None) -> list[object]:
+    """
+    One agreement of each calculation model, and one of them expired.
+
+    Each model names a different value field, which is what the «القيمة»
+    column reads — so all three shapes have to be on screen for that column to
+    be worth asserting anything about.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from apps.partners.models import (
+        Agreement,
+        AgreementStatus,
+        CalculationModel,
+        PartnerStatus,
+        PartnerType,
+    )
+    from apps.partners.services import partner_service
+
+    manager = _user(Role.CENTER_MANAGER, "ag.fixture.manager")
+    partner = partner_service.create_partner(
+        actor=manager,
+        data={
+            "code": "PN-AG-1",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+        },
+    )
+    common = {
+        "partner": partner,
+        "signed_on": date(2026, 8, 1),
+        "valid_from": date(2026, 9, 1),
+        "valid_to": date(2099, 8, 31),
+        "status": AgreementStatus.ACTIVE,
+    }
+    return [
+        Agreement.objects.create(
+            agreement_number="2026/AG-P",
+            title_ar="اتفاقية نسبية",
+            calculation_model=CalculationModel.PERCENT,
+            percent_rate=Decimal("50.0000"),
+            **common,
+        ),
+        Agreement.objects.create(
+            agreement_number="2026/AG-F",
+            title_ar="اتفاقية مبلغ ثابت",
+            calculation_model=CalculationModel.FIXED_PER_STUDENT,
+            fixed_amount_per_student=Decimal("195.000"),
+            sell_price=Decimal("400.000"),
+            **common,
+        ),
+        Agreement.objects.create(
+            agreement_number="2020/AG-X",
+            partner=partner,
+            title_ar="اتفاقية انقضت",
+            signed_on=date(2019, 8, 1),
+            valid_from=date(2019, 9, 1),
+            valid_to=date(2020, 8, 31),
+            status=AgreementStatus.ACTIVE,
+            calculation_model=CalculationModel.PERCENT,
+            percent_rate=Decimal("40.0000"),
+        ),
+    ]
+
+
+def _agreements_page(client: Client) -> str:
+    response = client.get(reverse("partners:agreements"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
+def test_the_agreements_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _sees_link: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "agreements")
+    client.force_login(_user(role, f"ag.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:agreements")).status_code == 200
+
+
+@pytest.mark.parametrize("role", AGREEMENT_NON_READERS)
+def test_the_agreements_register_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "agreements")
+    client.force_login(_user(role, f"ag.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:agreements")).status_code == 403
+
+
+def test_the_agreements_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("partners:agreements")).status_code in (302, 403)
+
+
+def test_the_agreements_register_stayed_read_only(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    Activation and supersession live on the agreement's own page, each behind
+    its own guard there. This screen writes nothing, so the polish may not have
+    introduced a POST target — and the empty `<form>` that wrapped one link is
+    gone, because a form with no field and no submit sends nothing and only
+    misleads whoever reads the template next.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "ag.readonly"))
+
+    page = _agreements_page(client)
+
+    assert "<form" not in page
+    assert "<button" not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert 'name="action"' not in page
+
+
+@pytest.mark.parametrize(("role", "sees_link"), AGREEMENT_READERS)
+def test_the_editor_link_follows_view_on_the_editor_not_create(
+    client: Client, three_agreements: list[object], role: str, sees_link: bool
+) -> None:
+    """
+    The link is drawn off VIEW on §3.5/25, which is why the audit account sees
+    it and the finance officer does not — the auditor may READ the editor. The
+    guarantee that matters is that the link always opens for whoever is shown
+    it, and never for whoever is not.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.VIEW in allowed_actions(role, "agreement-new")) is sees_link
+    client.force_login(_user(role, f"ag.link.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("partners:agreements"))
+    assert response.context["can_create"] is sees_link
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    href = reverse("partners:agreement-new")
+    assert (f'href="{href}"' in page) is sees_link, role
+    # Shown ⇒ it opens. Hidden ⇒ the route refuses. No reader meets a refusal.
+    assert client.get(href).status_code == (200 if sees_link else 403)
+
+
+def test_only_the_manager_can_actually_submit_the_editor(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Seeing the editor is not permission to fill it in. The auditor is shown the
+    link, opens the page, and is still refused on POST — which is the whole
+    reason the two checks differ.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.CREATE in allowed_actions(Role.CENTER_MANAGER, "agreement-new")
+    assert Action.CREATE not in allowed_actions(Role.AUDIT_ACCOUNT, "agreement-new")
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ag.submit"))
+    assert client.get(reverse("partners:agreement-new")).status_code == 200
+    assert client.post(reverse("partners:agreement-new"), {}).status_code == 403
+
+
+def test_every_register_row_links_to_an_agreement_its_reader_may_open(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """The «عرض» link is covered by the same VIEW that opened this register."""
+    for role, _sees_link in AGREEMENT_READERS:
+        client.force_login(_user(role, f"ag.row.{role}".lower().replace("_", ".")))
+        response = client.get(reverse("partners:agreements"))
+        page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+        for row in response.context["agreements"]:
+            href = reverse("partners:agreement-detail", args=[row["agreement_number"]])
+            assert f'href="{href}"' in page, f"{role} · {row['agreement_number']}"
+            assert client.get(href).status_code == 200, f"{role} · {href}"
+        client.logout()
+
+
+def test_the_value_column_reads_the_field_its_model_names(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    A percentage agreement has no per-student amount and a per-student one has
+    no rate. The column shows whichever the model names — unchanged by the
+    polish — and never invents a figure for a model that has none.
+    """
+    from decimal import Decimal
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "ag.value"))
+
+    response = client.get(reverse("partners:agreements"))
+    rows = {a["agreement_number"]: a for a in response.context["agreements"]}
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert rows["2026/AG-P"]["percent_rate"] == Decimal("50.0000")
+    assert rows["2026/AG-P"]["fixed_amount_per_student"] is None
+    assert rows["2026/AG-F"]["fixed_amount_per_student"] == Decimal("195.000")
+    assert rows["2026/AG-F"]["percent_rate"] is None
+
+    # Compared against what a template really renders. The cells print the
+    # Decimal directly, so USE_L10N localises it — 50.0000 reaches the page as
+    # «50,0000», and `floatformat` would trim it to «50» and prove nothing.
+    from django.utils.formats import localize
+
+    table = page[page.index('class="tbl"') : page.index("</table>")]
+    assert f"{localize(rows['2026/AG-P']['percent_rate'])}%" in table
+    assert localize(rows["2026/AG-F"]["fixed_amount_per_student"]) in table
+    # The sell price belongs to the agreement's own page, not to this column.
+    assert localize(rows["2026/AG-F"]["sell_price"]) not in table
+
+
+def test_the_expired_agreement_is_named_the_same_way_the_partner_card_names_it(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    One rule, one wording. The partner card says «انقضت مدّتها» and so does
+    this register — two screens phrasing one fact two ways is how a reader
+    learns two rules (polish rules §7).
+
+    And it is no longer yellow: `.warn` is the colour of a refusal, while
+    running out of term is a fact about the calendar that the service computes.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ag.expired"))
+
+    response = client.get(reverse("partners:agreements"))
+    rows = {a["agreement_number"]: a for a in response.context["agreements"]}
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+    table = page[page.index('class="tbl"') : page.index("</table>")]
+
+    assert rows["2020/AG-X"]["is_expired"] is True
+    assert rows["2026/AG-P"]["is_expired"] is False
+    assert table.count("انقضت مدّتها") == 1
+    assert "منقضية" not in page, "the two screens still word one fact two ways"
+    assert 'class="chip warn"' not in table, "a calendar fact is drawn as a refusal"
+    # Both screens read the service's flag; neither compares dates itself.
+    assert "انقضت مدّتها" in PARTNER_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    assert "a.is_expired" in AGREEMENTS_TEMPLATE.read_text(encoding="utf-8")
+
+
+def test_the_agreements_head_reads_like_every_polished_register(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and a count over the rows
+    drawn — all off the view's own ``title`` and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ag.head"))
+
+    page = _agreements_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشركاء والمخالصات" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+    assert "3 اتفاقيات" in page
+
+
+def test_the_agreements_table_names_its_eighth_column(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and lands off the left
+    edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ag.col"))
+
+    page = _agreements_page(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 8
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_three_models_rule_is_explained_and_no_longer_alerted(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    «ثلاثة نماذج تعاقد» was a blue `.note info` between the guided-help block
+    and the table — a third framed block above the rows. Blue is an alert and
+    explaining a rule is not one (polish rules §6.5).
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ag.rule"))
+
+    page = _agreements_page(client)
+
+    assert "note info" not in page
+    assert '<p class="hint">' in page
+    anchor = "ثلاثة نماذج تعاقد"
+    assert anchor in page
+    assert page.index(anchor) > page.index('class="tbl"'), "the rule left its rows behind"
+
+
+def test_the_agreements_filter_parameter_is_untouched(
+    client: Client, three_agreements: list[object]
+) -> None:
+    """
+    The view has always narrowed by ``?partner=``; it has never had a control,
+    and the polish added none. Pinned so a later slice knows what to keep.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ag.filter"))
+
+    page = _agreements_page(client)
+    assert 'class="filterbar"' not in page
+    assert 'name="partner"' not in page
+
+    narrowed = client.get(reverse("partners:agreements"), {"partner": "PN-AG-1"})
+    assert len(narrowed.context["agreements"]) == 3
+    missed = client.get(reverse("partners:agreements"), {"partner": "PN-NOPE"})
+    assert len(missed.context["agreements"]) == 0
+
+    source = Path("apps/partners/views.py").read_text(encoding="utf-8")
+    assert 'request.GET.get("partner", "").strip()' in source
+
+
+def test_the_agreements_empty_state_kept_its_words_and_its_gate(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The register already had a written empty state; the polish kept it word for
+    word, and its action still follows the same flag the header link does.
+    """
+    from apps.partners.models import Agreement
+
+    assert not Agreement.objects.exists()
+    for role, sees_link in AGREEMENT_READERS:
+        client.force_login(_user(role, f"ag.empty.{role}".lower().replace("_", ".")))
+        page = _agreements_page(client)
+        assert 'class="empty-title"' in page
+        assert "تُوقَّع على الورق ثم تُسجَّل هنا كما وردت" in page
+        assert ("empty-act" in page) is sees_link, role
+        client.logout()
+
+
+def test_the_agreements_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The register lists and links. The help may not imply an agreement is edited
+    here — BR-042 says the opposite — and it names the three roles that read
+    the screen rather than only the one that writes.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["agreements"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "BR-042" in text
+    assert "لا تُعدَّل اتفاقية موقّعة" in text
+    assert "حساب التدقيق" in text
+    for absent in ("حذف", "تعديل البنود", "استرداد"):
+        assert absent not in text, f"the agreements guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
+def test_the_agreements_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _sees_link: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"ag.links.{role}".lower().replace("_", ".")))
+    page = _agreements_page(client)
+
+    guide = GUIDES["agreements"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_agreements_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = AGREEMENTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the agreements register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
     assert "sr-only" not in markup
     for alert in ("note info", "note warn", "note danger", "note ok"):
         assert alert not in markup, f"a rule is still being explained in «{alert}»"

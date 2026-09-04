@@ -1,31 +1,75 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل الاتفاقيات الموقّعة. العرض يقبل GET وحده: الاعتماد والإحلال على صفحة
+  الاتفاقية الواحدة، ولكلٍّ منهما حارسه هناك. فلا يُرسم هنا زرّ فعل واحد؛
+  الرابطان الوحيدان هما «تسجيل اتفاقية موقّعة» و«عرض» على كل صف.
+
+  ورايةُ الرابط الأول `can_create` تُحسب من VIEW على §3.5/25 لا من CREATE —
+  وهو ما يقصده العرض: المحرِّر يُفتح على VIEW ويُرسل على CREATE، فيقرؤه حساب
+  التدقيق ولا يملؤه. فالرابط يفتح لمن يُعرض له، ولا يُدعى أحد إلى رفض.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا مرشّح ولا حارس، ولا عمود بدّل موضعه،
+  ولا قيمة تعاقدية أو مالية مُسّت — «القيمة» تُقرأ من الحقل الذي يسمّيه نموذج
+  الاحتساب، كما كانت.
+
+  الجملة التي كانت في `.note info` نزلت إلى `.hint` تحت الجدول: الأزرق تنبيه،
+  وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5). وكانت تفصل كتلة الإرشاد عن
+  الجدول بكتلة مؤطَّرة ثالثة.
+
+  و`<form class="toolbar">` صار `<div>`: نموذجٌ بلا حقل ولا زرّ إرسال لا
+  يُرسل شيئاً، ووجوده يوهم من يقرأ القالب أن هنا إرسالاً. الرابط هو الرابط
+  نفسه بصنفه نفسه.
+
+  و«انقضت مدّتها» بالصياغة نفسها المستقرّة في بطاقة الشريك — قاعدةٌ واحدة لا
+  تُقال بصيغتين (قواعد التحسين §7) — وبلا `warn`: الأصفر للحظة يُرفض فيها شيء،
+  وانقضاء المدّة واقعةُ تاريخ تحسبها الخدمة في `is_expired`.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "العقود الموقّعة كما وردت: نموذج احتساب كل عقد وقيمته وتقاسم خصمه ودورة مخالصته." %}</p>
+  </div>
+  <div class="acts">
+    {% if can_create %}
+      <a class="btn2 primary" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>
+    {% endif %}
+  </div>
 </div>
 
 {% guided_help "agreements" %}
-<div class="note info">
-  {% translate "النظام يدعم ثلاثة نماذج تعاقد ولا يثبّت أياً منها في الكود — تُعرض بنود كل اتفاقية كما وُقّعت." %}
-</div>
-{% if can_create %}
-  <form class="toolbar">
-    <a class="btn2 primary" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>
-  </form>
-{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الاتفاقيات المسجَّلة" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=agreements|length %}اتفاقية واحدة{% plural %}{{ n }} اتفاقيات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرقم" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النموذج" %}</th>
-        <th>{% translate "القيمة" %}</th><th>{% translate "تقاسم الخصم" %}</th>
-        <th>{% translate "دورة المخالصة" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرقم" %}</th>
+          <th>{% translate "الشريك" %}</th>
+          <th>{% translate "النموذج" %}</th>
+          <th class="num">{% translate "القيمة" %}</th>
+          <th>{% translate "تقاسم الخصم" %}</th>
+          <th>{% translate "دورة المخالصة" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for a in agreements %}
           <tr>
-            <td dir="ltr">{{ a.agreement_number }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ a.agreement_number }}</strong></td>
             <td>{{ a.partner_name }}</td>
             <td>{{ a.calculation_model_display }}</td>
             <td class="num">
@@ -37,18 +81,25 @@
             <td>{{ a.discount_split_mode_display }}</td>
             <td>{{ a.settlement_cycle_display }}</td>
             <td>
-              <span class="chip {{ a.status|status_tone }}">{{ a.status_display }}</span>
-              {% if a.is_expired %}<span class="chip warn">{% translate "منقضية" %}</span>{% endif %}
+              <span class="chip {{ a.status|status_tone }} dot">{{ a.status_display }}</span>
+              {% if a.is_expired %}<span class="chip">{% translate "انقضت مدّتها" %}</span>{% endif %}
             </td>
-            <td><a class="btn2 ghost" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="8" class="empty">
-              <span class="empty-title">{% translate "لا اتفاقيات بعد" %}</span>
-              <span class="empty-body">{% translate "الاتفاقية تُوقَّع على الورق ثم تُسجَّل هنا كما وردت، وتسري باعتماد منفصل من صفحتها." %}</span>
-              {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>{% endif %}
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا اتفاقيات بعد" %}</span>
+            <span class="empty-body">{% translate "الاتفاقية تُوقَّع على الورق ثم تُسجَّل هنا كما وردت، وتسري باعتماد منفصل من صفحتها." %}</span>
+            {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>{% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "النظام يدعم ثلاثة نماذج تعاقد ولا يثبّت أياً منها في الكود — تُعرض بنود كل اتفاقية كما وُقّعت. و«القيمة» هي الحقل الذي يسمّيه نموذج الاحتساب وحده: نسبةٌ أو مبلغٌ لكل طالب أو عمولة." %}</p>
   </div>
 </div>
 {% endblock %}

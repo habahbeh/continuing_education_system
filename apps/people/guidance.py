@@ -472,9 +472,15 @@ GUIDES: dict[str, Guide] = {
     ),
     "agreements": Guide(
         what=_("اتفاقيات الشركاء: نموذج الاحتساب، والاستثناءات، ولقطة الأسعار."),
-        who=_("مدير المركز يُنشئ ويعتمد."),
+        # §3.5/24 gives the manager C E A and leaves the officer and the audit
+        # account reading. Naming them keeps the line true for the three roles
+        # that actually open the screen.
+        who=_("مدير المركز يُنشئ ويعتمد، والموظف المالي وحساب التدقيق يقرآن."),
         after=_("على الاتفاقية تُبنى مطالبة الشريك."),
-        links=((Screen.ENTITLEMENT, "settlements:entitlement", _("استحقاق الشركاء")),),
+        links=(
+            (Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),
+            (Screen.ENTITLEMENT, "settlements:entitlement", _("استحقاق الشركاء")),
+        ),
         stops=_("لا تُعدَّل اتفاقية موقّعة؛ التصحيح يكون بملحق يحلّ محلّها (BR-042)."),
     ),
     "agreement-new": Guide(
