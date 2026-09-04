@@ -7636,3 +7636,455 @@ def test_the_extra_fees_register_added_no_dead_class_and_no_dependency() -> None
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The expenses register — page polish
+# ---------------------------------------------------------------------------
+# §3.4/22 «V A P · — · V C E P · — · — · V P». Three roles read it; the finance
+# officer records and the centre manager decides, and never the same person for
+# one row (D-18). The screen already had a filter bar, counters and a written
+# empty state, so the polish is narrower here: a blue alert carrying a
+# definition, a counter footer using a class the card does not define, four
+# equal-weight numbers with no lead, an unnamed ninth column and a decision
+# note with no accessible name.
+EXPENSES_TEMPLATE = Path("templates/expenses/expenses.html")
+
+#: role, may record, may decide — read straight off §3.4/22.
+EXPENSE_READERS = (
+    (Role.CENTER_MANAGER, False, True),
+    (Role.FINANCE_OFFICER, True, False),
+    (Role.AUDIT_ACCOUNT, False, False),
+)
+
+#: The roles §3.4/22 leaves empty. An empty cell is an explicit deny (BR-080).
+EXPENSE_NON_READERS = (Role.REGISTRATION_OFFICER, Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def three_expenses(seeded_settings: None) -> list[object]:
+    """
+    Three expenses: one still recorded, one approved, one rejected.
+
+    Recorded and decided through the service so ``counts_toward_net_income``
+    and every status is the service's answer — the approved one is the only
+    figure ``approved_total`` is entitled to include.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from apps.expenses.services import expense_service
+
+    officer = _user(Role.FINANCE_OFFICER, "xp.fixture.officer")
+    manager = _user(Role.CENTER_MANAGER, "xp.fixture.manager")
+    categories = [code for code, _label in expense_service.category_choices(as_of=date.today())]
+    assert categories, "no expense categories are seeded, so this proves nothing"
+
+    def _record(code: str, amount: str, category: str) -> object:
+        return expense_service.record(
+            actor=officer,
+            code=code,
+            category=category,
+            amount=Decimal(amount),
+            incurred_on=date(2026, 9, 20),
+            description_ar=f"مصروف {code}",
+            reference=f"INV-{code}",
+        )
+
+    still_recorded = _record("EX-UI-1", "40.000", categories[0])
+    approved = _record("EX-UI-2", "60.000", categories[0])
+    rejected = _record("EX-UI-3", "25.000", categories[-1])
+    expense_service.approve(actor=manager, expense=approved, note_ar="ضمن الموازنة")
+    expense_service.reject(actor=manager, expense=rejected, note_ar="بلا فاتورة")
+    return [still_recorded, approved, rejected]
+
+
+def _expenses_page(client: Client) -> str:
+    response = client.get(reverse("expenses:expenses"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_record", "_may_decide"), EXPENSE_READERS)
+def test_the_expenses_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_record: bool, _may_decide: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "expenses")
+    client.force_login(_user(role, f"xp.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("expenses:expenses")).status_code == 200
+
+
+@pytest.mark.parametrize("role", EXPENSE_NON_READERS)
+def test_the_expenses_register_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "expenses")
+    client.force_login(_user(role, f"xp.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("expenses:expenses")).status_code == 403
+
+
+def test_the_expenses_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("expenses:expenses")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_record", "may_decide"), EXPENSE_READERS)
+def test_each_expense_act_is_drawn_only_for_the_role_that_holds_it(
+    client: Client, three_expenses: list[object], role: str, may_record: bool, may_decide: bool
+) -> None:
+    """
+    §9.7 puts recording and deciding in two different hands, and the screen
+    reads that split rather than inventing it. Asserted in both directions.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "expenses")) is may_record
+    assert (Action.APPROVE in allowed_actions(role, "expenses")) is may_decide
+    client.force_login(_user(role, f"xp.act.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("expenses:expenses"))
+    assert response.context["can_create"] is may_record
+    assert response.context["can_approve"] is may_decide
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert ('name="action" value="record"' in page) is may_record
+    assert ('value="approve"' in page) is may_decide
+    assert ('value="reject"' in page) is may_decide
+    if not (may_record or may_decide):
+        assert '<form method="post"' not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_the_separation_holds_before_the_identity_test_is_ever_needed() -> None:
+    """
+    D-18 is enforced twice over here, and the outer guard is the matrix itself:
+    §3.4/22 gives no role both CREATE and APPROVE, so on this screen the person
+    who records an entry can never be the person offered its decision.
+
+    The template's own identity test is kept all the same — it is the branch
+    that would catch a matrix change, and the chip that explains the refusal
+    instead of leaving a missing button to explain itself. Deleting a guard
+    because the layer above it currently makes it unreachable is how the layer
+    above it becomes load-bearing by accident.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role in (Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT):
+        actions = allowed_actions(role, "expenses")
+        assert not (Action.CREATE in actions and Action.APPROVE in actions), role
+
+    source = EXPENSES_TEMPLATE.read_text(encoding="utf-8")
+    assert "e.created_by_id != current_user_id" in source
+    assert "الاعتماد لغير من قيّده" in source
+    # …and the service refuses it regardless of what any screen draws.
+    service = Path("apps/expenses/services/expense_service.py").read_text(encoding="utf-8")
+    assert "لا يعتمد المصروفَ من قيّده (D-18)." in service
+
+
+def test_the_record_form_keeps_every_field_it_carried(
+    client: Client, seeded_settings: None
+) -> None:
+    """Presentation only: same fields, same names, one record form."""
+    client.force_login(_user(Role.FINANCE_OFFICER, "xp.fields"))
+
+    response = client.get(reverse("expenses:expenses"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page, name
+    assert 'class="form-acts"' in page
+
+
+def test_the_decision_note_box_has_a_name_a_screen_reader_reads(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    It was a bare box with a placeholder and nothing else. A placeholder is not
+    an accessible name, so the field is named the way the daily closing names
+    its own in-row input — and the field name itself is untouched.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "xp.note"))
+
+    page = _expenses_page(client)
+
+    assert 'name="note_ar" aria-label="ملاحظة القرار"' in page
+    assert 'placeholder="ملاحظة…"' in page
+
+
+def test_the_counter_footers_use_the_slot_the_card_defines(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    The footers were `.muted` — a global colour with no place inside a `.kpi`,
+    which defines `.kpi .foot` for exactly this line, with its own size and
+    spacing. The words are unchanged.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.foot"))
+
+    page = _expenses_page(client)
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+
+    assert ".kpi .foot" in css
+    assert 'class="foot"' in page
+    assert "قيد معتمَد" in page
+    assert "يُخصم من صافي دخل المركز" in page
+    # `.muted` survives where it belongs — on the recorded decision note.
+    assert 'class="muted"' in page
+
+
+def test_the_approved_total_is_the_one_number_the_screen_leads_with(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    Four equal cards gave a reader no lead. The design system defines exactly
+    one highlight per screen, and the number that earns it is the one the
+    income report subtracts. The value is still the service's own.
+    """
+    from decimal import Decimal
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.lead"))
+
+    response = client.get(reverse("expenses:expenses"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    # Only the approved entry counts, and the highlight carries that figure.
+    assert response.context["approved_total"] == Decimal("60.000")
+    assert page.count('class="kpi primary"') == 1
+    assert ".kpi.primary" in CSS_SOURCE.read_text(encoding="utf-8")
+
+
+def test_the_expense_row_prints_only_keys_it_already_carried(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """The nine columns are the projection's own values, unchanged."""
+    from django.template.defaultfilters import floatformat
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.rows"))
+
+    response = client.get(reverse("expenses:expenses"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for row in response.context["expenses"]:
+        assert row["code"] in page
+        assert row["description_ar"] in page
+        assert row["reference"] in page
+        assert str(row["category_label"]) in page
+        assert str(row["status_display"]) in page
+        assert floatformat(row["amount"], -3) in page
+
+
+def test_the_expenses_head_reads_like_every_polished_screen(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and a count over the rows
+    drawn — all off the view's own ``title`` and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.head"))
+
+    page = _expenses_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+
+
+def test_the_expenses_table_names_its_ninth_column(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and lands off the left
+    edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.col"))
+
+    page = _expenses_page(client)
+
+    assert 'aria-label="القرار"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 9
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_definition_is_explained_and_no_longer_alerted(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    What an expense is NOT was a blue `.note info` above the page. Blue is an
+    alert and a definition is not one (polish rules §6.5), so it now sits as a
+    `.hint` beneath the rows it describes.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.rule"))
+
+    page = _expenses_page(client)
+
+    assert "note info" not in page
+    assert '<p class="hint">' in page
+    anchor = "لا علاقة لها بالتزامات الشريك"
+    assert anchor in page
+    assert page.index(anchor) > page.index('class="tbl"'), "the definition left its rows behind"
+
+
+def test_the_expenses_filters_are_the_three_that_were_already_there(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    ``from``, ``to`` and ``category`` narrow the register and did before; the
+    polish added no control and renamed nothing. The counters follow the same
+    window, which is what makes the filter honest.
+    """
+    from decimal import Decimal
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.filter"))
+
+    page = _expenses_page(client)
+    assert 'name="from"' in page and 'name="to"' in page and 'name="category"' in page
+    assert 'name="status"' not in page, "a control appeared for a parameter that had none"
+
+    everything = client.get(reverse("expenses:expenses"))
+    assert len(everything.context["expenses"]) == 3
+
+    # A window that excludes every entry empties the rows AND the totals.
+    outside = client.get(reverse("expenses:expenses"), {"from": "2027-01-01"})
+    assert len(outside.context["expenses"]) == 0
+    assert outside.context["approved_total"] == Decimal("0.000")
+
+    # Narrowing by category still narrows.
+    category = everything.context["expenses"][0]["category"]
+    narrowed = client.get(reverse("expenses:expenses"), {"category": category})
+    assert all(r["category"] == category for r in narrowed.context["expenses"])
+    assert 0 < len(narrowed.context["expenses"]) <= 3
+
+
+def test_the_status_parameter_the_view_reads_is_still_read(
+    client: Client, three_expenses: list[object]
+) -> None:
+    """
+    The view has always accepted ``?status=``; it has never had a control, and
+    the polish did not add one. Pinned so a later slice that adds the control
+    knows the parameter it must keep.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.status"))
+
+    approved = client.get(reverse("expenses:expenses"), {"status": "APPROVED"})
+
+    assert [r["status"] for r in approved.context["expenses"]] == ["APPROVED"]
+    source = Path("apps/expenses/views.py").read_text(encoding="utf-8")
+    assert 'request.GET.get("status", "").strip()' in source
+
+
+def test_the_expenses_empty_state_survived_the_polish(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    This screen already had a written empty state; the polish kept it word for
+    word and still offers no action, because the reader may not hold it.
+    """
+    from apps.expenses.models import Expense
+
+    assert not Expense.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.empty"))
+
+    page = _expenses_page(client)
+
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "المصروف يُقيَّد على دورة أو على المركز" in page
+    assert "empty-act" not in page
+
+
+def test_the_expenses_register_renders_on_an_empty_database(
+    client: Client, seeded_settings: None
+) -> None:
+    """Settings and nothing else — the screen still draws for all three readers."""
+    for role, _record, _decide in EXPENSE_READERS:
+        client.force_login(_user(role, f"xp.bare.{role}".lower().replace("_", ".")))
+        assert client.get(reverse("expenses:expenses")).status_code == 200
+        client.logout()
+
+
+def test_the_expenses_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen records an expense and decides one. The help may not imply a row
+    is edited or deleted, and it says what an expense is NOT — the confusion
+    the screen exists to prevent.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["expenses"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "D-18" in text
+    assert "ليس التزام شريك" in text
+    assert "إيراد لا تكلفة" in text
+    for absent in ("حذف", "تعديل المصروف", "استرداد"):
+        assert absent not in text, f"the expenses guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_record", "_may_decide"), EXPENSE_READERS)
+def test_the_expenses_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_record: bool, _may_decide: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"xp.links.{role}".lower().replace("_", ".")))
+    page = _expenses_page(client)
+
+    guide = GUIDES["expenses"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="kpi-grid"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_expenses_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = EXPENSES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the expenses register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

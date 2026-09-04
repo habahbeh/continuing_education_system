@@ -1,12 +1,40 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل مصروفات المركز ونموذج قيدها. التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل
+  ولا حارس، ولا مرشّح ولا معامل استعلام، ولا عمود بدّل موضعه. الأزرار الثلاثة
+  هي نفسها خلف الرايات نفسها — «اعتماد» و«رفض» خلف `can_approve` وشرط أن يكون
+  القارئ غير من قيّد المصروف (D-18)، و«قيد» خلف `can_create` — وكلها تُفحص
+  ثانيةً في `policy.require` عند الإرسال.
+
+  الجملة التي كانت في `.note info` نزلت إلى `.hint` تحت الجدول: الأزرق تنبيه،
+  وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5). وموضعها تحت الصفوف التي تخصّها.
+
+  ذيل بطاقة العدّاد كان `.muted`، والنظام يعرّف `.kpi .foot` لهذا الموضع
+  بالذات — بتباعده وحجمه — بينما `.muted` لونٌ عام لا مكان له في البطاقة.
+  و«إجمالي المعتمَد» صار `.kpi primary`: النظام يعرّف إبرازاً واحداً لكل شاشة،
+  والتسلسل يأتي من رقم واحد مميَّز لا من أرقام متساوية. والرقم نفسه لم يتغيّر —
+  هو `approved_total` من الخدمة كما كان.
+
+  عمود القرار كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
+  أفقياً. وحقل ملاحظة القرار كان صندوقاً بلا اسم يقرؤه قارئ الشاشة — أُعطي
+  `aria-label` بالصياغة نفسها المستقرّة في إقفال الصندوق.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "ما أنفقه المركز، مقيَّداً بتصنيفه وتاريخه ودفعته. والمعتمَد وحده هو ما يُطرح من صافي الدخل." %}</p>
+  </div>
 </div>
-<div class="note info">
-  {% translate "مصروفات المركز — ما أنفقته الجامعة. لا علاقة لها بالتزامات الشريك (ما يدين به للجامعة) ولا بالمستهلكات المحمَّلة على المشارك (وهي إيراد). ولا يُخصم من صافي الدخل إلا المصروف المعتمَد." %}
-</div>
+
+{% guided_help "expenses" %}
 
 <form method="get" class="filterbar" role="search">
   <div class="fld">
@@ -20,67 +48,86 @@
   <div class="fld">
     <label for="f_category">{% translate "الفئة" %}</label>
     <select name="category" id="f_category">
-    <option value="">{% translate "كل التصنيفات" %}</option>
-    {% for code, label in categories %}<option value="{{ code }}"{% if code == request.GET.category %} selected{% endif %}>{{ label }}</option>{% endfor %}
-  </select>
+      <option value="">{% translate "كل التصنيفات" %}</option>
+      {% for code, label in categories %}<option value="{{ code }}"{% if code == request.GET.category %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
   </div>
   <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
+  <span class="count">{% blocktranslate count n=expenses|length %}قيد واحد{% plural %}{{ n }} قيود{% endblocktranslate %}</span>
 </form>
 
 <div class="kpi-grid">
   {% for t in totals %}
-    <div class="kpi"><div class="label">{{ t.label }}</div>
+    <div class="kpi">
+      <div class="label">{{ t.label }}</div>
       <div class="value num">{{ t.total }}</div>
-      <div class="muted">{{ t.count }} {% translate "قيد معتمَد" %}</div></div>
+      <div class="foot">{{ t.count }} {% translate "قيد معتمَد" %}</div>
+    </div>
   {% endfor %}
-  <div class="kpi"><div class="label">{% translate "إجمالي المعتمَد" %}</div>
+  <div class="kpi primary">
+    <div class="label">{% translate "إجمالي المعتمَد" %}</div>
     <div class="value num">{{ approved_total }}</div>
-    <div class="muted">{% translate "يُخصم من صافي دخل المركز" %}</div></div>
+    <div class="foot">{% translate "يُخصم من صافي دخل المركز" %}</div>
+  </div>
 </div>
 
 <div class="card2">
+  <div class="card2-head"><h2>{% translate "القيود" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "التصنيف" %}</th>
-        <th>{% translate "البيان" %}</th><th>{% translate "الدفعة" %}</th><th>{% translate "المرجع" %}</th>
-        <th>{% translate "المبلغ" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th class="num">{% translate "التاريخ" %}</th>
+          <th>{% translate "التصنيف" %}</th>
+          <th>{% translate "البيان" %}</th>
+          <th>{% translate "الدفعة" %}</th>
+          <th>{% translate "المرجع" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'القرار' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for e in expenses %}
           <tr>
-            <td dir="ltr">{{ e.code }}</td>
-            <td class="num">{{ e.incurred_on }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ e.code }}</strong></td>
+            <td class="num"><span dir="ltr">{{ e.incurred_on|date:"Y/m/d" }}</span></td>
             <td>{{ e.category_label }}</td>
             <td>{{ e.description_ar }}</td>
-            <td dir="ltr">{{ e.cohort_code|default:"—" }}</td>
-            <td dir="ltr">{{ e.reference|default:"—" }}</td>
+            <td dir="ltr" translate="no">{{ e.cohort_code|default:"—" }}</td>
+            <td dir="ltr" translate="no">{{ e.reference|default:"—" }}</td>
             <td class="num">{{ e.amount }}</td>
             <td>
-              <span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span>
+              <span class="chip {{ e.status|status_tone }} dot">{{ e.status_display }}</span>
               {% if e.counts_toward_net_income %}<span class="chip ok">{% translate "يُخصم" %}</span>{% endif %}
             </td>
-            <td>
+            <td class="acts">
               {% if can_approve and e.status == "RECORDED" and e.created_by_id != current_user_id %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="code" value="{{ e.code }}">
-                  <input name="note_ar" placeholder="{% translate 'ملاحظة…' %}">
+                  <input name="note_ar" aria-label="{% translate 'ملاحظة القرار' %}" placeholder="{% translate 'ملاحظة…' %}">
                   <button class="btn2 primary" type="submit" name="action" value="approve">{% translate "اعتماد" %}</button>
                   <button class="btn2" type="submit" name="action" value="reject">{% translate "رفض" %}</button>
                 </form>
               {% elif can_approve and e.status == "RECORDED" %}
-                <span class="chip warn">{% translate "الاعتماد لغير من قيّده" %}</span>
+                <span class="chip warn dot">{% translate "الاعتماد لغير من قيّده" %}</span>
               {% elif e.decision_note_ar %}
                 <small class="muted">{{ e.decision_note_ar }}</small>
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty">
-              <span class="empty-title">{% translate "لا مصاريف مسجّلة" %}</span>
-              <span class="empty-body">{% translate "المصروف يُقيَّد على دورة أو على المركز، ويدخل وعاء القسمة بحسب نموذج الاتفاقية." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا مصاريف مسجّلة" %}</span>
+            <span class="empty-body">{% translate "المصروف يُقيَّد على دورة أو على المركز، ويدخل وعاء القسمة بحسب نموذج الاتفاقية." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "مصروفات المركز — ما أنفقته الجامعة. لا علاقة لها بالتزامات الشريك (ما يدين به للجامعة) ولا بالمستهلكات المحمَّلة على المشارك (وهي إيراد). ولا يُخصم من صافي الدخل إلا المصروف المعتمَد." %}</p>
   </div>
 </div>
 
@@ -91,7 +138,9 @@
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="record">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "قيد" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "قيد" %}</button>
+        </div>
       </form>
     </div>
   </div>

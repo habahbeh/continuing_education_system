@@ -192,6 +192,23 @@ GUIDES: dict[str, Guide] = {
             "الأنواع فقسمتها تقرّرها القاعدة لا مُدخِل الرسم."
         ),
     ),
+    "expenses": Guide(
+        what=_("ما أنفقه المركز، مقيَّداً بتصنيفه وتاريخه ودفعته، وحالة اعتماد كل قيد."),
+        who=_("الموظف المالي يقيّد المصروف، ومدير المركز يعتمده أو يرفضه."),
+        after=_("المعتمَد وحده يُطرح من صافي دخل المركز في تقارير الدخل."),
+        links=(
+            (Screen.REPORTS, "reporting:reports", _("التقارير")),
+            (Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
+        ),
+        # What an expense is NOT is the rule people get wrong here: a partner's
+        # obligation and a consumable charged to a participant both look like
+        # money and are neither of them a cost to subtract.
+        stops=_(
+            "لا يُخصم من صافي الدخل إلا المصروف المعتمَد، ولا يعتمد المصروفَ من قيّده "
+            "(D-18). والمصروف ليس التزام شريك ولا مستهلكات محمَّلة على المشارك — تلك "
+            "إيراد لا تكلفة."
+        ),
+    ),
     "transfers": Guide(
         what=_("طلبات النقل بين الدورات: فحصها واعتمادها وتنفيذها."),
         who=_("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده (BR-066)."),

@@ -833,6 +833,7 @@ GUIDED_HELP_SCREENS = [
     ("billing:discounts", "discounts", "discounts"),
     ("billing:refunds", "refunds", "refunds"),
     ("billing:extra-fees", "extra-fees", "extra-fees"),
+    ("expenses:expenses", "expenses", "expenses"),
     ("operations:transfers", "transfers", "transfers"),
     ("operations:transfer-new", "transfer-new", "transfer-new"),
     ("operations:special-cases", "special-cases", "special-cases"),
