@@ -8619,3 +8619,394 @@ def test_the_opening_balances_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The partners register — page polish (Wave 1)
+# ---------------------------------------------------------------------------
+# §3.5/23 «V C E P · — · V P · — · — · V P». Three roles read it and only the
+# centre manager records a partner. The screen already carried guided help, a
+# search bar and a written empty state, so the polish is narrow: no title
+# block, a bare <h1>, a blue alert wedged between the teaching and its search
+# box, and an unnamed seventh column.
+PARTNERS_TEMPLATE = Path("templates/partners/partners.html")
+
+#: role, may record a partner — read straight off §3.5/23.
+PARTNER_READERS = (
+    (Role.CENTER_MANAGER, True),
+    (Role.FINANCE_OFFICER, False),
+    (Role.AUDIT_ACCOUNT, False),
+)
+
+#: The roles §3.5/23 leaves empty. An empty cell is an explicit deny (BR-080).
+PARTNER_NON_READERS = (Role.REGISTRATION_OFFICER, Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def three_partners(seeded_settings: None) -> list[object]:
+    """
+    Three partners through the creating service, one of them former.
+
+    Built by ``create_partner`` rather than the ORM so ``agreement_count`` and
+    both display labels are the service's own answers.
+    """
+    from apps.partners.models import PartnerStatus, PartnerType
+    from apps.partners.services import partner_service
+
+    manager = _user(Role.CENTER_MANAGER, "pt.fixture.manager")
+    rows = [
+        {
+            "code": "PN-UI-1",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+            "registry_number": "12345",
+        },
+        {
+            "code": "PN-UI-2",
+            "name_ar": "مؤسسة صرح",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+        },
+        {
+            "code": "PN-UI-3",
+            "name_ar": "مدرب مستقل سابق",
+            "partner_type": PartnerType.FREELANCE_TRAINER,
+            "status": PartnerStatus.FORMER,
+        },
+    ]
+    return [partner_service.create_partner(actor=manager, data=data) for data in rows]
+
+
+def _partners_page(client: Client) -> str:
+    response = client.get(reverse("partners:partners"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_create"), PARTNER_READERS)
+def test_the_partners_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "partners")
+    client.force_login(_user(role, f"pt.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:partners")).status_code == 200
+
+
+@pytest.mark.parametrize("role", PARTNER_NON_READERS)
+def test_the_partners_register_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "partners")
+    client.force_login(_user(role, f"pt.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:partners")).status_code == 403
+
+
+def test_the_partners_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("partners:partners")).status_code in (302, 403)
+
+
+def test_the_partners_register_stayed_read_only(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The screen takes GET alone. It draws two links and no form at all, so the
+    polish may not have introduced a POST target or a CSRF token.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pt.readonly"))
+
+    page = _partners_page(client)
+
+    assert 'method="post"' not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert "<button" in page, "the search submit is still a button"
+    assert page.count('name="action"') == 0
+
+
+@pytest.mark.parametrize(("role", "may_create"), PARTNER_READERS)
+def test_the_new_partner_link_is_offered_only_where_create_is_granted(
+    client: Client, three_partners: list[object], role: str, may_create: bool
+) -> None:
+    """
+    A link a reader may not follow ends in a refusal and a BR-085 row, so the
+    gate is asserted in both directions — and the route still refuses whoever
+    the page never offered it to.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "partners")) is may_create
+    client.force_login(_user(role, f"pt.new.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("partners:partners"))
+    assert response.context["can_create"] is may_create
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    href = reverse("partners:partner-new")
+    assert (f'href="{href}"' in page) is may_create
+    if not may_create:
+        assert client.get(href).status_code == 403
+
+
+def test_every_row_links_to_a_detail_page_that_opens(
+    client: Client, three_partners: list[object]
+) -> None:
+    """The «عرض» link exists for every row and reaches a real page."""
+    client.force_login(_user(Role.FINANCE_OFFICER, "pt.detail"))
+
+    response = client.get(reverse("partners:partners"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for row in response.context["partners"]:
+        href = reverse("partners:partner-detail", args=[row["code"]])
+        assert f'href="{href}"' in page, row["code"]
+        assert client.get(href).status_code == 200, row["code"]
+
+
+def test_the_partner_row_prints_only_keys_it_already_carried(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The seven columns are the projection's own values. In particular the
+    agreement count is the service's number, not a length computed in markup.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.rows"))
+
+    response = client.get(reverse("partners:partners"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for row in response.context["partners"]:
+        assert row["code"] in page
+        assert row["name_ar"] in page
+        assert str(row["partner_type_display"]) in page
+        assert str(row["status_display"]) in page
+        assert row["agreement_count"] == 0, "no agreements were created for these partners"
+    # A partner with no registry number says so rather than leaving a blank.
+    assert "—" in page
+
+
+def test_the_partners_register_prints_no_commercial_term_from_an_agreement(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    A partner record is a name, a type and its registry details. The share,
+    the exclusions and the settlement cycle live on the AGREEMENT, and a
+    register that printed them here would invite a reader to take a figure
+    from the wrong document.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.terms"))
+
+    page = _partners_page(client)
+
+    for term in ("النسبة", "الاستثناءات", "دورة المخالصة", "حصة الشريك", "%"):
+        assert term not in page, f"the partners register prints «{term}»"
+
+
+def test_the_partners_head_reads_like_every_polished_screen(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and a count over the rows
+    drawn — all off the view's own ``title`` and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.head"))
+
+    page = _partners_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشركاء والمخالصات" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+    assert 'class="card2-head"' in page
+
+
+def test_the_partner_count_describes_the_rows_on_screen(
+    client: Client, three_partners: list[object]
+) -> None:
+    """The chip counts what was drawn, so it follows the search."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.count"))
+
+    everything = client.get(reverse("partners:partners"))
+    assert len(everything.context["partners"]) == 3
+    assert "3 شركاء" in everything.content.decode("utf-8")
+
+    narrowed = client.get(reverse("partners:partners"), {"q": "تناغم"})
+    assert len(narrowed.context["partners"]) == 1
+    assert "شريك واحد" in narrowed.content.decode("utf-8")
+
+
+def test_the_partners_table_names_its_seventh_column(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and lands off the left
+    edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.col"))
+
+    page = _partners_page(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 7
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_paper_rule_is_explained_and_no_longer_alerted(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    «الاتفاقيات تُوقَّع على الورق» was a blue `.note info` sitting between the
+    guided-help block and the search box — a third framed block separating the
+    teaching from its own tool. Blue is an alert and explaining a rule is not
+    one (polish rules §6.5), so it now sits as a `.hint` under the rows.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.rule"))
+
+    page = _partners_page(client)
+
+    assert "note info" not in page
+    assert '<p class="hint">' in page
+    # Anchored on wording the hint alone carries: the guidance block above the
+    # page must not repeat a sentence the screen already prints, and a shared
+    # phrase would find the guide and prove nothing about where the hint sits.
+    anchor = "الاتفاقيات تُوقَّع على الورق"
+    assert anchor in page
+    assert page.count(anchor) == 1, "the paper rule is printed twice on one page"
+    assert page.index(anchor) > page.index('class="tbl"'), "the rule left its rows behind"
+    # …and the teaching now sits directly above the search box it belongs to.
+    assert page.index('class="filterbar"') > page.index("من يستخدمها")
+
+
+def test_the_partners_search_is_the_one_that_was_already_there(
+    client: Client, three_partners: list[object]
+) -> None:
+    """``?q=`` narrows by name or code and did before; nothing was renamed."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.search"))
+
+    page = _partners_page(client)
+    assert 'name="q"' in page
+
+    by_name = client.get(reverse("partners:partners"), {"q": "صرح"})
+    assert [p["code"] for p in by_name.context["partners"]] == ["PN-UI-2"]
+
+    by_code = client.get(reverse("partners:partners"), {"q": "PN-UI-3"})
+    assert [p["code"] for p in by_code.context["partners"]] == ["PN-UI-3"]
+
+    # The box keeps what was typed, so the reader can see what narrowed it.
+    assert 'value="صرح"' in by_name.content.decode("utf-8")
+
+
+def test_a_search_that_matches_nothing_still_draws_the_written_empty_state(
+    client: Client, three_partners: list[object]
+) -> None:
+    """The register is populated; this empty is the search's, and it still teaches."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.noresult"))
+
+    response = client.get(reverse("partners:partners"), {"q": "لا-يطابق-شيئاً"})
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert len(response.context["partners"]) == 0
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    # The audit account may not record a partner, so the empty offers no act.
+    assert "empty-act" not in page
+
+
+def test_the_partner_empty_state_offers_the_form_only_where_it_is_allowed(
+    client: Client, seeded_settings: None
+) -> None:
+    """An empty register on a fresh install, and its action follows CREATE."""
+    from apps.partners.models import Partner
+
+    assert not Partner.objects.exists()
+    for role, may_create in PARTNER_READERS:
+        client.force_login(_user(role, f"pt.empty.{role}".lower().replace("_", ".")))
+        page = _partners_page(client)
+        assert 'class="empty-title"' in page
+        assert ("empty-act" in page) is may_create, role
+        client.logout()
+
+
+def test_the_partners_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen lists partners and links to the form. The help may not imply a
+    partner is edited or deleted here, and it says where the commercial terms
+    actually live — the reason a thin record is not a poor one.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["partners"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "تلك كلّها على الاتفاقية" in text
+    # The screen prints the paper rule itself; the guide may not repeat it.
+    assert "لا يؤلّفها ولا يعدّلها" not in text
+    for absent in ("حذف", "تعديل الشريك", "مطالبة", "مخالصة نقدية"):
+        assert absent not in text, f"the partners guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_create"), PARTNER_READERS)
+def test_the_partners_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"pt.links.{role}".lower().replace("_", ".")))
+    page = _partners_page(client)
+
+    guide = GUIDES["partners"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="filterbar"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_partners_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PARTNERS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the partners register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

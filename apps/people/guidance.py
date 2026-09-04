@@ -421,10 +421,21 @@ GUIDES: dict[str, Guide] = {
         stops=_("لا شهادة بلا براءة ذمة مكتملة (BR-075)."),
     ),
     "partners": Guide(
-        what=_("سجل الشركاء المتعاقدين مع المركز."),
-        who=_("مدير المركز والموظف المالي."),
-        after=_("بعد تسجيل الشريك تُسجَّل اتفاقيته."),
+        what=_("الأطراف المتعاقدة كما ترد في الاتفاقيات الموقّعة، وكم اتفاقية يحمل كلٌّ منها."),
+        # §3.5/23 gives CREATE to the manager alone; the officer and the audit
+        # account read. Naming the reader as well keeps the line true for the
+        # three roles that actually open the screen.
+        who=_("مدير المركز يسجّل الشريك، والموظف المالي وحساب التدقيق يقرآن."),
+        after=_("بعد تسجيل الشريك تُسجَّل اتفاقيته الموقّعة، وعندها تبدأ الشروط."),
         links=((Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),),
+        # The record is thin on purpose, and a reader looking here for the
+        # share or the exclusions needs to be told where they actually live.
+        # The screen's own `.hint` says the paper rule; saying it here too
+        # would print one sentence twice on one page (polish rules §7.3).
+        stops=_(
+            "سجل الشريك اسمٌ ونوعٌ وبيانات تعريف؛ لا نسبة فيه ولا استثناء ولا دورة "
+            "مخالصة — تلك كلّها على الاتفاقية، ولا تبدأ قبل سريانها."
+        ),
     ),
     "agreements": Guide(
         what=_("اتفاقيات الشركاء: نموذج الاحتساب، والاستثناءات، ولقطة الأسعار."),

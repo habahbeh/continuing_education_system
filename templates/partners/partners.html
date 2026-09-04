@@ -1,14 +1,40 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل الشركاء المتعاقدين. العرض يقبل GET وحده: لا فعل على هذه الشاشة سوى
+  رابطين — «شريك جديد» بحارسه CREATE على §3.5/23، و«عرض» على كل صف وقد مرّ
+  قارئه من بوّابة الشاشة ليصل إليها. فلا نموذج POST هنا ولا بطاقة CSRF.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا مرشّح ولا حارس، ولا عمود بدّل موضعه،
+  ولا معنى تعاقدياً أو مالياً مُسّ — الصفّ يعرض ما تعطيه `list_partners` كما
+  هو، وعدّ الاتفاقيات من الخدمة لا من القالب.
+
+  الجملة التي كانت في `.note info` نزلت إلى `.hint` تحت الجدول: الأزرق تنبيه،
+  وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5). وكانت تقع بين كتلة الإرشاد
+  وشريط البحث، فتفصل التعليم عن أداته بكتلة مؤطَّرة ثالثة.
+
+  عمود الإجراء كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
+  أفقياً.
+
+  والعدّ يُحصى فوق الصفوف المرسومة لا فوق السجل كلّه، فالشريحة تصف ما على
+  الشاشة — و`.filterbar > a.btn2.primary ~ .count` مكانها المعرَّف سلفاً.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "الأطراف المتعاقدة كما ترد في الاتفاقيات الموقّعة، وكم اتفاقية يحمل كلٌّ منها." %}</p>
+  </div>
 </div>
 
 {% guided_help "partners" %}
-<div class="note info">
-  {% translate "الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها كما وردت — لا يؤلّفها ولا يعدّلها بعد سريانها." %}
-</div>
+
 <form method="get" class="filterbar" role="search">
   <div class="fld">
     <label for="f_q">{% translate "بحث" %}</label>
@@ -18,32 +44,49 @@
   {% if can_create %}
     <a class="btn2 primary" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>
   {% endif %}
+  <span class="count">{% blocktranslate count n=partners|length %}شريك واحد{% plural %}{{ n }} شركاء{% endblocktranslate %}</span>
 </form>
+
 <div class="card2">
+  <div class="card2-head"><h2>{% translate "الشركاء" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الاسم" %}</th><th>{% translate "النوع" %}</th>
-        <th>{% translate "السجل" %}</th><th>{% translate "الاتفاقيات" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الاسم" %}</th>
+          <th>{% translate "النوع" %}</th>
+          <th>{% translate "السجل" %}</th>
+          <th class="num">{% translate "الاتفاقيات" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for p in partners %}
           <tr>
-            <td dir="ltr">{{ p.code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ p.code }}</strong></td>
             <td>{{ p.name_ar }}</td>
             <td>{{ p.partner_type_display }}</td>
-            <td dir="ltr">{{ p.registry_number|default:"—" }}</td>
+            <td dir="ltr" translate="no">{{ p.registry_number|default:"—" }}</td>
             <td class="num">{{ p.agreement_count }}</td>
-            <td><span class="chip {{ p.status|status_tone }}">{{ p.status_display }}</span></td>
-            <td><a class="btn2 ghost" href="{% url 'partners:partner-detail' p.code %}">{% translate "عرض" %}</a></td>
+            <td><span class="chip {{ p.status|status_tone }} dot">{{ p.status_display }}</span></td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'partners:partner-detail' p.code %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="7" class="empty">
-              <span class="empty-title">{% translate "لا شركاء مسجّلون بعد" %}</span>
-              <span class="empty-body">{% translate "الشريك هو الطرف المتعاقد كما يرد في الاتفاقية. سجّله أولاً ثم سجّل اتفاقيته الموقّعة." %}</span>
-              {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>{% endif %}
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="7" class="empty">
+            <span class="empty-title">{% translate "لا شركاء مسجّلون بعد" %}</span>
+            <span class="empty-body">{% translate "الشريك هو الطرف المتعاقد كما يرد في الاتفاقية. سجّله أولاً ثم سجّل اتفاقيته الموقّعة." %}</span>
+            {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>{% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها كما وردت — لا يؤلّفها ولا يعدّلها بعد سريانها." %}</p>
   </div>
 </div>
 {% endblock %}
