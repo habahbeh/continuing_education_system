@@ -10531,3 +10531,276 @@ def test_the_agreement_card_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The agreement editor — page polish (Wave 1)
+# ---------------------------------------------------------------------------
+# §3.5/25 «V C E · — · — · — · — · V». The row's split is the whole design: the
+# editor OPENS on VIEW so the auditor can read what the form asks for, and only
+# CREATE gets past the submit. Sprint 8J already grouped the fields and fixed
+# their layout, so this slice is the head, the title, and one blue box that was
+# stating a permission rather than raising an alarm.
+AGREEMENT_NEW_TEMPLATE = Path("templates/partners/agreement_new.html")
+
+#: role, may open the editor, may submit it — read straight off §3.5/25.
+AGREEMENT_EDITOR_ROLES = (
+    (Role.CENTER_MANAGER, True, True),
+    (Role.AUDIT_ACCOUNT, True, False),
+    (Role.FINANCE_OFFICER, False, False),
+    (Role.REGISTRATION_OFFICER, False, False),
+    (Role.FINANCE_MANAGER, False, False),
+    (Role.CASHIER, False, False),
+)
+
+
+def _agreement_new_page(client: Client) -> str:
+    response = client.get(reverse("partners:agreement-new"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "may_open", "may_submit"), AGREEMENT_EDITOR_ROLES)
+def test_the_editor_opens_on_view_and_submits_on_create(
+    client: Client, seeded_settings: None, role: str, may_open: bool, may_submit: bool
+) -> None:
+    """
+    The two checks differ on purpose and the polish did not merge them. A role
+    holding only VIEW reads the form and is refused by ``policy.require`` on
+    POST — not by a hidden button.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    actions = allowed_actions(role, "agreement-new")
+    assert (Action.VIEW in actions) is may_open
+    assert (Action.CREATE in actions) is may_submit
+    client.force_login(_user(role, f"an.gate.{role}".lower().replace("_", ".")))
+
+    assert client.get(reverse("partners:agreement-new")).status_code == (200 if may_open else 403)
+    assert client.post(reverse("partners:agreement-new"), {}).status_code == (
+        200 if may_submit else 403
+    )
+
+
+def test_the_editor_refuses_an_anonymous_visitor(client: Client, seeded_settings: None) -> None:
+    assert client.get(reverse("partners:agreement-new")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_open", "may_submit"), AGREEMENT_EDITOR_ROLES[:2])
+def test_the_draft_button_follows_create_while_the_fields_follow_view(
+    client: Client, seeded_settings: None, role: str, may_open: bool, may_submit: bool
+) -> None:
+    """
+    Both readers get every field; only the one who may submit gets the button.
+    The auditor keeps the form and the cancel link, so the page still reads.
+    """
+    client.force_login(_user(role, f"an.save.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("partners:agreement-new"))
+    assert response.context["can_create"] is may_submit
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page, name
+    assert ("حفظ كمسودة" in page) is may_submit
+    assert "إلغاء" in page
+    assert "csrfmiddlewaretoken" in page
+
+
+def test_the_read_only_reader_is_told_so_without_being_alarmed(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «للاطلاع فقط» was a blue `.note info`. Blue is an alert and stating a
+    permission is not one (polish rules §6.5), so the sentence is a `.hint`
+    above the fields it describes and the head carries the same read-only chip
+    the other read-only screens use.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "an.readonly"))
+
+    page = _agreement_new_page(client)
+
+    assert "note info" not in page
+    assert "هذه الشاشة للاطلاع فقط بصلاحيتك" in page
+    assert 'class="chip info dot"' in page
+    assert "قراءة فقط" in page
+
+
+def test_the_manager_is_told_none_of_that(client: Client, seeded_settings: None) -> None:
+    """The read-only chip and sentence are for the reader who cannot submit."""
+    client.force_login(_user(Role.CENTER_MANAGER, "an.notreadonly"))
+
+    page = _agreement_new_page(client)
+
+    assert "للاطلاع فقط" not in page
+    assert "قراءة فقط" not in page
+    assert "حفظ كمسودة" in page
+
+
+def test_a_refusal_is_still_drawn_as_a_refusal(client: Client, seeded_settings: None) -> None:
+    """
+    `.note danger` over the form's own errors stays exactly where it was: that
+    IS the moment something is refused, and it is what the colour is reserved
+    for. Only the permission statement lost its box.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "an.errors"))
+
+    response = client.post(reverse("partners:agreement-new"), {"partner_code": ""})
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.status_code == 200
+    assert response.context["form"].errors
+    assert 'class="err"' in page or "has-error" in page
+    source = AGREEMENT_NEW_TEMPLATE.read_text(encoding="utf-8")
+    assert 'class="note danger" role="alert"' in source
+
+
+def test_the_editor_head_reads_like_every_polished_form(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The head gained the section, the sentence and the way back — and the title
+    is read from the view's own ``title`` rather than retyped, so one screen
+    cannot end up with two names that drift apart.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "an.head"))
+
+    response = client.get(reverse("partners:agreement-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'class="eyebrow"' in page
+    assert "الشركاء والمخالصات" in page
+    assert 'class="sub"' in page
+    assert f"<h1>{response.context['title']}</h1>" in page
+
+    href = reverse("partners:agreements")
+    assert f'href="{href}"' in page
+    assert client.get(href).status_code == 200
+
+    source = AGREEMENT_NEW_TEMPLATE.read_text(encoding="utf-8")
+    assert "{{ title }}" in source
+    assert source.count("تسجيل اتفاقية موقّعة") == 0, "a second, hand-typed name survives"
+
+
+def test_the_model_groups_and_their_switch_are_untouched(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    Sprint 8J's arrangement is load-bearing and this slice did not touch it:
+    the groups still key off the same select, and the hand-written `<select>`
+    stays hand-written because `x-model` has to bind that element.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "an.groups"))
+
+    response = client.get(reverse("partners:agreement-new"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert 'x-data="{ model:' in page
+    assert 'x-model="model"' in page
+    assert "x-show=\"model === '" in page
+    assert page.count("<fieldset") == len(list(response.context["form"].grouped()))
+    assert 'class="fld-group"' in page
+    assert "calc-row" not in page, "the 8J layout fix was undone"
+
+
+def test_the_hiding_is_courtesy_and_the_service_is_the_control(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    A percentage agreement posted without its rate is refused by the form and
+    the service, not by the browser hiding a group — which is what makes the
+    page safe with JavaScript off.
+    """
+    from apps.partners.models import Agreement
+
+    client.force_login(_user(Role.CENTER_MANAGER, "an.control"))
+
+    response = client.post(
+        reverse("partners:agreement-new"),
+        {
+            "partner_code": "",
+            "agreement_number": "2026/JS-OFF",
+            "title_ar": "بلا نسبة",
+            "calculation_model": "PERCENT",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["form"].errors
+    assert not Agreement.objects.filter(agreement_number="2026/JS-OFF").exists()
+    service = Path("apps/partners/services/partner_service.py").read_text(encoding="utf-8")
+    assert "def check_agreement_terms" in service
+
+
+def test_the_editor_guidance_names_the_reader_who_cannot_write() -> None:
+    """
+    §3.5/25 lets the audit account open this page, so the help has to be true
+    for them too — and it still says where the exclusions come from, which is
+    the rule the form's defaults make easy to misread.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["agreement-new"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "حساب التدقيق" in text
+    assert "BR-092" in text
+    assert "الاستثناءات تأتي من العقد الموقّع لا من النظام" in text
+    for absent in ("حذف", "تعديل اتفاقية سارية", "اعتماد السريان"):
+        assert absent not in text, f"the agreement-new guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "may_open", "_may_submit"), AGREEMENT_EDITOR_ROLES[:2])
+def test_the_editor_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, may_open: bool, _may_submit: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"an.links.{role}".lower().replace("_", ".")))
+    page = _agreement_new_page(client)
+
+    guide = GUIDES["agreement-new"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may, f"{role} · {route}"
+        if may:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_agreement_editor_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = AGREEMENT_NEW_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the agreement editor uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    # The permission statement lost its box; the refusal kept its colour.
+    for alert in ("note info", "note warn", "note ok"):
+        assert alert not in markup, f"a statement is still being alerted in «{alert}»"
+    assert "note danger" in markup, "the form's own errors lost their alert"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

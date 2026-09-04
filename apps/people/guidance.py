@@ -502,7 +502,9 @@ GUIDES: dict[str, Guide] = {
     ),
     "agreement-new": Guide(
         what=_("تسجيل اتفاقية موقّعة بنموذج احتسابها واستثناءاتها."),
-        who=_("مدير المركز."),
+        # §3.5/25 is «V C E» for the manager and «V» for the audit account, so
+        # the auditor opens this screen too and needs to know it reads to them.
+        who=_("مدير المركز يسجّلها، وحساب التدقيق يطّلع على النموذج ولا يملؤه."),
         after=_("تظهر بعدها في سجل الاتفاقيات."),
         links=((Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),),
         stops=_(
