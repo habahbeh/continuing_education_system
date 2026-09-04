@@ -579,9 +579,20 @@ GUIDES: dict[str, Guide] = {
     ),
     "obligations": Guide(
         what=_("ما على الشريك: غرامات الغياب والدفعات المقدّمة المستردّة."),
-        who=_("مدير المركز والموظف المالي."),
+        # §3.5/29 gives V P to the audit account as well.
+        who=_("مدير المركز والموظف المالي يقيّدان، وحساب التدقيق يقرأ."),
         after=_("تُخصم من مطالبة لاحقة، ولا يُطالَب بها بفاتورة (BR-036)."),
-        links=((Screen.CLAIMS, "settlements:claims", _("المطالبات")),),
+        links=(
+            (Screen.CLAIMS, "settlements:claims", _("المطالبات")),
+            (Screen.OBLIGATIONS, "settlements:absences", _("غيابات المدربين")),
+        ),
+        # Two refusals live behind this form and neither was ever said on the
+        # screen: the statement reference IS the evidence of the debt, and the
+        # absence penalty is a formula that must show its inputs (BR-057).
+        stops=_(
+            "لا يُقيَّد التزام بلا مرجع كشف من المركز، ولا تُقيَّد غرامة الغياب باليد — "
+            "تُحتسب من سجل الغيابات (BR-057)."
+        ),
     ),
     "reports": Guide(
         what=_("التقارير السبعة، ولكل دور ما يُسمح له منها."),

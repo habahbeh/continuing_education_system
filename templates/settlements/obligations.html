@@ -1,54 +1,112 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل التزامات الشركاء تجاه الجامعة، وتحته كتلة قيد التزام يدوي لمن يملك
+  الإنشاء.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا مرشّح ولا عمود بدّل موضعه.
+  الصفوف هي ما يعيده `clawback_service.list_obligations`، والنموذج يُرسم من
+  `partials/_form.html` ويُرسل `action=record` إلى المسار نفسه. ولا استيفاء
+  هنا: الالتزام يُستوفى بالحسم على بطاقة المطالبة، لا من هذا السجل.
+
+  ما تغيّر:
+
+  * الترويسة صارت كترويسة كل سجلّ مصقول، وفوق الجدول عدّاد ما رُسم من صفوف؛
+  * كتلتا `.note info` الزرقاوان صارتا `.hint`: الأزرق تنبيه، وشرحُ من يقيّد
+    الالتزام ومن يرفعه النظام آلياً ليس تنبيهاً (قواعد التحسين §6.5). والأولى
+    كانت فقرةً طويلة تفصل الإرشاد عن الجدول، فصارت سطراً تحته وقائمةً في
+    بطاقتها: الطرق الثلاث التي يصل بها الالتزام إلى هذا السجل، وهي ما يحتاج
+    القارئ تمييزه في الصفّ الواحد؛
+  * الجدول كان تسعة أعمدة بلا محاذاة رقمية على ثلاثة منها، فأخذت `num`؛
+  * «المُستوفى» و«المتبقّي» عمودان يقولان معاً هل بقي شيء، فبقيا كما هما ولم
+    يُصبغ أيّهما: الاستيفاء الجزئي حالةٌ تعرضها شريحة الحالة أصلاً
+    (`PARTIALLY_RECOVERED` في `_WARN`)، وصبغُ عمودٍ فوقها تكرارٌ للون؛
+  * الحالة الفارغة كانت تقول إن الالتزام «يُحتسب من التسجيلات» وهو نصفُ
+    الحقيقة: ثلاثة أنواع تُقيَّد باليد. صارت تقول الطرق كلها، وتدلّ على كتلة
+    القيد لمن يملكها وحده (قواعد التحسين §8.2)؛
+  * زرّ الإرسال دخل `.form-acts`، والنموذج أخذ `novalidate`.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "ما على الشريك للجامعة: مبلغه، وما استُوفي منه بالحسم، وما بقي مفتوحاً لمطالبة لاحقة." %}</p>
+  </div>
 </div>
 
 {% guided_help "obligations" %}
-<div class="note info">
-  {% translate "التزامات الشريك تجاه الجامعة — تُستوفى بالحسم من مطالباته لا نقداً. رواتب المدربين ومصاريف التدريب العملي وإعادة ما قُبض عن أجزاء لم تُنفَّذ تُقيَّد هنا. أما غرامة غياب المدرب فتُحتسب من سجل الغيابات لأنها صيغة بمدخلات، واسترجاع الصرف المقدّم واسترجاع الاسترداد يرفعهما النظام آلياً." %}
-</div>
+
+<p class="hint">{% translate "التزامات الشريك تجاه الجامعة تُستوفى بالحسم من مطالباته لا نقداً — ولا يُستوفى شيء من هذا السجل: الحسم يقع على بطاقة المطالبة." %}</p>
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الالتزامات المسجَّلة" %}</h2>
+    <div class="acts">
+      <span class="count muted">{% blocktranslate count n=obligations|length %}التزام واحد{% plural %}{{ n }} التزامات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النوع" %}</th>
-        <th>{% translate "المبلغ" %}</th><th>{% translate "المُستوفى" %}</th><th>{% translate "المتبقّي" %}</th>
-        <th>{% translate "مقيَّد باتفاقية" %}</th><th>{% translate "البيان" %}</th><th>{% translate "الحالة" %}</th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الشريك" %}</th>
+          <th>{% translate "النوع" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th class="num">{% translate "المُستوفى" %}</th>
+          <th class="num">{% translate "المتبقّي" %}</th>
+          <th>{% translate "مقيَّد باتفاقية" %}</th>
+          <th>{% translate "البيان" %}</th>
+          <th>{% translate "الحالة" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for o in obligations %}
           <tr>
-            <td dir="ltr">{{ o.code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ o.code }}</strong></td>
             <td>{{ o.partner_name }}</td>
             <td>{{ o.obligation_type_display }}</td>
             <td class="num">{{ o.amount }}</td>
             <td class="num">{{ o.recovered_amount }}</td>
             <td class="num">{{ o.outstanding }}</td>
-            <td dir="ltr">{{ o.restricted_to|default:"—" }}</td>
+            <td dir="ltr" translate="no">{{ o.restricted_to|default:"—" }}</td>
             <td>{{ o.statement_reference }}</td>
-            <td><span class="chip {{ o.status|status_tone }}">{{ o.status_display }}</span></td>
+            <td><span class="chip {{ o.status|status_tone }} dot">{{ o.status_display }}</span></td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty">
-              <span class="empty-title">{% translate "لا التزامات" %}</span>
-              <span class="empty-body">{% translate "الالتزام يُحتسب من التسجيلات المشمولة باتفاقية الشريك." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا التزامات على أي شريك" %}</span>
+            <span class="empty-body">{% translate "لا التزام قائم اليوم بأي من طرقه الثلاث: ما يُقيَّد باليد بموجب كشف من المركز، وما يرفعه النظام آلياً عن دفعة مقدّمة أو استرداد، وغرامة الغياب المحتسبة من سجل الغيابات." %}</span>
+            {% if can_create %}
+              <span class="empty-body">{% translate "قيّد أول التزام يدوي من كتلة «قيد التزام» أسفل هذه الصفحة." %}</span>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "الالتزام يصل هذا السجل بثلاث طرق: رواتب المدربين ومصاريف التدريب العملي وإعادة ما قُبض عن أجزاء لم تُنفَّذ تُقيَّد باليد؛ واسترجاع الصرف المقدّم واسترجاع الاسترداد يرفعهما النظام آلياً؛ وغرامة غياب المدرب تُحتسب من سجل الغيابات لأن BR-057 يجعلها صيغةً تُظهر مدخلاتها لا مبلغاً يُكتب." %}</p>
+  </div>
 </div>
+
 {% if can_create %}
   <div class="card2">
     <div class="card2-head"><h2>{% translate "قيد التزام" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
-        {% translate "مرجع الكشف إلزامي — «بموجب كشف من المركز» وهو سند الذمة. والالتزام الناشئ عن دفعة يُقيَّد على اتفاقيتها." %}
-      </div>
-      <form method="post">{% csrf_token %}
+      <p class="hint boxed">{% translate "مرجع الكشف إلزامي — «بموجب كشف من المركز» وهو سند الذمة. والالتزام الناشئ عن دفعة يُقيَّد على اتفاقيتها." %}</p>
+      <form method="post" novalidate>
+        {% csrf_token %}
         <input type="hidden" name="action" value="record">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "قيد الالتزام" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "قيد الالتزام" %}</button>
+        </div>
       </form>
     </div>
   </div>

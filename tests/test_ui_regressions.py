@@ -11714,3 +11714,127 @@ def test_the_settlement_card_carries_no_inline_style_and_no_script() -> None:
     assert "novalidate" in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the obligations register (templates/settlements/obligations.html)
+# ---------------------------------------------------------------------------
+OBLIGATIONS_TEMPLATE = Path("templates/settlements/obligations.html")
+
+#: §3.5/29 — the manager and the officer both record; the audit account reads.
+OBLIGATIONS_READERS = [Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT]
+
+
+def _obligations_page(client: Client, role: str, tag: str) -> str:
+    client.force_login(_user(role, f"ob.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:obligations"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_obligations_register_explains_without_alerting(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Two blue boxes on a register that refuses nothing — one a paragraph long,
+    standing between the teaching block and the table. Blue is an alert, and
+    saying which obligations are typed and which the system raises is not one
+    (polish rules §6.5).
+    """
+    page = _obligations_page(client, role, "tone")
+
+    for alert in ("note info", "note warn", "note ok"):
+        assert alert not in page, f"the register still alerts in «{alert}»"
+    assert "تُستوفى بالحسم من مطالباته لا نقداً" in page, "…and the rule is still said"
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_register_names_all_three_routes_an_obligation_arrives_by(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Which route raised a row is what a reader has to tell apart when reading
+    one: hand-recorded against a centre statement, raised automatically, or
+    computed from the absence register. The empty state used to name only the
+    first idea — «يُحتسب من التسجيلات» — which is true of none of the three.
+    """
+    page = _obligations_page(client, role, "routes")
+
+    assert "لا التزامات على أي شريك" in page
+    assert "بموجب كشف من المركز" in page
+    assert "يرفعه النظام آلياً" in page
+    assert "سجل الغيابات" in page
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_empty_register_points_only_the_recorder_at_the_form(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """An empty state's action goes by permission like any other (§8.2)."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_record = Action.CREATE in allowed_actions(role, "obligations")
+    assert may_record is (role != Role.AUDIT_ACCOUNT)
+
+    page = _obligations_page(client, role, "empty")
+
+    assert ("كتلة «قيد التزام» أسفل هذه الصفحة" in page) is may_record
+    assert ("قيد الالتزام" in page) is may_record
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_two_refusals_behind_the_form_are_taught_to_every_reader(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The service refuses an obligation with no statement reference, and refuses
+    an absence penalty recorded by hand — both proved in
+    ``apps/settlements/tests``, and neither was ever said on the screen. They
+    are `stops` now, and guide prose is not filtered (polish rules §3.5).
+    """
+    page = _obligations_page(client, role, "stops")
+
+    assert "ما يوقف العملية" in page
+    assert "بلا مرجع كشف" in page
+    assert "BR-057" in page
+
+
+def test_the_obligations_guide_names_the_reader_who_only_reads(
+    client: Client, seeded_settings: None
+) -> None:
+    """§3.5/29 gives the audit account V P and no more."""
+    page = _obligations_page(client, Role.AUDIT_ACCOUNT, "who")
+
+    assert "حساب التدقيق" in page
+
+
+def test_the_obligations_register_uses_no_class_defined_nowhere() -> None:
+    """A class in neither sheet renders bare."""
+    import re
+
+    source = OBLIGATIONS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_obligations_register_carries_no_inline_style_and_no_script() -> None:
+    """8J-5 removed inline styles from the delivery; they do not come back."""
+    source = OBLIGATIONS_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert "style=" not in source
+    assert "<script" not in source
+    assert 'class="form-acts"' in markup
+    assert "novalidate" in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
