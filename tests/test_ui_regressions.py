@@ -6717,3 +6717,495 @@ def test_the_discounts_register_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The refunds and credit returns screen — page polish
+# ---------------------------------------------------------------------------
+# §3.4/20 «V A P · — · V C E P · — · — · V P». Three roles read it, and the
+# three acts sit in two different pairs of hands: the finance officer requests
+# and executes, the centre manager approves or rejects. The screen was a bare
+# <h1>, a yellow alert carrying two rules at once, an unnamed ninth column, a
+# rejection box with no accessible name and two empty states saying «لا
+# استردادات» and «لا حركات».
+REFUNDS_TEMPLATE = Path("templates/billing/refunds.html")
+
+#: role, may request/execute, may approve — read straight off §3.4/20.
+REFUND_READERS = (
+    (Role.CENTER_MANAGER, False, True),
+    (Role.FINANCE_OFFICER, True, False),
+    (Role.AUDIT_ACCOUNT, False, False),
+)
+
+#: The roles §3.4/20 leaves empty. An empty cell is an explicit deny (BR-080).
+REFUND_NON_READERS = (Role.REGISTRATION_OFFICER, Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def a_refund_and_a_credit(  # type: ignore[no-untyped-def]
+    seeded_settings: None, active_semester: object, participant_data: dict
+):
+    """
+    One requested refund and one returned credit, each on its own enrolment.
+
+    Both through the services: ``partner_recovery_amount`` is the refund
+    service's answer to what the partner was already paid, and the credit is
+    whatever ``get_account_state`` calls an overpayment — neither is a number
+    this fixture is entitled to invent.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.core.management import call_command
+
+    from apps.billing.services import charge_service, credit_service, refund_service
+    from apps.cashbox.models import PaymentMethod
+    from apps.cashbox.services import payment_service
+    from apps.catalog.models import PriceList, PriceListStatus, Program
+    from apps.catalog.services import pricing_service
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.services import participant_service
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    actor = _user(Role.CENTER_MANAGER, "rf.fixture.actor")
+    finance = _user(Role.FINANCE_OFFICER, "rf.fixture.finance")
+    cashier = _user(Role.CASHIER, "rf.fixture.cashier")
+    program = Program.objects.get(code="SC-NET")
+    price_list = PriceList.objects.get(status=PriceListStatus.APPROVED)
+    method, _created = PaymentMethod.objects.get_or_create(
+        code="CASH", defaults={"name_ar": "نقداً"}
+    )
+    quote = pricing_service.resolve_price(
+        program=program, participant_category="UNIVERSITY", as_of=date(2026, 9, 20)
+    )
+    due = quote.course_fee + (quote.registration_fee or Decimal("0.000"))
+
+    def _enrol(suffix: str, id_number: str, paid: object) -> object:
+        cohort = Cohort.objects.create(
+            code=f"CO-RF-{suffix}",
+            program=program,
+            semester=active_semester,
+            name_ar=f"دفعة {program.name_ar} {suffix}",
+            starts_on=date(2026, 9, 20),
+            ends_on=date(2026, 12, 20),
+            capacity=25,
+        )
+        participant = participant_service.create_participant(
+            actor=actor, data={**participant_data, "id_document_number": id_number}
+        )
+        enrollment = Enrollment.objects.create(
+            code=f"EN-RF-{suffix}",
+            participant=participant,
+            cohort=cohort,
+            enrolled_on=date(2026, 9, 20),
+            price_list=price_list,
+        )
+        charge_service.charge_lines_from_quote(
+            actor=actor, enrollment=enrollment, quote=quote, charged_on=date(2026, 9, 20)
+        )
+        payment_service.take_payment(
+            actor=cashier,
+            enrollment=enrollment,
+            amount=paid,
+            payment_method=method,
+            received_on=date(2026, 9, 20),
+        )
+        return enrollment
+
+    # One enrolment paid exactly, so a refund has something to reverse…
+    refunded = _enrol("1", participant_data["id_document_number"], due)
+    refund = refund_service.request_refund(
+        actor=finance,
+        enrollment=refunded,
+        refund_type="PARTIAL",
+        amount=Decimal("30.000"),
+        reason_ar="إلغاء الدورة لعدم اكتمال العدد",
+        official_letter_ref="LT-2026-9",
+        official_letter_date=date(2026, 9, 20),
+        president_approval_ref="PR-2026-9",
+        president_approval_date=date(2026, 9, 20),
+        code="RF-UI-1",
+    )
+    # …and one overpaid, so a credit exists to hand back. Two enrolments, not
+    # one: the point of the screen is that these are different movements.
+    overpaid = _enrol(
+        "2", "8" + participant_data["id_document_number"][1:], due + Decimal("80.000")
+    )
+    credit = credit_service.return_credit(
+        actor=finance,
+        enrollment=overpaid,
+        returned_on=date(2026, 9, 20),
+        reason_ar="دفع زائد",
+        code="CR-UI-1",
+    )
+    return refund, credit
+
+
+def _refunds_page(client: Client) -> str:
+    response = client.get(reverse("billing:refunds"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_create", "_may_approve"), REFUND_READERS)
+def test_the_refunds_screen_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_create: bool, _may_approve: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "refunds")
+    client.force_login(_user(role, f"rf.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:refunds")).status_code == 200
+
+
+@pytest.mark.parametrize("role", REFUND_NON_READERS)
+def test_the_refunds_screen_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "refunds")
+    client.force_login(_user(role, f"rf.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:refunds")).status_code == 403
+
+
+def test_the_refunds_screen_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("billing:refunds")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_create", "_may_approve"), REFUND_READERS)
+def test_both_forms_are_drawn_only_where_create_is_granted(
+    client: Client, seeded_settings: None, role: str, may_create: bool, _may_approve: bool
+) -> None:
+    """
+    The two forms are separate on purpose and both follow the one flag the
+    view computes. A reader without it gets neither, and no CSRF token at all.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "refunds")) is may_create
+    client.force_login(_user(role, f"rf.create.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("billing:refunds"))
+    assert response.context["can_create"] is may_create
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert ('name="action" value="request"' in page) is may_create
+    assert ('name="action" value="return-credit"' in page) is may_create
+    if not may_create:
+        assert "<form" not in page
+        assert "<button" not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_the_two_forms_kept_every_field_they_carried(client: Client, seeded_settings: None) -> None:
+    """
+    Presentation only. The refund form and the credit form stay two forms with
+    two actions, and both keep every field name the view built them from.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "rf.fields"))
+
+    response = client.get(reverse("billing:refunds"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for name in response.context["refund_form"].fields:
+        assert f'name="{name}"' in page, f"refund_form.{name}"
+    for name in response.context["credit_form"].fields:
+        assert f'name="{name}"' in page, f"credit_form.{name}"
+    assert page.count("<form") == 2
+    assert page.count('class="form-acts"') == 2
+
+
+@pytest.mark.parametrize(("role", "may_execute", "may_approve"), REFUND_READERS)
+def test_each_refund_act_is_drawn_only_for_the_role_that_holds_it(
+    client: Client, a_refund_and_a_credit: object, role: str, may_execute: bool, may_approve: bool
+) -> None:
+    """
+    §8 splits the three acts deliberately: the manager approves or rejects a
+    REQUESTED row, the finance officer executes an APPROVED one, and the audit
+    account does neither. Asserted in both directions on both states.
+    """
+    from apps.billing.services import refund_service
+    from apps.people.constants import Action
+    from apps.people.models import User
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.APPROVE in allowed_actions(role, "refunds")) is may_approve
+    assert (Action.EDIT in allowed_actions(role, "refunds")) is may_execute
+
+    client.force_login(_user(role, f"rf.act.{role}".lower().replace("_", ".")))
+    page = _refunds_page(client)
+    assert ('name="action" value="approve"' in page) is may_approve
+    assert ('name="action" value="reject"' in page) is may_approve
+    assert 'name="action" value="execute"' not in page, "nothing is APPROVED yet"
+    client.logout()
+
+    # Once the manager has approved it, the execute button appears for exactly
+    # the role that may move the money — and for no one else.
+    refund, _credit = a_refund_and_a_credit  # type: ignore[misc]
+    refund_service.approve_refund(
+        actor=User.objects.get(username="rf.fixture.actor"), refund=refund
+    )
+    client.force_login(_user(role, f"rf.exec.{role}".lower().replace("_", ".")))
+    page = _refunds_page(client)
+    assert ('name="action" value="execute"' in page) is may_execute
+    assert 'name="action" value="approve"' not in page, "an approved row is not approved twice"
+
+
+def test_the_requester_is_never_offered_the_approval_of_their_own_refund(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """
+    D-18 is a service refusal AND a drawing condition. The finance officer who
+    raised the row holds no APPROVE anyway, so this pins the template's own
+    half of the rule: the identity test is still on the row.
+    """
+    source = REFUNDS_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "r.requested_by_id != current_user_id" in source
+    from apps.people.models import User
+
+    client.force_login(User.objects.get(username="rf.fixture.finance"))
+    page = _refunds_page(client)
+    assert 'name="action" value="approve"' not in page
+
+
+def test_the_rejection_reason_box_has_a_name_a_screen_reader_reads(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """
+    It was a bare box with a placeholder and nothing else. A placeholder is not
+    a label — it disappears on the first keystroke and is not an accessible
+    name — so the field is named the way the daily closing names its own
+    in-row input, and the field name itself is untouched.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "rf.reason"))
+
+    page = _refunds_page(client)
+
+    assert 'name="reason_ar" aria-label="سبب الرفض"' in page
+    assert 'placeholder="سبب الرفض…"' in page
+
+
+def test_the_refunds_screen_prints_only_keys_the_rows_already_carried(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """Both tables render their own projection's values, unchanged."""
+    from django.template.defaultfilters import floatformat
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.rows"))
+
+    response = client.get(reverse("billing:refunds"))
+    refund_row = response.context["refunds"][0]
+    credit_row = response.context["credit_returns"][0]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for key in (
+        "code",
+        "enrollment_code",
+        "participant_name",
+        "official_letter_ref",
+        "president_approval_ref",
+        "status_display",
+    ):
+        assert str(refund_row[key]) in page, f"refund.{key}"
+    for key in ("amount", "partner_recovery_amount"):
+        assert floatformat(refund_row[key], -3) in page, f"refund.{key}"
+    for key in ("code", "enrollment_code", "participant_name", "reason_ar"):
+        assert str(credit_row[key]) in page, f"credit.{key}"
+    assert floatformat(credit_row["amount"], -3) in page
+
+
+def test_the_refunds_head_reads_like_every_polished_screen(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and a count per table —
+    all off the view's own ``title`` and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.head"))
+
+    page = _refunds_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    # One count per table: the two movements are counted separately, because
+    # counting them together is exactly the conflation the screen exists to
+    # prevent.
+    assert page.count('class="count"') == 2
+
+
+def test_the_refunds_table_names_its_ninth_column(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and lands off the left
+    edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.col"))
+
+    page = _refunds_page(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    # Nine headers on the refunds table and six on the credit table.
+    assert len(re.findall(r"<th[\s>]", page)) == 15
+    assert page.count('class="tbl-wrap"') == 2
+
+
+def test_the_two_rules_are_explained_where_each_one_applies(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """
+    One yellow `.note warn` carried both rules above the page. Yellow is the
+    colour of a refusal and explaining a rule is not one (polish rules §6.5),
+    so each half now sits as a `.hint` under the table it describes — which is
+    also where the difference between the two movements is legible.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.rules"))
+
+    page = _refunds_page(client)
+
+    assert "note warn" not in page
+    assert page.count('<p class="hint">') == 2
+    # Anchored on wording the hints alone carry: the guidance block above the
+    # page states the same rule in its own words, so a phrase they share would
+    # find the guide and prove nothing about where the hint sits.
+    first = "ويُنفَّذ بعد الاعتماد من شخص آخر"
+    second = "لا يعكس إيراداً ولا يحتاج موافقة رئيس الجامعة"
+    assert first in page
+    assert second in page
+    # The §5.3 rule sits after the refunds table, and BR-071's after the second.
+    assert page.index(first) > page.index('class="tbl"')
+    assert page.index(second) > page.index(first)
+
+
+def test_the_two_refund_empty_states_are_not_the_same_sentence(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «لا استردادات» and «لا حركات» taught nothing and, worse, read as the same
+    absence. Each now says what its own movement is and how a row appears —
+    and neither offers an action, because the reader may not hold it.
+    """
+    from apps.billing.models import CreditReturn, Refund
+
+    assert not Refund.objects.exists() and not CreditReturn.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.empty"))
+
+    page = _refunds_page(client)
+
+    assert page.count('class="empty-title"') == 2
+    assert page.count('class="empty-body"') == 2
+    assert "BR-034" in page
+    assert "BR-071" in page
+    assert "empty-act" not in page
+
+
+def test_the_refunds_screen_renders_on_an_empty_database(
+    client: Client, seeded_settings: None
+) -> None:
+    """Settings and nothing else — the screen still draws for all three readers."""
+    for role, _create, _approve in REFUND_READERS:
+        client.force_login(_user(role, f"rf.bare.{role}".lower().replace("_", ".")))
+        assert client.get(reverse("billing:refunds")).status_code == 200
+        client.logout()
+
+
+def test_the_refunds_screen_still_takes_no_query_parameter(
+    client: Client, a_refund_and_a_credit: object
+) -> None:
+    """
+    The services can narrow by enrolment and status; this view has never asked
+    them to, and the polish added no filter control that would imply otherwise.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.filter"))
+
+    plain = client.get(reverse("billing:refunds"))
+    with_noise = client.get(reverse("billing:refunds"), {"status": "EXECUTED", "enrollment": "X"})
+
+    assert len(plain.context["refunds"]) == len(with_noise.context["refunds"]) == 1
+    assert 'class="filterbar"' not in _refunds_page(client)
+
+
+def test_the_refunds_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen requests, approves, rejects and executes. The help may not imply
+    a row is edited or deleted, nor that cash is taken here — and it keeps the
+    two movements apart, which is the whole reason they share a page.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["refunds"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "BR-034" in text
+    assert "D-18" in text
+    assert "BR-071" in text
+    for absent in ("حذف", "تعديل الاسترداد", "استيفاء دفعة"):
+        assert absent not in text, f"the refunds guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_create", "_may_approve"), REFUND_READERS)
+def test_the_refunds_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_create: bool, _may_approve: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"rf.links.{role}".lower().replace("_", ".")))
+    page = _refunds_page(client)
+
+    guide = GUIDES["refunds"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_refunds_screen_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = REFUNDS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the refunds screen uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert markup.count('class="tbl-wrap"') == 2
+    assert markup.count('class="form-acts"') == 2
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

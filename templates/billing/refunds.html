@@ -1,34 +1,76 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  شاشتان في صفحة واحدة: الاسترداد الاستثنائي (§5.3) وردّ الرصيد الدائن
+  (BR-071). وهما جدولان ونموذجان منفصلان لا نموذج واحد — فالأول يعكس إيراداً
+  ويحتاج كتاباً رسمياً وموافقة الرئيس، والثاني يعيد مبلغاً لم يكن إيراداً قط.
+  دمجهما يدعو المسار الثقيل إلى الحالة الخفيفة أو العكس.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس ولا مرشّح، ولا عمود بدّل
+  موضعه. الأزرار الأربعة هي نفسها خلف الرايات نفسها — «اعتماد» و«رفض» خلف
+  `can_approve` وشرط أن يكون القارئ غير طالب الاسترداد (D-18)، و«تنفيذ» خلف
+  `can_execute`، والنموذجان خلف `can_create` — وكلها تُفحص ثانيةً في
+  `policy.require` عند الإرسال.
+
+  الجملة التي كانت في `.note warn` انقسمت نصفين ونزلت إلى `.hint`: الأصفر
+  للحظة رفض، وشرحُ قاعدةٍ ليس رفضاً (قواعد التحسين §6.5). ونصفها الأول تحت
+  جدول الاستردادات ونصفها الثاني تحت جدول الأرصدة — فالفرق بين الحركتين هو
+  سبب فصلهما، ويُقرأ عند كلٍّ منهما لا فوق الصفحة مرة واحدة.
+
+  عمود الإجراء كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
+  أفقياً. وحقل سبب الرفض كان صندوقاً بلا اسم يقرؤه قارئ الشاشة — أُعطي
+  `aria-label` بالصياغة نفسها المستقرّة في إقفال الصندوق.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
-</div>
-<div class="note warn">
-  {% translate "الأصل لا استرداد. الاستثناء بكتاب رسمي وموافقة رئيس الجامعة معاً، ويُنفَّذ بعد الاعتماد من شخص آخر. أما ردّ الرصيد الدائن فحركة مستقلة لا استرداد ولا يحتاج موافقة الرئيس." %}
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "حركتان مختلفتان في صفحة واحدة: الاسترداد الاستثنائي بوثائقه الخارجية ومراحله الثلاث، وردّ الرصيد الدائن المستقل عنه." %}</p>
+  </div>
 </div>
 
+{% guided_help "refunds" %}
+
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "الاستردادات" %}</h2></div>
+  <div class="card2-head">
+    <h2>{% translate "الاستردادات" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=refunds|length %}استرداد واحد{% plural %}{{ n }} استردادات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
-        <th>{% translate "المبلغ" %}</th><th>{% translate "الكتاب" %}</th><th>{% translate "موافقة الرئيس" %}</th>
-        <th>{% translate "استرجاع الشريك" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "التسجيل" %}</th>
+          <th>{% translate "المشارك" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th>{% translate "الكتاب" %}</th>
+          <th>{% translate "موافقة الرئيس" %}</th>
+          <th class="num">{% translate "استرجاع الشريك" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for r in refunds %}
           <tr>
-            <td dir="ltr">{{ r.code }}</td>
-            <td dir="ltr">{{ r.enrollment_code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ r.code }}</strong></td>
+            <td dir="ltr" translate="no">{{ r.enrollment_code }}</td>
             <td>{{ r.participant_name }}</td>
             <td class="num">{{ r.amount }}</td>
-            <td dir="ltr">{{ r.official_letter_ref }}</td>
-            <td dir="ltr">{{ r.president_approval_ref }}</td>
+            <td dir="ltr" translate="no">{{ r.official_letter_ref|default:"—" }}</td>
+            <td dir="ltr" translate="no">{{ r.president_approval_ref|default:"—" }}</td>
             <td class="num">{{ r.partner_recovery_amount }}</td>
-            <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span></td>
-            <td>
+            <td><span class="chip {{ r.status|status_tone }} dot">{{ r.status_display }}</span></td>
+            <td class="acts">
               {% if r.status == "REQUESTED" and can_approve and r.requested_by_id != current_user_id %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="action" value="approve">
@@ -38,7 +80,7 @@
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="action" value="reject">
                   <input type="hidden" name="code" value="{{ r.code }}">
-                  <input name="reason_ar" placeholder="{% translate 'سبب الرفض…' %}">
+                  <input name="reason_ar" aria-label="{% translate 'سبب الرفض' %}" placeholder="{% translate 'سبب الرفض…' %}">
                   <button class="btn2" type="submit">{% translate "رفض" %}</button>
                 </form>
               {% elif r.status == "APPROVED" and can_execute %}
@@ -50,30 +92,60 @@
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty"><span class="empty-title">{% translate "لا استردادات" %}</span></td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا استردادات" %}</span>
+            <span class="empty-body">{% translate "الاسترداد استثناء يُطلب بكتاب رسمي وموافقة رئيس الجامعة معاً، ثم يعتمده غير طالبه، ثم يُنفَّذ (BR-034 · §5.3)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "الأصل لا استرداد. الاستثناء بكتاب رسمي وموافقة رئيس الجامعة معاً، ويُنفَّذ بعد الاعتماد من شخص آخر. وما سبق أن قُبض للشريك يعود بالحسم من مطالباته اللاحقة، لا بمطالبة نقدية." %}</p>
   </div>
 </div>
 
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "ردّ الأرصدة الدائنة" %}</h2></div>
+  <div class="card2-head">
+    <h2>{% translate "ردّ الأرصدة الدائنة" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=credit_returns|length %}حركة واحدة{% plural %}{{ n }} حركات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
-        <th>{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "السبب" %}</th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "التسجيل" %}</th>
+          <th>{% translate "المشارك" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th class="num">{% translate "التاريخ" %}</th>
+          <th>{% translate "السبب" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in credit_returns %}
           <tr>
-            <td dir="ltr">{{ c.code }}</td><td dir="ltr">{{ c.enrollment_code }}</td>
-            <td>{{ c.participant_name }}</td><td class="num">{{ c.amount }}</td>
-            <td class="num">{{ c.returned_on }}</td><td>{{ c.reason_ar }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+            <td dir="ltr" translate="no">{{ c.enrollment_code }}</td>
+            <td>{{ c.participant_name }}</td>
+            <td class="num">{{ c.amount }}</td>
+            <td class="num"><span dir="ltr">{{ c.returned_on|date:"Y/m/d" }}</span></td>
+            <td>{{ c.reason_ar }}</td>
           </tr>
-        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا حركات" %}</span></td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="6" class="empty">
+            <span class="empty-title">{% translate "لا حركات ردّ رصيد" %}</span>
+            <span class="empty-body">{% translate "الرصيد الدائن ينشأ حين يزيد المقبوض عن المستحق — بعد نقل إلى دورة أقل رسماً مثلاً — ويُردّ حركةً مستقلة عند براءة الذمة (BR-071 · BR-064)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "ردّ الرصيد الدائن ليس استرداداً: لا يعكس إيراداً ولا يحتاج موافقة رئيس الجامعة، ولذلك له جدوله ونموذجه لا نموذج الاسترداد." %}</p>
   </div>
 </div>
 
@@ -84,7 +156,9 @@
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="request">
         {% include "partials/_form.html" with form=refund_form %}
-        <button class="btn2 primary" type="submit">{% translate "تسجيل الطلب" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "تسجيل الطلب" %}</button>
+        </div>
       </form>
     </div>
   </div>
@@ -94,7 +168,9 @@
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="return-credit">
         {% include "partials/_form.html" with form=credit_form %}
-        <button class="btn2" type="submit">{% translate "ردّ الرصيد" %}</button>
+        <div class="form-acts">
+          <button class="btn2" type="submit">{% translate "ردّ الرصيد" %}</button>
+        </div>
       </form>
     </div>
   </div>

@@ -831,6 +831,7 @@ GUIDED_HELP_SCREENS = [
     # Sprint 8I-1 — the discounts register joined the taught set with its
     # own polish slice.
     ("billing:discounts", "discounts", "discounts"),
+    ("billing:refunds", "refunds", "refunds"),
     ("operations:transfers", "transfers", "transfers"),
     ("operations:transfer-new", "transfer-new", "transfer-new"),
     ("operations:special-cases", "special-cases", "special-cases"),

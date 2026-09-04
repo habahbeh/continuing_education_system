@@ -158,6 +158,23 @@ GUIDES: dict[str, Guide] = {
             "ولا يعتمد الخصمَ من أنشأه (D-18)."
         ),
     ),
+    "refunds": Guide(
+        what=_("حركتان لا واحدة: الاسترداد الاستثنائي بوثائقه ومراحله، وردّ الرصيد الدائن المستقل."),
+        who=_("الموظف المالي يطلب الاسترداد وينفّذه، ومدير المركز يعتمده أو يرفضه."),
+        after=_("أثر التنفيذ يظهر في رصيد التسجيل، وحصّة الشريك تعود في مطالباته."),
+        links=(
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+            (Screen.CLAIMS, "settlements:claims", _("مطالبات الشركاء")),
+        ),
+        # The screen's own separation, said as a rule rather than left to be
+        # inferred from two tables: the light case must not inherit the heavy
+        # process, which is the mistake one merged form would invite.
+        stops=_(
+            "الأصل لا استرداد (§5.3): الاستثناء يحتاج كتاباً رسمياً وموافقة رئيس الجامعة "
+            "معاً (BR-034)، ولا يعتمده من طلبه (D-18)، ولا يُنفَّذ قبل اعتماده. أمّا ردّ "
+            "الرصيد الدائن فلا يحتاج شيئاً من ذلك (BR-071)."
+        ),
+    ),
     "transfers": Guide(
         what=_("طلبات النقل بين الدورات: فحصها واعتمادها وتنفيذها."),
         who=_("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده (BR-066)."),
