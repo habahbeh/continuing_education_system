@@ -11838,3 +11838,190 @@ def test_the_obligations_register_carries_no_inline_style_and_no_script() -> Non
     assert "novalidate" in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the absence register (templates/settlements/absences.html)
+# ---------------------------------------------------------------------------
+ABSENCES_TEMPLATE = Path("templates/settlements/absences.html")
+
+
+@pytest.fixture
+def two_absences(seeded_settings: None, active_semester: object) -> dict[str, object]:
+    """One absence that counts and one waived, on a cohort of its own."""
+    from datetime import timedelta
+
+    from django.core.management import call_command
+    from django.utils import timezone
+
+    from apps.catalog.models import Program
+    from apps.operations.models import Cohort
+    from apps.settlements.models import TrainerAbsence
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    recorder = _user(Role.CENTER_MANAGER, "ab.fixture.recorder")
+    today = timezone.localdate()
+    cohort = Cohort.objects.create(
+        code="CO-ABS-1",
+        program=Program.objects.get(code="SC-NET"),
+        semester=active_semester,
+        name_ar="دفعة الغيابات",
+        starts_on=today - timedelta(days=30),
+        ends_on=today + timedelta(days=30),
+        capacity=25,
+    )
+    return {
+        "counted": TrainerAbsence.objects.create(
+            cohort=cohort,
+            trainer_name="سامي المدرّب",
+            occurred_on=today - timedelta(days=5),
+            recorded_by=recorder,
+        ),
+        "waived": TrainerAbsence.objects.create(
+            cohort=cohort,
+            trainer_name="ليلى المدرّبة",
+            occurred_on=today - timedelta(days=4),
+            is_waived=True,
+            waiver_approval_ref="APP-2026-1",
+            waiver_approval_date=today - timedelta(days=3),
+            recorded_by=recorder,
+        ),
+    }
+
+
+def _absences_page(client: Client, role: str, tag: str) -> str:
+    client.force_login(_user(role, f"ab.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:absences"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_absence_register_finally_says_what_it_is_for(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The screen had no guidance at all — no key in the registry and no tag on
+    the template — so it was the one settlements screen a new employee met
+    with nothing above it.
+    """
+    page = _absences_page(client, role, "guide")
+
+    assert "من يستخدمها" in page
+    assert "ما يوقف العملية" in page
+    assert "BR-058" in page, "the replacement rule reaches the reader who cannot act on it"
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_absence_register_explains_the_formula_without_alerting(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The multiplier and the replacement limit are a rule, not an alarm."""
+    page = _absences_page(client, role, "tone")
+
+    assert "note info" not in page
+    assert "أضعاف نفقة المحاضرة" in page
+
+
+def test_a_waived_absence_is_not_painted_as_an_achievement(
+    client: Client, two_absences: dict[str, object]
+) -> None:
+    """
+    «معفى» wore `ok`. The project's own tone table puts WAIVED in `_INFO` —
+    "superseded or moved on: not a problem, not an achievement" — and an
+    exemption is exactly that. «محتسب» wore `danger`; `_DANGER` is for what was
+    refused, voided or is overdue, while a counted absence is a row waiting on
+    a decision, which is the definition of `_WARN` (polish rules §6.5).
+    """
+    page = _absences_page(client, Role.AUDIT_ACCOUNT, "chips")
+
+    assert '<span class="chip info dot">معفى</span>' in page
+    assert '<span class="chip warn dot">محتسب</span>' in page
+    assert "chip ok" not in page
+    assert "chip danger" not in page
+
+
+def test_the_counted_flag_is_read_from_the_field_the_rule_names(
+    client: Client, two_absences: dict[str, object]
+) -> None:
+    """
+    The template negated ``is_waived`` to decide whether an absence counts.
+    ``counts_toward_penalty`` is the property the rule is written on and the
+    service already returns it, so the screen reads that instead — the same
+    value today, and the right one if the rule ever grows a second condition.
+    """
+    markup = ABSENCES_TEMPLATE.read_text(encoding="utf-8").split("{% endcomment %}", 1)[-1]
+
+    assert "counts_toward_penalty" in markup
+
+    from apps.settlements.services import absence_service
+
+    rows = {
+        row["trainer_name"]: row
+        for row in absence_service.list_absences(actor=_user(Role.AUDIT_ACCOUNT, "ab.field.reader"))
+    }
+    assert rows["سامي المدرّب"]["counts_toward_penalty"] is True
+    assert rows["ليلى المدرّبة"]["counts_toward_penalty"] is False
+
+
+def test_the_waiver_fields_inside_the_row_are_named_for_a_screen_reader(
+    client: Client, two_absences: dict[str, object]
+) -> None:
+    """
+    Two bare `<input>`s with a `placeholder` and no label at all — a
+    placeholder is not a name, and it disappears the moment anything is typed.
+    The seventh column had no name either.
+    """
+    page = _absences_page(client, Role.FINANCE_OFFICER, "labels")
+
+    assert "مرجع الموافقة الخطية" in page
+    assert "تاريخ الموافقة الخطية" in page
+    assert "الإعفاء" in page
+
+
+@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
+def test_the_empty_register_names_the_order_and_points_only_the_recorder(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """Record, then penalise — and the penalty is never typed by hand (BR-057)."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_record = Action.CREATE in allowed_actions(role, "obligations")
+
+    page = _absences_page(client, role, "empty")
+
+    assert "لا غيابات مسجّلة" in page
+    assert "BR-057" in page, "the reason is for everybody"
+    assert ("كتلة «تسجيل غياب» أسفل هذه الصفحة" in page) is may_record
+
+
+def test_the_absence_register_uses_no_class_defined_nowhere() -> None:
+    """A class in neither sheet renders bare."""
+    import re
+
+    source = ABSENCES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_absence_register_carries_no_inline_style_and_no_script() -> None:
+    """8J-5 removed inline styles from the delivery; they do not come back."""
+    source = ABSENCES_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert "style=" not in source
+    assert "<script" not in source
+    assert 'class="form-acts"' in markup
+    assert "novalidate" in markup
+    assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

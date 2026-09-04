@@ -594,6 +594,22 @@ GUIDES: dict[str, Guide] = {
             "تُحتسب من سجل الغيابات (BR-057)."
         ),
     ),
+    # Guarded by Screen.OBLIGATIONS, not by a row of its own: an absence exists
+    # here only because it raises an obligation. The screen had no guidance at
+    # all — no key, and no tag on the template.
+    "absences": Guide(
+        what=_("سجل غياب مدرّبي الشريك: ما يُحتسب منه، وما أُعفي، وما رُفعت عنه غرامة."),
+        who=_("مدير المركز والموظف المالي يسجّلان ويُعفيان، وحساب التدقيق يقرأ."),
+        after=_("الغرامة تصير التزاماً يُخصم من مطالبة لاحقة، ولا يُطالَب به بفاتورة (BR-036)."),
+        links=(
+            (Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
+            (Screen.CLAIMS, "settlements:claims", _("المطالبات")),
+        ),
+        stops=_(
+            "لا يُعفى غياب بلا موافقة خطية، ولا يُعفى بعد أن تُرفع غرامته. وتجاوز حدّ "
+            "الغياب يُبيح استبدال المدرّب بالاتفاق مع الشريك ولا يوقعه النظام (BR-058)."
+        ),
+    ),
     "reports": Guide(
         what=_("التقارير السبعة، ولكل دور ما يُسمح له منها."),
         who=_("المدير والمالية وحساب التدقيق؛ والصندوق لا يرى التقارير (BR-083)."),
