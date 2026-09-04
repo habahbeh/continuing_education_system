@@ -1,73 +1,147 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ agreement.agreement_number }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  بنود الاتفاقية كما وُقّعت، كلّها لا ملخّصها: الاستثناءات وصيغة تقاسم الخصم
+  ودورة المخالصة هي بالضبط ما يفترق فيه عقدٌ عن عقد في ملف العميل، فشاشةٌ
+  تعرض «50%» وحدها تُخفي ما بُنيت المطالبة عليه.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس، ولا قيمة تعاقدية أو
+  مالية مُسّت. الفعل الوحيد — «اعتماد السريان» — يبقى خلف `can_activate`
+  نفسها (مسودة + APPROVE على §3.5/24)، ويبقى POST إلى مساره الخاص الذي يفعل
+  شيئاً واحداً.
+
+  ثلاث كتل `.note` فوق الصفحة صارت شريحة حالة في الترويسة و`.hint` تحت بطاقة
+  «الأطراف والسريان» — وهي البطاقة التي تخصّها المدد والتواريخ. والأصفر رُفع
+  عن انقضاء المدّة: الأصفر للحظة يُرفض فيها شيء، وانقضاء المدّة واقعةُ تاريخ
+  تحسبها الخدمة في `is_expired` (قواعد التحسين §6.5).
+
+  وشرحُ الحالة صار يتبع الحالة لا الصلاحية. كان نصّ «مسودة» لا يُرسم إلا مع
+  `can_activate`، فالموظف المالي وحساب التدقيق يقرآن مسودةً لا تقول لهما إنها
+  مسودة ولا ماذا يعني ذلك. الشرح للجميع والفعل بالصلاحية (قواعد التحسين §3.5):
+  الزرّ وحده بقي خلف الراية.
+
+  وشريحة «ضمن الوعاء» تبقى `warn` على التأمينات وحدها ولا تُسوّى بأختيها:
+  Q-01 يجعل استثناء التأمين هو الأصل، وإدخاله في الوعاء يتطلب نصاً صريحاً في
+  الاتفاقية ويُسجَّل تحذيراً (BR-092). فاللون هنا يحمل معنى القاعدة لا زينة،
+  وتوحيده كان سيمحو الإشارة الوحيدة إلى حالةٍ يقول النظام إنها استثنائية.
+
+  ونصّ قاعدة الاستحقاق منقولٌ من العقد حرفاً، فيُعرض في `.hint boxed` داخل
+  بطاقته لا في كتلة تنبيه: هو اقتباسٌ لا إنذار.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ agreement.agreement_number }}</span></h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ agreement.agreement_number }}</span></h1>
+    <p class="sub">
+      {{ agreement.partner_name }} —
+      {% translate "بنود العقد كما وُقّعت. لا تُعدَّل اتفاقية موقّعة؛ التصحيح يكون بملحق يحلّ محلّها." %}
+    </p>
+  </div>
+  <div class="acts">
+    <span class="chip {{ agreement.status|status_tone }} dot">{{ agreement.status_display }}</span>
+    {% if agreement.is_expired %}<span class="chip">{% translate "انقضت مدّتها" %}</span>{% endif %}
+    {% if can_activate %}
+      <form method="post" action="{% url 'partners:agreement-activate' agreement.agreement_number %}">
+        {% csrf_token %}
+        <button type="submit" class="btn2 primary">{% translate "اعتماد السريان" %}</button>
+      </form>
+    {% endif %}
+    <a class="btn2 ghost" href="{% url 'partners:agreements' %}">{% translate "عودة إلى الاتفاقيات" %}</a>
+  </div>
 </div>
-{% if agreement.is_expired %}
-  <div class="note warn">
-    {% translate "انقضت مدة سريان هذه الاتفاقية — تبقى مقروءة ومرجعاً لما بُني عليها من مطالبات، ولا تُعرض على الدفعات الجديدة ولا تُعتمد. التعاقد المستمر يكون بملحق بمدة سريان جديدة." %}
-  </div>
-{% elif can_activate %}
-  <div class="note">
-    {% translate "مسودة — لا تُحتسب عليها استحقاقات ولا تُعرض على الدفعات حتى تسري. السريان يجمّد بنودها (D-15)، ويُنهي الاتفاقية التي تحلّ محلّها إن وُجدت." %}
-    <form method="post" action="{% url 'partners:agreement-activate' agreement.agreement_number %}">
-      {% csrf_token %}
-      <button type="submit" class="btn2">{% translate "اعتماد السريان" %}</button>
-    </form>
-  </div>
-{% elif agreement.status == "ACTIVE" and not agreement.is_available %}
-  <div class="note">
-    {% translate "سارية على الورق ولم تبدأ مدتها بعد — تُعرض على الدفعات ابتداءً من تاريخ بدء السريان." %}
-  </div>
-{% endif %}
+
+{% guided_help "agreement-detail" %}
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الأطراف والسريان" %}</h2></div>
   <div class="card2-body">
     <dl class="dl">
-      <dt>{% translate "الشريك" %}</dt><dd>{{ agreement.partner_name }}</dd>
-      <dt>{% translate "العنوان" %}</dt><dd>{{ agreement.title_ar }}</dd>
-      <dt>{% translate "التوقيع" %}</dt><dd class="num">{{ agreement.signed_on }}</dd>
-      <dt>{% translate "السريان" %}</dt><dd class="num">{{ agreement.valid_from }} — {{ agreement.valid_to }}</dd>
-      <dt>{% translate "الحالة" %}</dt><dd>{{ agreement.status_display }}</dd>
-      {% if agreement.supersedes %}<dt>{% translate "ملحق لاتفاقية" %}</dt><dd dir="ltr">{{ agreement.supersedes }}</dd>{% endif %}
+      <dt>{% translate "الشريك" %}</dt>
+      <dd>{{ agreement.partner_name }}</dd>
+      <dt>{% translate "العنوان" %}</dt>
+      <dd>{{ agreement.title_ar }}</dd>
+      <dt>{% translate "التوقيع" %}</dt>
+      <dd class="num"><span dir="ltr">{{ agreement.signed_on|date:"Y/m/d" }}</span></dd>
+      <dt>{% translate "السريان" %}</dt>
+      <dd class="num">
+        <span dir="ltr">{{ agreement.valid_from|date:"Y/m/d" }} — {{ agreement.valid_to|date:"Y/m/d" }}</span>
+      </dd>
+      <dt>{% translate "الحالة" %}</dt>
+      <dd><span class="chip {{ agreement.status|status_tone }} dot">{{ agreement.status_display }}</span></dd>
+      {% if agreement.supersedes %}
+        <dt>{% translate "ملحق لاتفاقية" %}</dt>
+        <dd dir="ltr" translate="no">{{ agreement.supersedes }}</dd>
+      {% endif %}
     </dl>
+
+    {% if agreement.is_expired %}
+      <p class="hint">{% translate "انقضت مدة سريان هذه الاتفاقية — تبقى مقروءة ومرجعاً لما بُني عليها من مطالبات، ولا تُعرض على الدفعات الجديدة ولا تُعتمد. التعاقد المستمر يكون بملحق بمدة سريان جديدة." %}</p>
+    {% elif agreement.status == "DRAFT" %}
+      <p class="hint">{% translate "مسودة — لا تُحتسب عليها استحقاقات ولا تُعرض على الدفعات حتى تسري. السريان يجمّد بنودها (D-15)، ويُنهي الاتفاقية التي تحلّ محلّها إن وُجدت." %}</p>
+    {% elif agreement.status == "ACTIVE" and not agreement.is_available %}
+      <p class="hint">{% translate "سارية على الورق ولم تبدأ مدتها بعد — تُعرض على الدفعات ابتداءً من تاريخ بدء السريان." %}</p>
+    {% endif %}
   </div>
 </div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "نموذج الاحتساب" %}</h2></div>
   <div class="card2-body">
     <dl class="dl">
-      <dt>{% translate "النموذج" %}</dt><dd>{{ agreement.calculation_model_display }}</dd>
+      <dt>{% translate "النموذج" %}</dt>
+      <dd><span class="chip">{{ agreement.calculation_model_display }}</span></dd>
       {% if agreement.percent_rate %}<dt>{% translate "النسبة" %}</dt><dd class="num">{{ agreement.percent_rate }}%</dd>{% endif %}
       {% if agreement.fixed_amount_per_student %}<dt>{% translate "المبلغ لكل طالب" %}</dt><dd class="num">{{ agreement.fixed_amount_per_student }}</dd>{% endif %}
       {% if agreement.sell_price %}<dt>{% translate "سعر البيع المرجعي" %}</dt><dd class="num">{{ agreement.sell_price }}</dd>{% endif %}
       {% if agreement.service_name_ar %}<dt>{% translate "الخدمة" %}</dt><dd>{{ agreement.service_name_ar }}</dd>{% endif %}
       {% if agreement.commission_amount %}<dt>{% translate "العمولة" %}</dt><dd class="num">{{ agreement.commission_amount }}</dd>{% endif %}
     </dl>
+    <p class="hint">{% translate "النموذج وحده يقرّر أي قيمة تعني شيئاً: الاتفاقية النسبية لا مبلغ ثابت فيها، والاتفاقية بمبلغ لكل طالب لا نسبة فيها — فما لا يخصّ النموذج لا يُعرض أصلاً." %}</p>
   </div>
 </div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الاستثناءات من وعاء القسمة" %}</h2></div>
   <div class="card2-body">
     <dl class="dl">
-      <dt>{% translate "رسوم التسجيل" %}</dt><dd>{% if agreement.exclude_registration_fee %}<span class="chip ok">{% translate "مستثناة" %}</span>{% else %}<span class="chip">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
-      <dt>{% translate "التأمينات" %}</dt><dd>{% if agreement.exclude_deposits %}<span class="chip ok">{% translate "مستثناة" %}</span>{% else %}<span class="chip warn">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
-      <dt>{% translate "المواد المستهلكة" %}</dt><dd>{% if agreement.exclude_consumables %}<span class="chip ok">{% translate "مستثناة" %}</span>{% else %}<span class="chip">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
-      {% if agreement.consumables_cap_per_student %}<dt>{% translate "سقف المستهلكات لكل طالب" %}</dt><dd class="num">{{ agreement.consumables_cap_per_student }}</dd>{% endif %}
+      <dt>{% translate "رسوم التسجيل" %}</dt>
+      <dd>{% if agreement.exclude_registration_fee %}<span class="chip ok dot">{% translate "مستثناة" %}</span>{% else %}<span class="chip dot">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
+      <dt>{% translate "التأمينات" %}</dt>
+      <dd>{% if agreement.exclude_deposits %}<span class="chip ok dot">{% translate "مستثناة" %}</span>{% else %}<span class="chip warn dot">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
+      <dt>{% translate "المواد المستهلكة" %}</dt>
+      <dd>{% if agreement.exclude_consumables %}<span class="chip ok dot">{% translate "مستثناة" %}</span>{% else %}<span class="chip dot">{% translate "ضمن الوعاء" %}</span>{% endif %}</dd>
+      {% if agreement.consumables_cap_per_student %}
+        <dt>{% translate "سقف المستهلكات لكل طالب" %}</dt>
+        <dd class="num">{{ agreement.consumables_cap_per_student }}</dd>
+      {% endif %}
     </dl>
+    <p class="hint">{% translate "وعاء القسمة هو ما يُحتسب عليه استحقاق الشريك. المستثنى منه لا يدخل الاحتساب، والباقي يدخله — والثلاثة تُقرأ من الاتفاقية لا من قاعدة عامة." %}</p>
   </div>
 </div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "التوقيت والتقاسم" %}</h2></div>
   <div class="card2-body">
     <dl class="dl">
-      <dt>{% translate "صيغة تقاسم الخصم" %}</dt><dd>{{ agreement.discount_split_mode_display }}</dd>
-      <dt>{% translate "توقيت الصرف" %}</dt><dd>{{ agreement.payout_timing_display }}</dd>
-      <dt>{% translate "دورة المخالصة" %}</dt><dd>{{ agreement.settlement_cycle_display }}</dd>
-      {% if agreement.name_list_due_days %}<dt>{% translate "مهلة كشف الأسماء" %}</dt><dd class="num">{{ agreement.name_list_due_days }} {% translate "يوماً" %}</dd>{% endif %}
+      <dt>{% translate "صيغة تقاسم الخصم" %}</dt>
+      <dd>{{ agreement.discount_split_mode_display }}</dd>
+      <dt>{% translate "توقيت الصرف" %}</dt>
+      <dd>{{ agreement.payout_timing_display }}</dd>
+      <dt>{% translate "دورة المخالصة" %}</dt>
+      <dd>{{ agreement.settlement_cycle_display }}</dd>
+      {% if agreement.name_list_due_days %}
+        <dt>{% translate "مهلة كشف الأسماء" %}</dt>
+        <dd class="num">{{ agreement.name_list_due_days }} {% translate "يوماً" %}</dd>
+      {% endif %}
     </dl>
-    {% if agreement.entitlement_rule_ar %}<div class="note">{{ agreement.entitlement_rule_ar }}</div>{% endif %}
+    {% if agreement.entitlement_rule_ar %}
+      <p class="hint boxed">{{ agreement.entitlement_rule_ar }}</p>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

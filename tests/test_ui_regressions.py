@@ -10100,3 +10100,434 @@ def test_the_agreements_register_added_no_dead_class_and_no_dependency() -> None
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The agreement card — page polish (Wave 1)
+# ---------------------------------------------------------------------------
+# §3.5/24 reaches it, and its one act — activation — is `A` on that same row,
+# applied only to a DRAFT. The page carried three framed `.note` blocks above
+# it, one of them yellow for an expiry that is a calendar fact; a lone `.warn`
+# chip on deposits and neutral ones on its two siblings; and, worst, a state
+# explanation drawn off the PERMISSION rather than the state, so a reader
+# without APPROVE met a draft that never said it was one.
+AGREEMENT_DETAIL_TEMPLATE = Path("templates/partners/agreement_detail.html")
+
+
+@pytest.fixture
+def four_agreement_states(seeded_settings: None) -> dict[str, object]:
+    """A draft, a live agreement, one not yet started, and one lapsed."""
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.partners.models import (
+        Agreement,
+        AgreementStatus,
+        CalculationModel,
+        PartnerStatus,
+        PartnerType,
+    )
+    from apps.partners.services import partner_service
+
+    manager = _user(Role.CENTER_MANAGER, "ad.fixture.manager")
+    partner = partner_service.create_partner(
+        actor=manager,
+        data={
+            "code": "PN-AD-1",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+        },
+    )
+    today = timezone.localdate()
+    common = {
+        "partner": partner,
+        "signed_on": date(2026, 8, 1),
+        "calculation_model": CalculationModel.PERCENT,
+        "percent_rate": Decimal("50.0000"),
+    }
+    return {
+        "draft": Agreement.objects.create(
+            agreement_number="2026/AD-DRAFT",
+            title_ar="مسودة اتفاقية",
+            valid_from=today,
+            valid_to=today + timedelta(days=365),
+            status=AgreementStatus.DRAFT,
+            **common,
+        ),
+        "live": Agreement.objects.create(
+            agreement_number="2026/AD-LIVE",
+            title_ar="اتفاقية سارية",
+            valid_from=today - timedelta(days=30),
+            valid_to=today + timedelta(days=365),
+            status=AgreementStatus.ACTIVE,
+            entitlement_rule_ar="يستحق الشريك حصته بعد اكتمال الدورة.",
+            **common,
+        ),
+        "future": Agreement.objects.create(
+            agreement_number="2026/AD-SOON",
+            title_ar="اتفاقية لم تبدأ",
+            valid_from=today + timedelta(days=30),
+            valid_to=today + timedelta(days=365),
+            status=AgreementStatus.ACTIVE,
+            **common,
+        ),
+        "lapsed": Agreement.objects.create(
+            agreement_number="2020/AD-GONE",
+            title_ar="اتفاقية انقضت",
+            valid_from=date(2019, 9, 1),
+            valid_to=date(2020, 8, 31),
+            status=AgreementStatus.ACTIVE,
+            **common,
+        ),
+    }
+
+
+def _agreement_card(client: Client, number: str) -> str:
+    response = client.get(reverse("partners:agreement-detail", args=[number]))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
+def test_the_agreement_card_opens_exactly_where_the_matrix_says(
+    client: Client, four_agreement_states: dict[str, object], role: str, _sees_link: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "agreements")
+    client.force_login(_user(role, f"ad.open.{role}".lower().replace("_", ".")))
+    url = reverse("partners:agreement-detail", args=["2026/AD-LIVE"])
+    assert client.get(url).status_code == 200
+
+
+@pytest.mark.parametrize("role", AGREEMENT_NON_READERS)
+def test_the_agreement_card_still_refuses_the_roles_it_always_did(
+    client: Client, four_agreement_states: dict[str, object], role: str
+) -> None:
+    client.force_login(_user(role, f"ad.deny.{role}".lower().replace("_", ".")))
+    url = reverse("partners:agreement-detail", args=["2026/AD-LIVE"])
+    assert client.get(url).status_code == 403
+
+
+def test_the_agreement_card_refuses_an_anonymous_visitor(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    url = reverse("partners:agreement-detail", args=["2026/AD-LIVE"])
+    assert client.get(url).status_code in (302, 403)
+
+
+def test_an_unknown_agreement_is_still_a_404(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.missing"))
+    url = reverse("partners:agreement-detail", args=["2026/NOPE"])
+    assert client.get(url).status_code == 404
+
+
+@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
+def test_activation_is_offered_only_on_a_draft_and_only_to_approve(
+    client: Client, four_agreement_states: dict[str, object], role: str, _sees_link: bool
+) -> None:
+    """
+    Two conditions, both unchanged: the row must be a DRAFT and the reader must
+    hold APPROVE on §3.5/24. Asserted in both directions and on both states.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_approve = Action.APPROVE in allowed_actions(role, "agreements")
+    assert may_approve is (role == Role.CENTER_MANAGER)
+    client.force_login(_user(role, f"ad.act.{role}".lower().replace("_", ".")))
+
+    draft = client.get(reverse("partners:agreement-detail", args=["2026/AD-DRAFT"]))
+    assert draft.context["can_activate"] is may_approve
+    draft_page = draft.content.decode("utf-8").split("</nav>", 1)[-1]
+    assert ("اعتماد السريان" in draft_page) is may_approve
+
+    live = client.get(reverse("partners:agreement-detail", args=["2026/AD-LIVE"]))
+    assert live.context["can_activate"] is False
+    assert "اعتماد السريان" not in live.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def test_a_role_without_approve_cannot_activate_by_posting(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """The page never offered the button; the route still refuses the POST."""
+    from apps.partners.models import Agreement, AgreementStatus
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "ad.post"))
+
+    response = client.post(
+        reverse("partners:agreement-activate", args=["2026/AD-DRAFT"]),
+        follow=False,
+    )
+
+    assert response.status_code == 403
+    assert Agreement.objects.get(agreement_number="2026/AD-DRAFT").status == AgreementStatus.DRAFT
+
+
+@pytest.mark.parametrize(
+    ("key", "number", "phrase"),
+    [
+        ("lapsed", "2020/AD-GONE", "انقضت مدة سريان"),
+        ("draft", "2026/AD-DRAFT", "مسودة — لا تُحتسب عليها استحقاقات"),
+        ("future", "2026/AD-SOON", "لم تبدأ مدتها بعد"),
+    ],
+)
+def test_each_state_explains_itself_to_every_reader_not_only_to_the_approver(
+    client: Client,
+    four_agreement_states: dict[str, object],
+    key: str,
+    number: str,
+    phrase: str,
+) -> None:
+    """
+    The draft sentence used to be drawn off ``can_activate``, so the finance
+    officer and the auditor met a draft that never said it was one — and never
+    learned that no entitlement is computed on it.
+
+    The explanation is for everyone and the button is by permission (polish
+    rules §3.5). Asserted for the role that cannot act, which is the one the
+    old markup failed.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, f"ad.state.{key}"))
+
+    response = client.get(reverse("partners:agreement-detail", args=[number]))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["can_activate"] is False
+    assert phrase in page, f"{key} does not explain itself to a reader who cannot act"
+    assert "اعتماد السريان" not in page
+
+
+def test_a_live_agreement_states_none_of_the_three_conditions(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """An ordinary contract in force says nothing exceptional about itself."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.plain"))
+
+    page = _agreement_card(client, "2026/AD-LIVE")
+
+    for phrase in ("انقضت مدة سريان", "مسودة — لا تُحتسب", "لم تبدأ مدتها بعد"):
+        assert phrase not in page, phrase
+
+
+def test_the_states_are_explained_and_no_longer_alerted(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """
+    Three framed `.note` blocks stood above the cards, one of them yellow.
+    Yellow is the colour of a refusal and expiry is a fact about the calendar,
+    so the state is a chip in the head and its sentence a `.hint` under the
+    card whose dates it is about (polish rules §6.5).
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.tone"))
+
+    page = _agreement_card(client, "2020/AD-GONE")
+
+    for alert in ("note warn", "note info", "note danger"):
+        assert alert not in page, alert
+    assert 'class="hint"' in page
+    assert "انقضت مدّتها" in page, "the head says the state in the wording both screens use"
+    # …and the sentence sits under the card that carries the dates.
+    assert page.index("انقضت مدة سريان") > page.index("الأطراف والسريان")
+
+
+def test_the_deposit_chip_keeps_the_colour_its_rule_gives_it(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """
+    The yellow on «التأمينات · ضمن الوعاء» is NOT an inconsistency to tidy up.
+
+    Q-01 makes excluding the deposit the default, and putting it back into the
+    base needs explicit contract text and is recorded as a warning (BR-092).
+    The colour is carrying that rule, so it stays — while registration fees
+    and consumables, which the contract may set either way with nothing
+    logged, stay neutral.
+    """
+    from apps.partners.models import Agreement
+
+    Agreement.objects.filter(agreement_number="2026/AD-LIVE").update(
+        exclude_registration_fee=False, exclude_deposits=False, exclude_consumables=False
+    )
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.chips"))
+
+    response = client.get(reverse("partners:agreement-detail", args=["2026/AD-LIVE"]))
+    agreement = response.context["agreement"]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert agreement["exclude_deposits"] is False
+    assert page.count("ضمن الوعاء") == 3
+    # Exactly one of the three is coloured, and it is the one BR-092 governs.
+    assert page.count('class="chip warn dot"') == 1
+    deposits = page.index("التأمينات")
+    assert page.index('class="chip warn dot"') > deposits
+    assert page.index('class="chip warn dot"') < page.index("المواد المستهلكة")
+    # The rule that earns the colour is quoted where it is enforced.
+    model = Path("apps/partners/models.py").read_text(encoding="utf-8")
+    assert "BR-092" in model and "Q-01" in model
+
+
+def test_the_other_two_exclusion_rows_stay_neutral(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """A contract term the rules let go either way is described, not flagged."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.chips.neutral"))
+
+    response = client.get(reverse("partners:agreement-detail", args=["2026/AD-LIVE"]))
+    agreement = response.context["agreement"]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    # The seeded defaults: registration and deposits excluded, consumables in.
+    assert agreement["exclude_registration_fee"] is True
+    assert agreement["exclude_deposits"] is True
+    assert agreement["exclude_consumables"] is False
+    assert page.count("مستثناة") == 2
+    assert page.count("ضمن الوعاء") == 1
+    # Nothing is flagged: the deposit is excluded, which is Q-01's default.
+    assert 'class="chip warn dot"' not in page
+
+
+def test_the_agreement_card_shows_every_term_it_was_given(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """
+    §3.4's point is that the three models are data. A card showing only the
+    headline rate would hide the exclusions, the split and the cycle — which
+    is exactly what differs between the signed agreements in the client file.
+    """
+    from django.utils.formats import localize
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "ad.terms"))
+
+    response = client.get(reverse("partners:agreement-detail", args=["2026/AD-LIVE"]))
+    agreement = response.context["agreement"]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert f"{localize(agreement['percent_rate'])}%" in page
+    for key in (
+        "calculation_model_display",
+        "discount_split_mode_display",
+        "payout_timing_display",
+        "settlement_cycle_display",
+        "status_display",
+        "title_ar",
+        "partner_name",
+    ):
+        assert str(agreement[key]) in page, key
+    # The quoted contract rule is shown as a quotation, not as an alert.
+    assert agreement["entitlement_rule_ar"] in page
+    assert 'class="hint boxed"' in page
+
+
+def test_the_card_prints_no_value_the_model_does_not_name(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """
+    A percentage agreement has no per-student amount and no commission, so
+    those rows are absent rather than drawn as zero or as a dash.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.model"))
+
+    response = client.get(reverse("partners:agreement-detail", args=["2026/AD-LIVE"]))
+    agreement = response.context["agreement"]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert agreement["fixed_amount_per_student"] is None
+    assert agreement["commission_amount"] is None
+    assert "المبلغ لكل طالب" not in page
+    assert "العمولة" not in page
+    assert "الخدمة" not in page
+
+
+def test_the_agreement_card_head_reads_like_every_polished_detail_page(
+    client: Client, four_agreement_states: dict[str, object]
+) -> None:
+    """The section, the identity, the partner, and the way back."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ad.head"))
+
+    page = _agreement_card(client, "2026/AD-LIVE")
+
+    assert 'class="eyebrow"' in page
+    assert "الشركاء والمخالصات" in page
+    assert 'class="sub"' in page
+    assert 'class="code"' in page
+    assert "2026/AD-LIVE" in page
+    href = reverse("partners:agreements")
+    assert f'href="{href}"' in page
+    assert client.get(href).status_code == 200
+
+
+def test_the_agreement_card_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The card reads, and activates a draft. The help may not imply the terms are
+    edited here — BR-042 says the opposite — and it names the confusion the
+    page invites: a draft is not a contract.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["agreement-detail"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "المسودة ليست عقداً" in text
+    assert "D-15" in text
+    assert "BR-042" in text
+    for absent in ("حذف", "تعديل البنود", "استرداد"):
+        assert absent not in text, f"the agreement-card guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
+def test_the_agreement_card_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, four_agreement_states: dict[str, object], role: str, _sees_link: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"ad.links.{role}".lower().replace("_", ".")))
+    page = _agreement_card(client, "2026/AD-LIVE")
+
+    guide = GUIDES["agreement-detail"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_agreement_card_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = AGREEMENT_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the agreement card uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert markup.count('class="dl"') == 4
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

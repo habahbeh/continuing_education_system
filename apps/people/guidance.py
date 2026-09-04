@@ -450,6 +450,23 @@ GUIDES: dict[str, Guide] = {
             "ينشئ التزاماً ولا يبدأ شرطاً — الاتفاقية الموقّعة وحدها تفعل ذلك."
         ),
     ),
+    "agreement-detail": Guide(
+        what=_("بنود العقد كما وُقّعت: نموذج الاحتساب والاستثناءات والتوقيت وصيغة تقاسم الخصم."),
+        who=_("مدير المركز يعتمد سريان المسودة، والموظف المالي وحساب التدقيق يقرآن."),
+        after=_("على البنود السارية يُحتسب استحقاق الشريك وتُبنى مطالبته."),
+        links=(
+            (Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
+            (Screen.ENTITLEMENT, "settlements:entitlement", _("استحقاق الشركاء")),
+        ),
+        # The one act on this page is activation, and the mistake it invites is
+        # reading a draft as a contract. D-15 is the reason the two are not the
+        # same thing: activation is what freezes the terms.
+        stops=_(
+            "المسودة ليست عقداً: لا تُحتسب عليها استحقاقات ولا تُعرض على الدفعات حتى "
+            "تسري، والسريان يجمّد بنودها (D-15). ولا تُعدَّل بعد ذلك — التصحيح بملحق "
+            "يحلّ محلّها (BR-042)."
+        ),
+    ),
     "partner-detail": Guide(
         what=_("بطاقة الطرف المتعاقد: بياناته التعريفية والاتفاقيات المعقودة معه."),
         who=_("مدير المركز والموظف المالي وحساب التدقيق يقرؤونها."),
