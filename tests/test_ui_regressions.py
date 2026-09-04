@@ -8088,3 +8088,534 @@ def test_the_expenses_register_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The opening balances screen — page polish
+# ---------------------------------------------------------------------------
+# §3.7/36أ «V A P · — · V C E P · — · — · V P». BR-094's four hands on one page
+# on purpose (D-24): a reader must see who proposed, who reviewed and who
+# approved side by side. The screen carried FOUR framed alert blocks — two
+# stacked above the page — counter footers using a class the card does not
+# define, eight equal-weight numbers, an unnamed tenth column, an empty state
+# saying «لا أرصدة افتتاحية», and eleven in-row inputs with no accessible name.
+OPENING_BALANCES_TEMPLATE = Path("templates/billing/opening_balances.html")
+
+#: role, may propose/review, may decide — read straight off §3.7/36أ.
+OPENING_BALANCE_READERS = (
+    (Role.CENTER_MANAGER, False, True),
+    (Role.FINANCE_OFFICER, True, False),
+    (Role.AUDIT_ACCOUNT, False, False),
+)
+
+#: The roles §3.7/36أ leaves empty. An empty cell is an explicit deny (BR-080).
+OPENING_BALANCE_NON_READERS = (
+    Role.REGISTRATION_OFFICER,
+    Role.FINANCE_MANAGER,
+    Role.CASHIER,
+)
+
+#: Every in-row control the screen draws, and the name each must answer to. A
+#: placeholder is not an accessible name, and every one of these had only that.
+IN_ROW_CONTROLS = (
+    ("enrollment_code", "رمز التسجيل"),
+    ("note_ar", "ملاحظة المراجعة"),
+    ("note_ar", "ملاحظة القرار"),
+    ("enrollment_code", "تسجيل لاحق"),
+    ("note_ar", "مسوّغ التسوية"),
+    ("payout_code", "رمز الصرف"),
+    ("payment_method", "طريقة الصرف"),
+    ("external_reference", "رقم سند الصرف"),
+    ("payee_name_ar", "اسم المستلم"),
+    ("reason_ar", "سبب عكس الصرف"),
+    ("reversal_reference", "مرجع التصحيح"),
+)
+
+
+@pytest.fixture
+def four_opening_balances(  # type: ignore[no-untyped-def]
+    seeded_settings: None, active_semester: object, participant_data: dict
+):
+    """
+    One balance at each of the first four stages, through the real four hands.
+
+    D-24 needs different PEOPLE, not different roles, so the proposer and the
+    reviewer are two finance officers. Driven through the service because
+    ``is_postable``, ``is_resolvable_credit`` and every status are its answers
+    — a hand-built row could sit in a state the workflow never produces.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.core.management import call_command
+
+    from apps.billing.models import OpeningBalanceDirection
+    from apps.billing.services import charge_service
+    from apps.billing.services import opening_balance_service as obs
+    from apps.catalog.models import PriceList, PriceListStatus, Program
+    from apps.catalog.services import pricing_service
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.services import participant_service
+
+    proposer = _user(Role.FINANCE_OFFICER, "ob.fixture.propose")
+    reviewer = _user(Role.FINANCE_OFFICER, "ob.fixture.review")
+    approver = _user(Role.CENTER_MANAGER, "ob.fixture.approve")
+
+    # An old debt has to land on a live enrolment before anyone may approve it
+    # — «الذمة التي لا مكان لها لا تُحصَّل» — so the fixture builds one.
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    program = Program.objects.get(code="SC-NET")
+    cohort = Cohort.objects.create(
+        code="CO-OB-1",
+        program=program,
+        semester=active_semester,
+        name_ar=f"دفعة {program.name_ar}",
+        starts_on=date(2026, 9, 20),
+        ends_on=date(2026, 12, 20),
+        capacity=25,
+    )
+    participant = participant_service.create_participant(actor=approver, data=participant_data)
+    quote = pricing_service.resolve_price(
+        program=program, participant_category="UNIVERSITY", as_of=date(2026, 9, 20)
+    )
+    enrollment = Enrollment.objects.create(
+        code="EN-OB-1",
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=date(2026, 9, 20),
+        price_list=PriceList.objects.get(status=PriceListStatus.APPROVED),
+    )
+    charge_service.charge_lines_from_quote(
+        actor=approver, enrollment=enrollment, quote=quote, charged_on=date(2026, 9, 20)
+    )
+
+    def _propose(code: str, direction: str = OpeningBalanceDirection.RECEIVABLE) -> object:
+        return obs.propose_manually(
+            actor=proposer,
+            code=code,
+            direction=direction,
+            amount=Decimal("120.000"),
+            as_of=date(2026, 1, 15),
+            description_ar=f"ذمة قديمة {code}",
+            legacy_number="202251024",
+        )
+
+    draft = _propose("OB-UI-1")
+    reviewed = _propose("OB-UI-2")
+    approved = _propose("OB-UI-3")
+    credit = _propose("OB-UI-4", direction=OpeningBalanceDirection.CREDIT)
+
+    obs.review(actor=reviewer, balance=reviewed, enrollment=enrollment, note_ar="قوبل بالصف")
+    obs.review(actor=reviewer, balance=approved, enrollment=enrollment, note_ar="قوبل بالصف")
+    obs.approve(actor=approver, balance=approved, note_ar="معتمد")
+    obs.review(actor=reviewer, balance=credit, enrollment=enrollment, note_ar="رصيد دائن قديم")
+    obs.approve(actor=approver, balance=credit, note_ar="معتمد")
+    for balance in (draft, reviewed, approved, credit):
+        balance.refresh_from_db()
+    return {"draft": draft, "reviewed": reviewed, "approved": approved, "credit": credit}
+
+
+def _opening_balances_page(client: Client) -> str:
+    response = client.get(reverse("billing:opening-balances"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_review", "_may_decide"), OPENING_BALANCE_READERS)
+def test_the_opening_balances_open_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_review: bool, _may_decide: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "opening-balances")
+    client.force_login(_user(role, f"ob.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:opening-balances")).status_code == 200
+
+
+@pytest.mark.parametrize("role", OPENING_BALANCE_NON_READERS)
+def test_the_opening_balances_still_refuse_the_roles_they_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "opening-balances")
+    client.force_login(_user(role, f"ob.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:opening-balances")).status_code == 403
+
+
+def test_the_opening_balances_refuse_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("billing:opening-balances")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_review", "may_decide"), OPENING_BALANCE_READERS)
+def test_each_hand_is_drawn_only_for_the_role_that_holds_it(
+    client: Client,
+    four_opening_balances: dict[str, object],
+    role: str,
+    may_review: bool,
+    may_decide: bool,
+) -> None:
+    """
+    BR-094's hands are three permissions, and every one of the seven in-row
+    forms follows the flag it always followed. Asserted in both directions,
+    against rows that are actually in each triggering state.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "opening-balances")) is may_review
+    assert (Action.EDIT in allowed_actions(role, "opening-balances")) is may_review
+    assert (Action.APPROVE in allowed_actions(role, "opening-balances")) is may_decide
+
+    client.force_login(_user(role, f"ob.hand.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("billing:opening-balances"))
+    assert response.context["can_propose"] is may_review
+    assert response.context["can_review"] is may_review
+    assert response.context["can_decide"] is may_decide
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    # EDIT draws the review form on the DRAFT row; APPROVE draws the decision
+    # form on the REVIEWED one and the post button on the APPROVED one.
+    assert ('name="action" value="review"' in page) is may_review
+    assert ('name="action" value="propose"' in page) is may_review
+    assert ('value="approve"' in page) is may_decide
+    assert ('name="action" value="post"' in page) is may_decide
+    assert ('value="carry-forward"' in page) is may_decide
+    if not (may_review or may_decide):
+        assert '<form method="post"' not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_the_reader_who_holds_nothing_is_offered_nothing(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """The audit account reads four rows and is offered no act on any of them."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.readonly"))
+
+    page = _opening_balances_page(client)
+
+    assert "OB-UI-1" in page and "OB-UI-4" in page
+    for action in ("review", "approve", "reject", "post", "carry-forward", "propose"):
+        assert f'value="{action}"' not in page, action
+
+
+def test_the_propose_form_keeps_every_field_it_carried(
+    client: Client, seeded_settings: None
+) -> None:
+    """Presentation only: same fields, same names, one propose form."""
+    client.force_login(_user(Role.FINANCE_OFFICER, "ob.fields"))
+
+    response = client.get(reverse("billing:opening-balances"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page, name
+    assert 'class="form-acts"' in page
+
+
+@pytest.mark.parametrize(("field", "label"), IN_ROW_CONTROLS)
+def test_every_in_row_control_has_a_name_a_screen_reader_reads(
+    client: Client, four_opening_balances: dict[str, object], field: str, label: str
+) -> None:
+    """
+    Eleven boxes carried a placeholder and nothing else. A placeholder is not
+    an accessible name — it vanishes on the first keystroke — so each is named
+    the way the daily closing names its own in-row input. No field was renamed
+    and none became required that was not.
+    """
+    source = OPENING_BALANCES_TEMPLATE.read_text(encoding="utf-8")
+
+    # Matched in the template rather than in a rendered page: drawing all seven
+    # in-row forms at once needs seven different row states AND two different
+    # roles, and until it is rendered the label is a `{% translate %}` tag.
+    expected = 'name="' + field + '" aria-label="{% translate \'' + label + "' %}\""
+    assert expected in source
+
+
+def test_the_polish_made_no_control_required_that_was_not(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    ``required`` is submit behaviour, not presentation. The five in-row fields
+    the screen already marked required are still exactly those five.
+    """
+    import re
+
+    source = OPENING_BALANCES_TEMPLATE.read_text(encoding="utf-8")
+
+    required = {
+        m.group(1)
+        for m in re.finditer(r'<(?:input|select)\s+name="([^"]+)"[^>]*\srequired', source)
+    }
+    assert required == {
+        "note_ar",
+        "payout_code",
+        "payment_method",
+        "external_reference",
+        "payee_name_ar",
+        "reason_ar",
+    }
+    # The two optional in-row fields gained a name and stayed optional: an
+    # `aria-label` tells a screen reader what the box is, and `required` would
+    # tell the browser to refuse a submission the service accepts today.
+    for optional in ("reversal_reference", "enrollment_code"):
+        assert optional not in required, optional
+        assert f'name="{optional}" aria-label=' in source, optional
+
+
+def test_the_opening_balance_footers_use_the_slot_the_card_defines(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    The eight footers were `.muted` — a global colour with no place inside a
+    `.kpi`, which defines `.kpi .foot` for exactly this line. Words unchanged.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.foot"))
+
+    page = _opening_balances_page(client)
+
+    assert page.count('class="foot"') == 8
+    assert "هذه وحدها موجودة في الحسابات" in page
+    assert "السجل الأصلي محفوظ" in page
+
+
+def test_the_posted_total_is_the_one_number_the_screen_leads_with(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    Eight equal cards gave a reader no lead on a screen whose whole point is
+    that only one of the eight is in the accounts — which is what that card's
+    own footer says. The value is still the service's own.
+    """
+    from decimal import Decimal
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.lead"))
+
+    response = client.get(reverse("billing:opening-balances"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert page.count('class="kpi primary"') == 1
+    lead = page.index('class="kpi primary"')
+    assert page.index("هذه وحدها موجودة في الحسابات") > lead
+    # Nothing has been posted, so the highlighted figure is honestly zero.
+    assert response.context["totals"]["posted"] == Decimal("0.000")
+
+
+def test_the_opening_balances_head_reads_like_every_polished_screen(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and a count over the rows
+    drawn — all off the view's own ``title`` and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.head"))
+
+    page = _opening_balances_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+
+
+def test_the_opening_balances_table_names_its_tenth_column(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and lands off the left
+    edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.col"))
+
+    page = _opening_balances_page(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    # Ten headers on the register; the waiting-payout card is absent here.
+    assert len(re.findall(r"<th[\s>]", page)) == 10
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_four_rules_are_explained_and_no_longer_alerted(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    Four framed `.note` blocks — two stacked yellow ones above the page — said
+    what the screen does. Yellow is the colour of a refusal and blue is an
+    alert; explaining a rule is neither (polish rules §6.5). Two framed blocks
+    above the register also pushed the table itself below the fold.
+
+    The words are unchanged; only the frame and the position are.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "ob.rules"))
+
+    page = _opening_balances_page(client)
+
+    for alert in ("note warn", "note info", "note danger"):
+        assert alert not in page, alert
+    assert 'class="hint"' in page
+    # BR-094 and the reversal rule now sit under the rows they describe.
+    for anchor in ("المعبر الوحيد من الأرشيف", "الصرف يُصحَّح ولا يُمحى"):
+        assert anchor in page
+        assert page.index(anchor) > page.index('class="tbl"'), anchor
+    # The proposer's warning stays above the form it is about.
+    assert 'class="hint boxed"' in page
+    assert "اكتب رقماً تستطيع الدفاع عنه" in page
+
+
+def test_the_opening_balances_empty_state_says_what_the_screen_is_for(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «لا أرصدة افتتاحية» told a reader neither what the screen does nor how a
+    row appears. The body now names the four hands and the one that moves the
+    ledger, and offers no action.
+    """
+    from apps.billing.models import OpeningBalance
+
+    assert not OpeningBalance.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.empty"))
+
+    page = _opening_balances_page(client)
+
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "BR-094" in page
+    assert "empty-act" not in page
+
+
+def test_the_opening_balances_render_on_an_empty_database(
+    client: Client, seeded_settings: None
+) -> None:
+    """Settings and nothing else — the screen still draws for all three readers."""
+    for role, _review, _decide in OPENING_BALANCE_READERS:
+        client.force_login(_user(role, f"ob.bare.{role}".lower().replace("_", ".")))
+        assert client.get(reverse("billing:opening-balances")).status_code == 200
+        client.logout()
+
+
+def test_the_opening_balance_filters_are_the_two_that_were_already_there(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """
+    ``status`` and ``direction`` narrow the register and did before; the polish
+    added no control and renamed nothing.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.filter"))
+
+    page = _opening_balances_page(client)
+    assert 'name="status"' in page and 'name="direction"' in page
+
+    everything = client.get(reverse("billing:opening-balances"))
+    assert len(everything.context["balances"]) == 4
+
+    drafts = client.get(reverse("billing:opening-balances"), {"status": "DRAFT"})
+    assert [b["code"] for b in drafts.context["balances"]] == ["OB-UI-1"]
+
+    credits = client.get(reverse("billing:opening-balances"), {"direction": "CREDIT"})
+    assert [b["code"] for b in credits.context["balances"]] == ["OB-UI-4"]
+
+
+def test_the_opening_balance_row_prints_only_keys_it_already_carried(
+    client: Client, four_opening_balances: dict[str, object]
+) -> None:
+    """The ten columns are the projection's own values, unchanged."""
+    from django.template.defaultfilters import floatformat
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.rows"))
+
+    response = client.get(reverse("billing:opening-balances"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for row in response.context["balances"]:
+        assert row["code"] in page
+        assert row["description_ar"] in page
+        assert str(row["direction_display"]) in page
+        assert str(row["status_display"]) in page
+        assert floatformat(row["amount"], -3) in page
+        assert row["legacy_number"] in page
+    # The four hands are still printed side by side — the reason D-24 wanted
+    # one screen rather than four.
+    for hand in ("اقترح", "راجع", "اعتمد", "رحّل"):
+        assert hand in page
+
+
+def test_the_opening_balances_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen proposes, reviews, decides, posts, pays and reverses. The help
+    may not imply a row is edited or deleted, and it names the mistake the
+    screen invites: reading an approval as a posting.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["opening-balances"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "BR-094" in text
+    assert "لا تُحرّك في الدفتر شيئاً" in text
+    assert "لا يجمع شخص واحد دورين" in text
+    for absent in ("حذف", "تعديل الرصيد", "سند قبض"):
+        assert absent not in text, f"the opening-balances guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_review", "_may_decide"), OPENING_BALANCE_READERS)
+def test_the_opening_balances_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_review: bool, _may_decide: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"ob.links.{role}".lower().replace("_", ".")))
+    page = _opening_balances_page(client)
+
+    guide = GUIDES["opening-balances"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="kpi-grid"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_opening_balances_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = OPENING_BALANCES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the opening balances screen uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert markup.count('class="tbl-wrap"') == 2
+    assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

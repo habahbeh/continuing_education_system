@@ -209,6 +209,23 @@ GUIDES: dict[str, Guide] = {
             "إيراد لا تكلفة."
         ),
     ),
+    "opening-balances": Guide(
+        what=_("أرصدة الأرشيف التاريخي في طريقها إلى الدفتر، وما بلغ الترحيل منها فعلاً."),
+        who=_("الموظف المالي يقترح ويراجع ويصرف، ومدير المركز يعتمد ويقرّر مصير الرصيد الدائن."),
+        after=_("المُرحَّل وحده يصير بنداً في حساب المشارك، والذمة القديمة تُقرأ في براءة الذمة."),
+        links=(
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+            (Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
+        ),
+        # The mistake this screen invites is reading an approval as a posting:
+        # three of the four hands move nothing at all, and the screen shows
+        # them side by side precisely so that stays visible.
+        stops=_(
+            "لا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في "
+            "الدفتر شيئاً (BR-094). ولا يجمع شخص واحد دورين، ولا يُقبل صرف ولا عكسه "
+            "بتاريخ في فترة مقفلة ولا في المستقبل."
+        ),
+    ),
     "transfers": Guide(
         what=_("طلبات النقل بين الدورات: فحصها واعتمادها وتنفيذها."),
         who=_("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده (BR-066)."),

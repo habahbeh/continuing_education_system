@@ -1,98 +1,177 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094)، بأيديه الأربع
+  على صفحة واحدة عمداً: من يقترح ومن يراجع ومن يعتمد ثم الترحيل، جنباً إلى جنب
+  حتى يرى القارئ الفصل الذي وُجدت القاعدة لأجله.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس ولا معامل استعلام، ولا
+  عمود بدّل موضعه. النماذج السبعة على الصف هي نفسها خلف الرايات نفسها —
+  `can_review` و`can_decide` و`can_propose` — وكلها تُفحص ثانيةً في
+  `policy.require` عند الإرسال، وشروط الحالة على كلٍّ منها كما كانت.
+
+  أربع كتل `.note` — اثنتان صفراوان فوق الصفحة، وثالثة داخل بطاقة الانتظار،
+  ورابعة زرقاء فوق نموذج الاقتراح — صارت `.hint`. النصوص نفسها حرفاً بحرف:
+  الأصفر للحظة يُرفض فيها شيء، وشرحُ قاعدةٍ ليس رفضاً (قواعد التحسين §6.5).
+  وكتلتان مؤطَّرتان فوق الصفحة كانتا تدفعان الجدول كلّه تحت الطيّة.
+
+  وذيول بطاقات العدّ كانت `.muted`، والنظام يعرّف `.kpi .foot` لهذا الموضع.
+  و«مُرحَّلة إلى الدفتر» صارت `.kpi primary`: هي وحدها الموجودة في الحسابات —
+  وهو ما يقوله ذيلها أصلاً — والنظام يعرّف إبرازاً واحداً لكل شاشة. والأرقام
+  الثمانية كلّها من `totals` كما هي.
+
+  عمود الإجراءات كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
+  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
+  أفقياً. وحقول الصف — وهي إحدى عشرة — كانت صناديق بلا أسماء يقرؤها قارئ
+  الشاشة، فأُعطيت `aria-label` بالصياغة المستقرّة في إقفال الصندوق. ولا حقل
+  تغيّر اسمه ولا صار إلزامياً وليس كذلك.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
-</div>
-<div class="note warn">
-  {% translate "الصرف يُصحَّح ولا يُمحى: عكس الصرف يضيف قيداً بجانب الأصلي ويعيد الرصيد مستحقاً للردّ، ولا يُقبل صرف ولا عكس بتاريخ في فترة مالية مقفلة ولا في المستقبل." %}
-</div>
-<div class="note warn">
-  {% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً. والرصيد الدائن يُرحَّل لتسجيل لاحق إن وُجد، وإلا فهو مستحق الردّ نقداً — وفي الحالتين بلا سند قبض عن مالٍ لم يستلمه النظام. والذمة القديمة غير المسدَّدة تمنع براءة الذمة والشهادة." %}
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "أرصدة الأرشيف التاريخي في طريقها إلى الدفتر: من اقترحها ومن راجعها ومن اعتمدها، وما بلغ الترحيل منها فعلاً." %}</p>
+  </div>
 </div>
 
+{% guided_help "opening-balances" %}
+
 <div class="kpi-grid">
-  <div class="kpi"><div class="label">{% translate "مسودات" %}</div><div class="value num">{{ totals.draft }}</div>
-    <div class="muted">{% translate "لا أثر مالي" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "مُراجَعة" %}</div><div class="value num">{{ totals.reviewed }}</div>
-    <div class="muted">{% translate "لا أثر مالي" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "معتمَدة بانتظار الترحيل" %}</div><div class="value num">{{ totals.approved_not_posted }}</div>
-    <div class="muted">{% translate "إذن بالترحيل لا ترحيل" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "مُرحَّلة إلى الدفتر" %}</div><div class="value num">{{ totals.posted }}</div>
-    <div class="muted">{% translate "هذه وحدها موجودة في الحسابات" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "أرصدة دائنة مُرحَّلة لتسجيل لاحق" %}</div><div class="value num">{{ totals.credit_applied }}</div>
-    <div class="muted">{% translate "تخفض ما على التسجيل — بلا سند قبض" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "مستحق الردّ نقداً" %}</div><div class="value num">{{ totals.refund_due }}</div>
-    <div class="muted">{% translate "التزام قائم لم يُصرف بعد" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "مصروف فعلاً" %}</div><div class="value num">{{ totals.refunded }}</div>
-    <div class="muted">{% translate "خرج النقد بسند صرف — بلا سند قبض" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "صرف معكوس" %}</div><div class="value num">{{ totals.refunds_reversed }}</div>
-    <div class="muted">{% translate "السجل الأصلي محفوظ — والرصيد عاد مستحقاً" %}</div></div>
+  <div class="kpi">
+    <div class="label">{% translate "مسودات" %}</div>
+    <div class="value num">{{ totals.draft }}</div>
+    <div class="foot">{% translate "لا أثر مالي" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">{% translate "مُراجَعة" %}</div>
+    <div class="value num">{{ totals.reviewed }}</div>
+    <div class="foot">{% translate "لا أثر مالي" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">{% translate "معتمَدة بانتظار الترحيل" %}</div>
+    <div class="value num">{{ totals.approved_not_posted }}</div>
+    <div class="foot">{% translate "إذن بالترحيل لا ترحيل" %}</div>
+  </div>
+  <div class="kpi primary">
+    <div class="label">{% translate "مُرحَّلة إلى الدفتر" %}</div>
+    <div class="value num">{{ totals.posted }}</div>
+    <div class="foot">{% translate "هذه وحدها موجودة في الحسابات" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">{% translate "أرصدة دائنة مُرحَّلة لتسجيل لاحق" %}</div>
+    <div class="value num">{{ totals.credit_applied }}</div>
+    <div class="foot">{% translate "تخفض ما على التسجيل — بلا سند قبض" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">{% translate "مستحق الردّ نقداً" %}</div>
+    <div class="value num">{{ totals.refund_due }}</div>
+    <div class="foot">{% translate "التزام قائم لم يُصرف بعد" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">{% translate "مصروف فعلاً" %}</div>
+    <div class="value num">{{ totals.refunded }}</div>
+    <div class="foot">{% translate "خرج النقد بسند صرف — بلا سند قبض" %}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">{% translate "صرف معكوس" %}</div>
+    <div class="value num">{{ totals.refunds_reversed }}</div>
+    <div class="foot">{% translate "السجل الأصلي محفوظ — والرصيد عاد مستحقاً" %}</div>
+  </div>
 </div>
 
 <form method="get" class="filterbar" role="search">
   <div class="fld">
     <label for="f_status">{% translate "الحالة" %}</label>
     <select name="status" id="f_status">
-    <option value="">{% translate "كل الحالات" %}</option>
-    {% for code, label in statuses %}<option value="{{ code }}"{% if code == request.GET.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
-  </select>
+      <option value="">{% translate "كل الحالات" %}</option>
+      {% for code, label in statuses %}<option value="{{ code }}"{% if code == request.GET.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
   </div>
   <div class="fld">
     <label for="f_direction">{% translate "الاتجاه" %}</label>
     <select name="direction" id="f_direction">
-    <option value="">{% translate "كل الاتجاهات" %}</option>
-    {% for code, label in directions %}<option value="{{ code }}"{% if code == request.GET.direction %} selected{% endif %}>{{ label }}</option>{% endfor %}
-  </select>
+      <option value="">{% translate "كل الاتجاهات" %}</option>
+      {% for code, label in directions %}<option value="{{ code }}"{% if code == request.GET.direction %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
   </div>
   <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
+  <span class="count">{% blocktranslate count n=balances|length %}رصيد واحد{% plural %}{{ n }} أرصدة{% endblocktranslate %}</span>
 </form>
 
 {% if outstanding_refunds %}
   <div class="card2">
-    <div class="card2-head"><h2>{% translate "أرصدة تنتظر الصرف" %}</h2></div>
-    <div class="card2-body">
-      <div class="note warn">
-        {% translate "أعلن المدير استحقاقها، ولم يخرج النقد بعد. من أعلن الاستحقاق لا يصرفه بنفسه — الصرف على الموظف المالي بسند صرف واسم مستلم." %}
+    <div class="card2-head">
+      <h2>{% translate "أرصدة تنتظر الصرف" %}</h2>
+      <div class="acts">
+        <span class="count">{% blocktranslate count n=outstanding_refunds|length %}رصيد واحد{% plural %}{{ n }} أرصدة{% endblocktranslate %}</span>
       </div>
     </div>
     <div class="tbl-wrap">
       <table class="tbl">
-        <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "المبلغ" %}</th>
-          <th>{% translate "المشارك" %}</th><th>{% translate "أعلنه" %}</th><th>{% translate "المسوّغ" %}</th></tr></thead>
+        <thead>
+          <tr>
+            <th>{% translate "الرمز" %}</th>
+            <th class="num">{% translate "المبلغ" %}</th>
+            <th>{% translate "المشارك" %}</th>
+            <th>{% translate "أعلنه" %}</th>
+            <th>{% translate "المسوّغ" %}</th>
+          </tr>
+        </thead>
         <tbody>
           {% for r in outstanding_refunds %}
-            <tr><td dir="ltr">{{ r.code }}</td><td class="num">{{ r.amount }}</td>
-                <td>{{ r.participant_name|default:r.legacy_number }}</td>
-                <td>{{ r.declared_by }}</td><td><small class="muted">{{ r.note_ar }}</small></td></tr>
+            <tr>
+              <td dir="ltr" translate="no"><strong class="num">{{ r.code }}</strong></td>
+              <td class="num">{{ r.amount }}</td>
+              <td>{{ r.participant_name|default:r.legacy_number }}</td>
+              <td>{{ r.declared_by }}</td>
+              <td><small class="muted">{{ r.note_ar }}</small></td>
+            </tr>
           {% endfor %}
         </tbody>
       </table>
+    </div>
+    <div class="card2-body">
+      <p class="hint">{% translate "أعلن المدير استحقاقها، ولم يخرج النقد بعد. من أعلن الاستحقاق لا يصرفه بنفسه — الصرف على الموظف المالي بسند صرف واسم مستلم." %}</p>
     </div>
   </div>
 {% endif %}
 
 <div class="card2">
+  <div class="card2-head"><h2>{% translate "الأرصدة الافتتاحية" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الاتجاه" %}</th><th>{% translate "المبلغ" %}</th>
-        <th>{% translate "كما في" %}</th><th>{% translate "البيان" %}</th><th>{% translate "المصدر" %}</th>
-        <th>{% translate "التسجيل" %}</th><th>{% translate "الأيدي" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الاتجاه" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th class="num">{% translate "كما في" %}</th>
+          <th>{% translate "البيان" %}</th>
+          <th>{% translate "المصدر" %}</th>
+          <th>{% translate "التسجيل" %}</th>
+          <th>{% translate "الأيدي" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for b in balances %}
           <tr>
-            <td dir="ltr">{{ b.code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ b.code }}</strong></td>
             <td>{{ b.direction_display }}</td>
             <td class="num">{{ b.amount }}</td>
-            <td class="num">{{ b.as_of }}</td>
+            <td class="num"><span dir="ltr">{{ b.as_of|date:"Y/m/d" }}</span></td>
             <td>{{ b.description_ar }}</td>
             <td>
-              {% if b.source %}<small class="muted" dir="ltr">{{ b.source }}</small>{% else %}<small class="muted">{% translate "ملف ورقي" %}</small>{% endif %}
-              {% if b.legacy_number %}<br><small class="muted" dir="ltr">{{ b.legacy_number }}</small>{% endif %}
+              {% if b.source %}<small class="muted" dir="ltr" translate="no">{{ b.source }}</small>{% else %}<small class="muted">{% translate "ملف ورقي" %}</small>{% endif %}
+              {% if b.legacy_number %}<br><small class="muted" dir="ltr" translate="no">{{ b.legacy_number }}</small>{% endif %}
             </td>
-            <td dir="ltr">{{ b.enrollment_code|default:"—" }}</td>
+            <td dir="ltr" translate="no">{{ b.enrollment_code|default:"—" }}</td>
             <td>
               <small class="muted">
                 {% translate "اقترح" %}: {{ b.created_by }}<br>
@@ -102,24 +181,24 @@
               </small>
             </td>
             <td>
-              <span class="chip {{ b.status|status_tone }}">{{ b.status_display }}</span>
+              <span class="chip {{ b.status|status_tone }} dot">{{ b.status_display }}</span>
               {% if b.resolution_note_ar %}<br><small class="muted">{{ b.resolved_by }} · {{ b.resolution_note_ar }}</small>{% endif %}
               {% if b.decision_note_ar %}<br><small class="muted">{{ b.decision_note_ar }}</small>{% endif %}
             </td>
-            <td>
+            <td class="acts">
               {% if can_review and b.status == "DRAFT" %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="action" value="review">
                   <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="enrollment_code" placeholder="{% translate 'رمز التسجيل…' %}">
-                  <input name="note_ar" placeholder="{% translate 'ملاحظة المراجعة…' %}" required>
+                  <input name="enrollment_code" aria-label="{% translate 'رمز التسجيل' %}" placeholder="{% translate 'رمز التسجيل…' %}">
+                  <input name="note_ar" aria-label="{% translate 'ملاحظة المراجعة' %}" placeholder="{% translate 'ملاحظة المراجعة…' %}" required>
                   <button class="btn2" type="submit">{% translate "مراجعة" %}</button>
                 </form>
               {% endif %}
               {% if can_decide and b.status == "REVIEWED" %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="note_ar" placeholder="{% translate 'ملاحظة القرار…' %}">
+                  <input name="note_ar" aria-label="{% translate 'ملاحظة القرار' %}" placeholder="{% translate 'ملاحظة القرار…' %}">
                   <button class="btn2 primary" type="submit" name="action" value="approve">{% translate "اعتماد" %}</button>
                   <button class="btn2" type="submit" name="action" value="reject">{% translate "رفض" %}</button>
                 </form>
@@ -127,8 +206,8 @@
               {% if can_decide and b.is_resolvable_credit %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="enrollment_code" placeholder="{% translate 'تسجيل لاحق…' %}">
-                  <input name="note_ar" placeholder="{% translate 'مسوّغ التسوية…' %}" required>
+                  <input name="enrollment_code" aria-label="{% translate 'تسجيل لاحق' %}" placeholder="{% translate 'تسجيل لاحق…' %}">
+                  <input name="note_ar" aria-label="{% translate 'مسوّغ التسوية' %}" placeholder="{% translate 'مسوّغ التسوية…' %}" required>
                   <button class="btn2 primary" type="submit" name="action" value="carry-forward">{% translate "ترحيل لتسجيل لاحق" %}</button>
                   <button class="btn2" type="submit" name="action" value="refund-due">{% translate "مستحق ردّ نقداً" %}</button>
                 </form>
@@ -137,12 +216,12 @@
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="action" value="pay-refund">
                   <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="payout_code" placeholder="{% translate 'رمز الصرف…' %}" required>
-                  <select name="payment_method" required>
+                  <input name="payout_code" aria-label="{% translate 'رمز الصرف' %}" placeholder="{% translate 'رمز الصرف…' %}" required>
+                  <select name="payment_method" aria-label="{% translate 'طريقة الصرف' %}" required>
                     {% for code, label in payment_methods %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
                   </select>
-                  <input name="external_reference" placeholder="{% translate 'رقم سند الصرف…' %}" required>
-                  <input name="payee_name_ar" placeholder="{% translate 'اسم المستلم…' %}" required>
+                  <input name="external_reference" aria-label="{% translate 'رقم سند الصرف' %}" placeholder="{% translate 'رقم سند الصرف…' %}" required>
+                  <input name="payee_name_ar" aria-label="{% translate 'اسم المستلم' %}" placeholder="{% translate 'اسم المستلم…' %}" required>
                   <label>{% translate "تاريخ الصرف" %}
                     <input type="date" name="paid_on" value="{{ today }}" required>
                   </label>
@@ -150,19 +229,19 @@
                 </form>
               {% endif %}
               {% if b.payout_reference %}
-                <small class="muted">{% translate "سند الصرف" %} <span dir="ltr">{{ b.payout_reference }}</span>
-                  · {{ b.payout_paid_on }} · {{ b.payout_paid_by }}</small>
+                <small class="muted">{% translate "سند الصرف" %} <span dir="ltr" translate="no">{{ b.payout_reference }}</span>
+                  · <span dir="ltr">{{ b.payout_paid_on|date:"Y/m/d" }}</span> · {{ b.payout_paid_by }}</small>
                 {% if b.payout_is_reversed %}
-                  <br><span class="chip danger">{% translate "معكوس" %}</span>
-                  <small class="muted">{{ b.payout_reversed_on }} — {{ b.payout_reversal_reason }}</small>
+                  <br><span class="chip danger dot">{% translate "معكوس" %}</span>
+                  <small class="muted"><span dir="ltr">{{ b.payout_reversed_on|date:"Y/m/d" }}</span> — {{ b.payout_reversal_reason }}</small>
                 {% endif %}
               {% endif %}
               {% if can_review and b.is_reversible %}
                 <form method="post">{% csrf_token %}
                   <input type="hidden" name="action" value="reverse-refund">
                   <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="reason_ar" placeholder="{% translate 'سبب عكس الصرف…' %}" required>
-                  <input name="reversal_reference" placeholder="{% translate 'مرجع التصحيح…' %}">
+                  <input name="reason_ar" aria-label="{% translate 'سبب عكس الصرف' %}" placeholder="{% translate 'سبب عكس الصرف…' %}" required>
+                  <input name="reversal_reference" aria-label="{% translate 'مرجع التصحيح' %}" placeholder="{% translate 'مرجع التصحيح…' %}">
                   <label>{% translate "تاريخ العكس" %}
                     <input type="date" name="reversed_on" value="{{ today }}" required>
                   </label>
@@ -178,9 +257,18 @@
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="10" class="empty"><span class="empty-title">{% translate "لا أرصدة افتتاحية" %}</span></td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="10" class="empty">
+            <span class="empty-title">{% translate "لا أرصدة افتتاحية" %}</span>
+            <span class="empty-body">{% translate "الرصيد الافتتاحي يُقترح من صفّ في الأرشيف التاريخي، ثم يُراجَع ويُعتمَد ويُرحَّل — والترحيل وحده هو ما ينشئ بند الرسم في الدفتر (BR-094)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً. والرصيد الدائن يُرحَّل لتسجيل لاحق إن وُجد، وإلا فهو مستحق الردّ نقداً — وفي الحالتين بلا سند قبض عن مالٍ لم يستلمه النظام. والذمة القديمة غير المسدَّدة تمنع براءة الذمة والشهادة." %}</p>
+    <p class="hint">{% translate "الصرف يُصحَّح ولا يُمحى: عكس الصرف يضيف قيداً بجانب الأصلي ويعيد الرصيد مستحقاً للردّ، ولا يُقبل صرف ولا عكس بتاريخ في فترة مالية مقفلة ولا في المستقبل." %}</p>
   </div>
 </div>
 
@@ -188,13 +276,13 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "اقتراح رصيد افتتاحي" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
-        {% translate "واحد في كل مرة (D-25). والمبلغ يُكتب ولا يُشتق: مجموع أعمدة المواد لا يطابق رسوم الدورة في معظم صفوف الأرشيف، واشتقاق ذمة منها يحوّل خطأ جدول إلى مطالبة بمال. اقرأ الصف، وقرّر، واكتب رقماً تستطيع الدفاع عنه." %}
-      </div>
+      <p class="hint boxed">{% translate "واحد في كل مرة (D-25). والمبلغ يُكتب ولا يُشتق: مجموع أعمدة المواد لا يطابق رسوم الدورة في معظم صفوف الأرشيف، واشتقاق ذمة منها يحوّل خطأ جدول إلى مطالبة بمال. اقرأ الصف، وقرّر، واكتب رقماً تستطيع الدفاع عنه." %}</p>
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="propose">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "اقتراح" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "اقتراح" %}</button>
+        </div>
       </form>
     </div>
   </div>
