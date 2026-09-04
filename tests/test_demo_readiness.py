@@ -832,6 +832,7 @@ GUIDED_HELP_SCREENS = [
     # own polish slice.
     ("billing:discounts", "discounts", "discounts"),
     ("billing:refunds", "refunds", "refunds"),
+    ("billing:extra-fees", "extra-fees", "extra-fees"),
     ("operations:transfers", "transfers", "transfers"),
     ("operations:transfer-new", "transfer-new", "transfer-new"),
     ("operations:special-cases", "special-cases", "special-cases"),

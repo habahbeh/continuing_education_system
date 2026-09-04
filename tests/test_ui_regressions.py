@@ -7209,3 +7209,430 @@ def test_the_refunds_screen_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The extra fees register — page polish
+# ---------------------------------------------------------------------------
+# §3.4/21 «V C E P · V P · V C E P · — · — · V P». Four roles read it and two
+# may charge. The screen was a bare <h1>, a blue alert that printed two fee
+# amounts as literal text, an empty state saying «لا رسوم إضافية», and a row
+# that never showed the one fact BR-040 turns on.
+EXTRA_FEES_TEMPLATE = Path("templates/billing/extra_fees.html")
+
+#: role, may charge — read straight off §3.4/21.
+EXTRA_FEE_READERS = (
+    (Role.CENTER_MANAGER, True),
+    (Role.REGISTRATION_OFFICER, False),
+    (Role.FINANCE_OFFICER, True),
+    (Role.AUDIT_ACCOUNT, False),
+)
+
+#: The roles §3.4/21 leaves empty. An empty cell is an explicit deny (BR-080).
+EXTRA_FEE_NON_READERS = (Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def three_extra_fees(  # type: ignore[no-untyped-def]
+    seeded_settings: None, active_semester: object, participant_data: dict
+):
+    """
+    One fee of each shape: shareable, centre-only, and the one BR-040 gates.
+
+    Charged through the service so ``is_partner_shareable`` is §5.5's answer
+    and each amount is the seeded setting's — the two figures the template
+    used to print as literal text.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.core.management import call_command
+
+    from apps.billing.models import ExtraFeeType
+    from apps.billing.services import charge_service, extra_fee_service
+    from apps.catalog.models import PriceList, PriceListStatus, Program
+    from apps.catalog.services import pricing_service
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.services import participant_service
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    actor = _user(Role.CENTER_MANAGER, "xf.fixture.actor")
+    program = Program.objects.get(code="SC-NET")
+    cohort = Cohort.objects.create(
+        code="CO-XF-1",
+        program=program,
+        semester=active_semester,
+        name_ar=f"دفعة {program.name_ar}",
+        starts_on=date(2026, 9, 20),
+        ends_on=date(2026, 12, 20),
+        capacity=25,
+    )
+    participant = participant_service.create_participant(actor=actor, data=participant_data)
+    quote = pricing_service.resolve_price(
+        program=program, participant_category="UNIVERSITY", as_of=date(2026, 9, 20)
+    )
+    enrollment = Enrollment.objects.create(
+        code="EN-XF-1",
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=date(2026, 9, 20),
+        price_list=PriceList.objects.get(status=PriceListStatus.APPROVED),
+    )
+    charge_service.charge_lines_from_quote(
+        actor=actor, enrollment=enrollment, quote=quote, charged_on=date(2026, 9, 20)
+    )
+    return [
+        extra_fee_service.charge_extra_fee(
+            actor=actor,
+            enrollment=enrollment,
+            fee_type=ExtraFeeType.SUBJECT_REPEAT,
+            charged_on=date(2026, 9, 20),
+            subject_name="مقدمة في الشبكات",
+        ),
+        extra_fee_service.charge_extra_fee(
+            actor=actor,
+            enrollment=enrollment,
+            fee_type=ExtraFeeType.CERTIFICATE_REPLACEMENT,
+            charged_on=date(2026, 9, 21),
+        ),
+        extra_fee_service.charge_extra_fee(
+            actor=actor,
+            enrollment=enrollment,
+            fee_type=ExtraFeeType.INTERNATIONAL_EXAM,
+            charged_on=date(2026, 9, 22),
+            amount=Decimal("120.000"),
+            prior_agreement_with_participant=True,
+        ),
+    ]
+
+
+def _extra_fees_page(client: Client) -> str:
+    response = client.get(reverse("billing:extra-fees"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_create"), EXTRA_FEE_READERS)
+def test_the_extra_fees_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "extra-fees")
+    client.force_login(_user(role, f"xf.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:extra-fees")).status_code == 200
+
+
+@pytest.mark.parametrize("role", EXTRA_FEE_NON_READERS)
+def test_the_extra_fees_register_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "extra-fees")
+    client.force_login(_user(role, f"xf.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:extra-fees")).status_code == 403
+
+
+def test_the_extra_fees_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("billing:extra-fees")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_create"), EXTRA_FEE_READERS)
+def test_the_charge_form_is_drawn_only_where_create_is_granted(
+    client: Client, seeded_settings: None, role: str, may_create: bool
+) -> None:
+    """
+    The form follows ``can_create`` exactly as it did, and a reader without it
+    gets a page with no form, no button and no CSRF token at all.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "extra-fees")) is may_create
+    client.force_login(_user(role, f"xf.create.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("billing:extra-fees"))
+    assert response.context["can_create"] is may_create
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    if may_create:
+        assert page.count("<form") == 1
+        assert page.count("<button") == 1
+        for name in response.context["form"].fields:
+            assert f'name="{name}"' in page, name
+        assert 'class="form-acts"' in page
+    else:
+        assert "<form" not in page
+        assert "<button" not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_a_role_without_create_cannot_charge_an_extra_fee(
+    client: Client, seeded_settings: None
+) -> None:
+    """The page never offered the form; the route still refuses the POST."""
+    from apps.billing.models import ExtraFee
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.post"))
+
+    response = client.post(reverse("billing:extra-fees"), {"fee_type": "SUBJECT_REPEAT"})
+
+    assert response.status_code == 403
+    assert not ExtraFee.objects.exists()
+
+
+def test_the_screen_prints_no_fee_amount_of_its_own(client: Client, seeded_settings: None) -> None:
+    """
+    «75 ديناراً» and «15 ديناراً» were literal text in the template, while both
+    are dated settings the service reads at charge time. A figure frozen in
+    markup keeps saying the old number after the setting moves — the BR-020
+    defect, on a second screen. On an empty register the page now names no
+    amount at all.
+    """
+    from decimal import Decimal
+
+    from apps.core.services.settings_service import get_setting
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "xf.amounts"))
+    page = _extra_fees_page(client)
+
+    assert "75" not in page
+    assert "15 " not in page
+    # The settings are still where the service reads them from; the screen
+    # simply no longer duplicates them.
+    from datetime import date
+
+    assert get_setting("subject_repeat_fee", as_of=date(2026, 9, 20)) == Decimal("75.000")
+    assert get_setting("certificate_replacement_fee", as_of=date(2026, 9, 20)) == Decimal("15.000")
+    # …and the rule that survives any amount is still taught.
+    assert "بدل فاقد الشهادة للمركز وحده" in page
+    assert "لا تُحمَّل بلا اتفاق مسبق" in page
+
+
+def test_the_seeded_amount_reaches_the_screen_from_the_row_it_charged(
+    client: Client, three_extra_fees: object
+) -> None:
+    """
+    Dropping the literal figures cost the reader nothing: every amount on the
+    page is the one actually charged, printed in its own column.
+    """
+    from decimal import Decimal
+
+    from django.template.defaultfilters import floatformat
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "xf.row.amount"))
+
+    response = client.get(reverse("billing:extra-fees"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    amounts = {row["amount"] for row in response.context["fees"]}
+    assert amounts == {Decimal("75.000"), Decimal("15.000"), Decimal("120.000")}
+    for amount in amounts:
+        assert floatformat(amount, -3) in page
+
+
+def test_the_prior_agreement_is_shown_beside_the_only_type_it_governs(
+    client: Client, three_extra_fees: object
+) -> None:
+    """
+    BR-040 gates the international exam fee and nothing else, so its evidence
+    sits beside that type rather than in a column of its own — the same reading
+    the till gives BR-020's breakdown. The value is the row's; nothing here
+    re-decides the rule.
+    """
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "xf.agreed"))
+
+    response = client.get(reverse("billing:extra-fees"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    exam = next(r for r in response.context["fees"] if r["fee_type"] == "INTERNATIONAL_EXAM")
+    assert exam["prior_agreement_with_participant"] is True
+    assert page.count("باتفاق مسبق") == 1, "the chip is on the exam row and no other"
+    assert page.index("باتفاق مسبق") > page.index("امتحان دولي")
+    # The other two rows carry the flag as False and get no chip.
+    for row in response.context["fees"]:
+        if row["fee_type"] != "INTERNATIONAL_EXAM":
+            assert row["prior_agreement_with_participant"] is False
+
+
+def test_the_extra_fees_row_prints_only_keys_it_already_carried(
+    client: Client, three_extra_fees: object
+) -> None:
+    """The eight columns are the projection's own values, unchanged."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.rows"))
+
+    response = client.get(reverse("billing:extra-fees"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for row in response.context["fees"]:
+        assert row["enrollment_code"] in page
+        assert row["participant_name"] in page
+        assert str(row["fee_type_display"]) in page
+        assert row["charge_line_description"] in page
+    assert "مقدمة في الشبكات" in page
+
+
+def test_the_extra_fees_head_reads_like_every_polished_screen(
+    client: Client, three_extra_fees: object
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and the count — all off
+    the view's own ``title`` and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.head"))
+
+    page = _extra_fees_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+    assert 'class="card2-head"' in page
+
+
+def test_the_extra_fees_rule_is_explained_and_no_longer_alerted(
+    client: Client, three_extra_fees: object
+) -> None:
+    """
+    §5.5 was a blue `.note info` above the page. Blue is an alert and
+    explaining a rule is not one (polish rules §6.5), so it now sits as a
+    `.hint` beneath the columns it explains.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.rule"))
+
+    page = _extra_fees_page(client)
+
+    assert "note info" not in page
+    assert '<p class="hint">' in page
+    anchor = "بدل فاقد الشهادة للمركز وحده"
+    assert page.index(anchor) > page.index('class="tbl"'), "the rule left its columns behind"
+
+
+def test_the_extra_fees_empty_state_says_what_a_fee_is(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «لا رسوم إضافية» told a reader neither what the screen is for nor how a row
+    appears. The body now names the three types and where the fee lands, and
+    offers no action: whoever may charge one finds the form below.
+    """
+    from apps.billing.models import ExtraFee
+
+    assert not ExtraFee.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.empty"))
+
+    page = _extra_fees_page(client)
+
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "§5.5" in page
+    assert "empty-act" not in page
+
+
+def test_the_extra_fees_register_renders_on_an_empty_database(
+    client: Client, seeded_settings: None
+) -> None:
+    """Settings and nothing else — the screen still draws for all four readers."""
+    for role, _create in EXTRA_FEE_READERS:
+        client.force_login(_user(role, f"xf.bare.{role}".lower().replace("_", ".")))
+        assert client.get(reverse("billing:extra-fees")).status_code == 200
+        client.logout()
+
+
+def test_the_extra_fees_screen_still_takes_no_query_parameter(
+    client: Client, three_extra_fees: object
+) -> None:
+    """
+    The service can narrow by enrolment; this view has never asked it to, and
+    the polish added no filter control that would imply otherwise.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.filter"))
+
+    plain = client.get(reverse("billing:extra-fees"))
+    noisy = client.get(reverse("billing:extra-fees"), {"enrollment": "EN-NOT-THERE"})
+
+    assert len(plain.context["fees"]) == len(noisy.context["fees"]) == 3
+    assert 'class="filterbar"' not in _extra_fees_page(client)
+
+
+def test_the_extra_fees_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen charges a fee and lists what was charged. The help may not imply
+    a fee is edited, deleted or refunded here, and it says who decides the
+    split — which the form's own field makes easy to misread as a free choice.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["extra-fees"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "BR-040" in text
+    assert "§5.5" in text
+    assert "تقرّرها القاعدة لا مُدخِل الرسم" in text
+    for absent in ("حذف", "تعديل الرسم", "استرداد"):
+        assert absent not in text, f"the extra-fees guidance offers «{absent}»"
+    # The guidance may not print an amount either — same reason the page no
+    # longer does.
+    for figure in ("75", "15"):
+        assert figure not in text, f"the guidance froze the amount «{figure}»"
+
+
+@pytest.mark.parametrize(("role", "_may_create"), EXTRA_FEE_READERS)
+def test_the_extra_fees_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"xf.links.{role}".lower().replace("_", ".")))
+    page = _extra_fees_page(client)
+
+    guide = GUIDES["extra-fees"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_extra_fees_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = EXTRA_FEES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the extra fees register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

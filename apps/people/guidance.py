@@ -175,6 +175,23 @@ GUIDES: dict[str, Guide] = {
             "الرصيد الدائن فلا يحتاج شيئاً من ذلك (BR-071)."
         ),
     ),
+    "extra-fees": Guide(
+        what=_("الرسوم المحمَّلة خارج رسوم البرنامج: نوع كل رسم ومبلغه وبنده في حساب المشارك."),
+        who=_("مدير المركز والموظف المالي يحمّلان الرسم، وموظف التسجيل وحساب التدقيق يقرآن."),
+        after=_("الرسم يصير بنداً في حساب المشارك، ويُقبض مع بقية رسومه في الصندوق."),
+        links=(
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+            (Screen.PAYMENTS, "cashbox:payments", _("الدفعات وسندات القبض")),
+        ),
+        # Who shares a fee is §5.5's answer and not the person's who enters it,
+        # which the form's own «قابل للقسمة» field makes easy to misread as a
+        # choice. Said here rather than left to the refusal message.
+        stops=_(
+            "رسم الامتحان الدولي لا يُحمَّل بلا اتفاق مسبق مع المشارك (BR-040 · §5.5)، "
+            "والرسم من نوع «أخرى» يحتاج قراراً صريحاً بقابليته للقسمة. أمّا بقية "
+            "الأنواع فقسمتها تقرّرها القاعدة لا مُدخِل الرسم."
+        ),
+    ),
     "transfers": Guide(
         what=_("طلبات النقل بين الدورات: فحصها واعتمادها وتنفيذها."),
         who=_("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده (BR-066)."),

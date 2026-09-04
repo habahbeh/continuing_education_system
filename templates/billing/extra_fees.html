@@ -1,38 +1,93 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل الرسوم الإضافية ونموذج تحميلها. التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل
+  ولا حارس ولا مرشّح، ولا عمود بدّل موضعه. الزرّ الوحيد على الشاشة هو «تحميل
+  الرسم» خلف `can_create` نفسه، ويُفحص ثانيةً في العرض عند الإرسال.
+
+  المبلغان المكتوبان في الجملة العلوية — «75 ديناراً» و«15 ديناراً» — حُذفا.
+  كلاهما إعداد مؤرَّخ (`subject_repeat_fee` · `certificate_replacement_fee`)
+  يُقرأ في `default_amount_for` عند التحميل، فالنصّ الجامد يبقى على الشاشة بعد
+  أن يتغيّر الإعداد فتقول الصفحة رسماً لا يُحمَّل. وهو العيب نفسه الذي أُصلح في
+  شاشة استيفاء الدفعة (BR-020). وما يبقى صحيحاً مهما تغيّر الرقم — من يقتسم كل
+  رسم، وأن الامتحان الدولي خارج الرسوم — يبقى مكتوباً، والمبالغ تُقرأ من عمود
+  «المبلغ» حيث كل رقم هو ما حُمِّل فعلاً.
+
+  والجملة نزلت من `.note info` إلى `.hint` تحت الجدول: الأزرق تنبيه، وشرحُ
+  قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5).
+
+  و«باتفاق مسبق» تُذكر إلى جانب نوع الرسم الذي تخصّه وحده — الامتحان الدولي —
+  لا في عمود جديد: هي شرط BR-040 على هذا النوع بعينه، ولا معنى لها على غيره.
+  والقيمة من الصف نفسه (`prior_agreement_with_participant`)، فلا حساب هنا ولا
+  حكم: الشرط يُفحص في `charge_extra_fee` وحدها.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
-</div>
-<div class="note info">
-  {% translate "رسم إعادة المادة 75 ديناراً يقتسمه الطرفان عبر وعاء الشريك · بدل فاقد الشهادة 15 ديناراً للمركز · الامتحانات الدولية خارج الرسوم ولا تُحمَّل بلا اتفاق مسبق مع المشارك." %}
+  <div>
+    <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "الرسوم المحمَّلة خارج رسوم البرنامج، كلٌّ ببنده في حساب المشارك وبقابليته للقسمة مع الشريك." %}</p>
+  </div>
 </div>
 
+{% guided_help "extra-fees" %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الرسوم المحمَّلة" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=fees|length %}رسم واحد{% plural %}{{ n }} رسوم{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th>
-        <th>{% translate "النوع" %}</th><th>{% translate "المادة" %}</th>
-        <th>{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th>
-        <th>{% translate "قابل للقسمة" %}</th><th>{% translate "بند الرسوم" %}</th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "التسجيل" %}</th>
+          <th>{% translate "المشارك" %}</th>
+          <th>{% translate "النوع" %}</th>
+          <th>{% translate "المادة" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th class="num">{% translate "التاريخ" %}</th>
+          <th>{% translate "قابل للقسمة" %}</th>
+          <th>{% translate "بند الرسوم" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for f in fees %}
           <tr>
-            <td dir="ltr">{{ f.enrollment_code }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ f.enrollment_code }}</strong></td>
             <td>{{ f.participant_name }}</td>
-            <td>{{ f.fee_type_display }}</td>
+            <td>
+              {{ f.fee_type_display }}
+              {% if f.fee_type == "INTERNATIONAL_EXAM" and f.prior_agreement_with_participant %}
+                <span class="chip ok">{% translate "باتفاق مسبق" %}</span>
+              {% endif %}
+            </td>
             <td>{{ f.subject_name|default:"—" }}</td>
             <td class="num">{{ f.amount }}</td>
-            <td class="num">{{ f.charged_on }}</td>
-            <td>{% if f.is_partner_shareable %}<span class="chip ok">{% translate "نعم" %}</span>
-                {% else %}<span class="chip">{% translate "لا" %}</span>{% endif %}</td>
+            <td class="num"><span dir="ltr">{{ f.charged_on|date:"Y/m/d" }}</span></td>
+            <td>
+              {% if f.is_partner_shareable %}<span class="chip ok dot">{% translate "نعم" %}</span>
+              {% else %}<span class="chip dot">{% translate "لا" %}</span>{% endif %}
+            </td>
             <td>{{ f.charge_line_description|default:"—" }}</td>
           </tr>
-        {% empty %}<tr><td colspan="8" class="empty"><span class="empty-title">{% translate "لا رسوم إضافية" %}</span></td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا رسوم إضافية" %}</span>
+            <span class="empty-body">{% translate "الرسم الإضافي يُحمَّل على تسجيل قائم فيصير بنداً في حساب المشارك يُقبض مع بقية رسومه — إعادة مادة أو بدل فاقد شهادة أو امتحان دولي (§5.5)." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "رسم إعادة المادة يقتسمه الطرفان عبر وعاء الشريك · بدل فاقد الشهادة للمركز وحده · الامتحانات الدولية خارج الرسوم ولا تُحمَّل بلا اتفاق مسبق مع المشارك. ومبلغ كل رسم هو ما يظهر في عموده، ويُقرأ عند التحميل من إعداده المؤرَّخ." %}</p>
   </div>
 </div>
 
@@ -42,7 +97,9 @@
     <div class="card2-body">
       <form method="post">{% csrf_token %}
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "تحميل الرسم" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "تحميل الرسم" %}</button>
+        </div>
       </form>
     </div>
   </div>
