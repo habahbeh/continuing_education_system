@@ -1,25 +1,83 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل مطالبات الشركاء، وتحته كتلة بناء مطالبة جديدة لمن يملك الإنشاء.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا حقل ولا عمود بدّل موضعه. صفوف
+  الجدول هي ما يعيده `claim_service.list_claims` بأسمائه نفسها، والنموذج يُرسم
+  من `partials/_form.html` كما كان، ويُرسل `action=build` إلى المسار نفسه.
+
+  ورايةُ الكتلة السفلى `can_create` تُحسب من CREATE على §3.5/27: الموظف المالي
+  وحده يبني، ومدير المركز يعتمد على البطاقة لا هنا، وحساب التدقيق يقرأ السجل
+  ولا يُعرض له نموذج لا يستطيع إرساله.
+
+  ما تغيّر:
+
+  * الترويسة صارت كترويسة كل سجلّ مصقول — كتلة عنوان بسياقها وسطرها — وفوق
+    الجدول عدّادُ ما رُسم من صفوف. و`.count` وحده معرَّف داخل `.filterbar` لا
+    في ترويسة البطاقة، فأخذ `muted` معه ليأتي بلون النصّ الثانوي بلا صنف جديد
+    ولا سطر CSS؛
+  * جملة «تُعرض الدفعات التي تحمل اتفاقية فقط» تركت `.note info` إلى
+    `.hint boxed` فوق حقول النموذج: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
+    (قواعد التحسين §6.5)، وهي فوق الحقول التي تخصّها لا فوق البطاقة كلها؛
+  * العمود الحادي عشر كان بلا اسم، فسُمّي بـ `aria-label` — لا `.sr-only`،
+    فهي `position:absolute` بلا جدٍّ مموضَع وتجرّ الصفحة عرضاً في RTL؛
+  * شارة «مختومة» فقدت `ok`. `is_frozen` تعني APPROVED أو PAID، وكلتاهما في
+    `_OK` عند `status_tone`، فكانت شارتان خضراوان متجاورتان تقولان الشيء
+    نفسه. الختم واقعةٌ عن الحالة لا إنجازٌ ثانٍ (قواعد التحسين §6.5 · §7)؛
+  * الحالة الفارغة كانت تقول من أين تنشأ المطالبة ولا تقول الخطوة التالية،
+    فصارت تدلّ على كتلة البناء أسفل الصفحة — لمن يملك البناء وحده
+    (قواعد التحسين §8.2)؛
+  * زرّ الإرسال دخل `.form-acts` كما في كل نموذج مصقول، والنموذج أخذ
+    `novalidate` فتصل الرسالة العربية من الخادم بدل رسالة المتصفّح.
+
+  ولا مبلغ يُحتسب هنا: كل رقم في الصف يأتي من الخدمة كما هو.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "ما استحقّه كل شريك عن فترة: الوعاء الموزَّع، وحصته منه، وما حُسم عليها، والصافي الذي تُخالَص به." %}</p>
+  </div>
 </div>
 
 {% guided_help "claims" %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "المطالبات المسجَّلة" %}</h2>
+    <div class="acts">
+      <span class="count muted">{% blocktranslate count n=claims|length %}مطالبة واحدة{% plural %}{{ n }} مطالبات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الاتفاقية" %}</th>
-        <th>{% translate "الفترة" %}</th><th>{% translate "المشاركون" %}</th><th>{% translate "الوعاء" %}</th>
-        <th>{% translate "حصة الشريك" %}</th><th>{% translate "الحسومات" %}</th><th>{% translate "الصافي" %}</th>
-        <th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الشريك" %}</th>
+          <th>{% translate "الاتفاقية" %}</th>
+          <th>{% translate "الفترة" %}</th>
+          <th class="num">{% translate "المشاركون" %}</th>
+          <th class="num">{% translate "الوعاء" %}</th>
+          <th class="num">{% translate "حصة الشريك" %}</th>
+          <th class="num">{% translate "الحسومات" %}</th>
+          <th class="num">{% translate "الصافي" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in claims %}
           <tr>
-            <td dir="ltr">{{ c.code }}</td><td>{{ c.partner_name }}</td>
-            <td dir="ltr">{{ c.agreement_number }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+            <td>{{ c.partner_name }}</td>
+            <td dir="ltr" translate="no">{{ c.agreement_number }}</td>
             <td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
             <td class="num">{{ c.student_count|default:"0" }}</td>
             <td class="num">{{ c.distribution_base }}</td>
@@ -27,15 +85,22 @@
             <td class="num">{{ c.total_deductions }}</td>
             <td class="num">{{ c.net_payable }}</td>
             <td>
-              <span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span>
-              {% if c.is_frozen %}<span class="chip ok">{% translate "مختومة" %}</span>{% endif %}
+              <span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span>
+              {% if c.is_frozen %}<span class="chip">{% translate "مختومة" %}</span>{% endif %}
             </td>
-            <td><a class="btn2 ghost" href="{% url 'settlements:claim-detail' c.code %}">{% translate "عرض" %}</a></td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'settlements:claim-detail' c.code %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="11" class="empty">
-              <span class="empty-title">{% translate "لا مطالبات" %}</span>
-              <span class="empty-body">{% translate "المطالبة تنشأ من دورة قائمة على اتفاقية شريك سارية." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="11" class="empty">
+            <span class="empty-title">{% translate "لا مطالبات بعد" %}</span>
+            <span class="empty-body">{% translate "المطالبة تنشأ من دفعة قائمة على اتفاقية شريك سارية، وتُجمّد حسبة الفترة عند بنائها." %}</span>
+            {% if can_create %}
+              <span class="empty-body">{% translate "ابْنِ أولى المطالبات من كتلة «بناء مطالبة» أسفل هذه الصفحة." %}</span>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
@@ -45,13 +110,14 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "بناء مطالبة" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
-        {% translate "تُعرض الدفعات التي تحمل اتفاقية فقط. الاستحقاق على أساس نقدي وبحدود ما دفعه المشارك فعلاً، وغير المستحقّين يظهرون في الكشف بأسبابهم لا يُحذفون." %}
-      </div>
-      <form method="post">{% csrf_token %}
+      <p class="hint boxed">{% translate "تُعرض الدفعات التي تحمل اتفاقية فقط. الاستحقاق على أساس نقدي وبحدود ما دفعه المشارك فعلاً، وغير المستحقّين يظهرون في الكشف بأسبابهم لا يُحذفون." %}</p>
+      <form method="post" novalidate>
+        {% csrf_token %}
         <input type="hidden" name="action" value="build">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "بناء المطالبة" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "بناء المطالبة" %}</button>
+        </div>
       </form>
     </div>
   </div>

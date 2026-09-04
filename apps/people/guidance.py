@@ -524,7 +524,10 @@ GUIDES: dict[str, Guide] = {
     ),
     "claims": Guide(
         what=_("بناء مطالبة الشريك عن فترة، ثم اعتمادها."),
-        who=_("الموظف المالي يُنشئ، ومدير المركز يعتمد."),
+        # §3.5/27 gives V P to the audit account too, and it reads the register
+        # like the other two. The line named the two that act and left out the
+        # one that only reads.
+        who=_("الموظف المالي يُنشئ، ومدير المركز يعتمد، وحساب التدقيق يقرأ."),
         after=_("بعد الاعتماد تُخالَص الفترة."),
         links=(
             (Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),

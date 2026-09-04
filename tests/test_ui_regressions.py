@@ -10953,3 +10953,210 @@ def test_the_entitlement_guide_carries_no_inline_style_and_no_script() -> None:
     assert "<script" not in source
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the claims register (templates/settlements/claims.html)
+# ---------------------------------------------------------------------------
+CLAIMS_TEMPLATE = Path("templates/settlements/claims.html")
+
+#: §3.5/27 — the officer builds, the manager approves, the audit account reads.
+CLAIMS_READERS = [Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT]
+
+
+@pytest.fixture
+def two_claims(seeded_settings: None) -> dict[str, object]:
+    """A draft claim and an approved one, on one live agreement."""
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.partners.models import (
+        Agreement,
+        AgreementStatus,
+        CalculationModel,
+        PartnerStatus,
+        PartnerType,
+    )
+    from apps.partners.services import partner_service
+    from apps.settlements.models import ClaimStatus, PartnerClaim
+
+    author = _user(Role.FINANCE_OFFICER, "cl.fixture.author")
+    manager = _user(Role.CENTER_MANAGER, "cl.fixture.manager")
+    partner = partner_service.create_partner(
+        actor=manager,
+        data={
+            "code": "PN-CL-1",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+        },
+    )
+    today = timezone.localdate()
+    agreement = Agreement.objects.create(
+        agreement_number="2026/CL-LIVE",
+        title_ar="اتفاقية سارية",
+        partner=partner,
+        signed_on=date(2026, 8, 1),
+        calculation_model=CalculationModel.PERCENT,
+        percent_rate=Decimal("50.0000"),
+        valid_from=today - timedelta(days=30),
+        valid_to=today + timedelta(days=365),
+        status=AgreementStatus.ACTIVE,
+    )
+    common = {
+        "partner": partner,
+        "agreement": agreement,
+        "period_from": today - timedelta(days=30),
+        "period_to": today,
+        "trigger_type": "END_OF_COURSE",
+        "created_by": author,
+    }
+    return {
+        "draft": PartnerClaim.objects.create(
+            code="CLM-CL-DRAFT", status=ClaimStatus.DRAFT, **common
+        ),
+        "approved": PartnerClaim.objects.create(
+            code="CLM-CL-DONE",
+            status=ClaimStatus.APPROVED,
+            approved_by=manager,
+            approved_at=timezone.now(),
+            # BR-051: an approved claim without its seal cannot be proved
+            # unedited, and the check constraint refuses to store one.
+            content_hash="0" * 64,
+            **common,
+        ),
+    }
+
+
+def _claims_page(client: Client, role: str, tag: str) -> str:
+    client.force_login(_user(role, f"cl.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:claims"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def test_a_sealed_claim_wears_one_colour_and_not_the_same_one_twice(
+    client: Client, two_claims: dict[str, object]
+) -> None:
+    """
+    ``is_frozen`` is APPROVED or PAID, and ``status_tone`` already puts both in
+    ``_OK`` — so an approved claim printed two green chips side by side saying
+    the same thing in two words. The seal is a fact about the status, not a
+    second achievement, so it keeps the label and loses the colour (polish
+    rules §6.5 · §7).
+    """
+    page = _claims_page(client, Role.FINANCE_OFFICER, "seal")
+
+    assert "مختومة" in page, "an approved claim still says it is sealed"
+    assert '<span class="chip">مختومة</span>' in page, "the seal is no longer coloured"
+    assert '<span class="chip ok dot">' in page, "…and the status keeps the tone it earned"
+
+
+def test_the_claims_register_explains_its_build_rule_without_alerting(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The cash-basis rule stood in a blue box above the build form. Blue is an
+    alert; explaining the rule the form obeys is not one (polish rules §6.5),
+    and the sentence belongs over the fields it governs.
+    """
+    page = _claims_page(client, Role.FINANCE_OFFICER, "tone")
+
+    assert "note info" not in page, "the build rule is still being alerted"
+    assert "الاستحقاق على أساس نقدي" in page, "…and it is still said"
+    assert "hint boxed" in page
+
+
+@pytest.mark.parametrize("role", CLAIMS_READERS)
+def test_the_build_block_is_drawn_for_whoever_may_build_and_for_nobody_else(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Both directions, which is the half that gets forgotten: §3.5/27 gives
+    CREATE to the finance officer alone, so the manager who approves and the
+    audit account who reads must not be offered a form they cannot submit.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_build = Action.CREATE in allowed_actions(role, "claims")
+    assert may_build is (role == Role.FINANCE_OFFICER)
+
+    page = _claims_page(client, role, "build")
+
+    assert ("بناء المطالبة" in page) is may_build
+
+
+@pytest.mark.parametrize("role", CLAIMS_READERS)
+def test_the_empty_register_says_what_the_emptiness_means(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    «لا مطالبات» said nothing about what to do next (polish rules §8.1). The
+    next step is now written — and only for the reader who can take it, since
+    an empty state's action goes by permission like any other (§8.2).
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_build = Action.CREATE in allowed_actions(role, "claims")
+
+    page = _claims_page(client, role, "empty")
+
+    assert "لا مطالبات بعد" in page
+    assert "اتفاقية شريك سارية" in page, "the reason is for everybody"
+    assert ("كتلة «بناء مطالبة» أسفل هذه الصفحة" in page) is may_build
+
+
+def test_the_claims_guide_names_the_reader_who_only_reads(
+    client: Client, seeded_settings: None
+) -> None:
+    """§3.5/27 gives the audit account V P; «من يستخدمها» named only the two
+    roles that act, so the third met a page that did not admit he read it."""
+    page = _claims_page(client, Role.AUDIT_ACCOUNT, "who")
+
+    assert "حساب التدقيق" in page
+
+
+def test_the_claims_action_column_is_named_without_dragging_the_page_sideways() -> None:
+    """
+    The eleventh column had no name at all. It is named by ``aria-label`` and
+    not by ``.sr-only``, which is ``position:absolute`` with no positioned
+    ancestor here and pushes the page sideways in RTL — the same fix the
+    agreements register took.
+    """
+    markup = CLAIMS_TEMPLATE.read_text(encoding="utf-8").split("{% endcomment %}", 1)[-1]
+
+    assert "aria-label" in markup
+    assert "sr-only" not in markup
+    assert 'class="form-acts"' in markup, "the submit sits in the row every form uses"
+    assert "novalidate" in markup, "the Arabic refusal comes from the server, not the browser"
+
+
+def test_the_claims_register_uses_no_class_defined_nowhere() -> None:
+    """A class in neither sheet renders bare."""
+    import re
+
+    source = CLAIMS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_claims_register_carries_no_inline_style_and_no_script() -> None:
+    """8J-5 removed inline styles from the delivery; they do not come back."""
+    source = CLAIMS_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "style=" not in source
+    assert "<script" not in source
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
