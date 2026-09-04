@@ -11013,6 +11013,27 @@ def two_claims(seeded_settings: None) -> dict[str, object]:
         "trigger_type": "END_OF_COURSE",
         "created_by": author,
     }
+    from apps.settlements.services.claim_service import content_hash_for
+
+    sealed = PartnerClaim.objects.create(
+        code="CLM-CL-SEAL",
+        status=ClaimStatus.APPROVED,
+        approved_by=manager,
+        approved_at=timezone.now(),
+        # BR-051: an approved claim without its seal cannot be proved unedited,
+        # and the check constraint refuses to store one. The real hash is
+        # written straight after, which `_MUTABLE_AFTER_APPROVAL` allows.
+        content_hash="0" * 64,
+        **common,
+    )
+    # The hash covers `str(...)` of every money field, and the in-memory
+    # instance still holds the int defaults while the row holds Decimals to
+    # four places — "0" and "0.0000" are not the same string. Read the row back
+    # before sealing it, exactly as the service does after saving.
+    sealed.refresh_from_db()
+    sealed.content_hash = content_hash_for(sealed)
+    sealed.save(update_fields=["content_hash"])
+
     return {
         "draft": PartnerClaim.objects.create(
             code="CLM-CL-DRAFT", status=ClaimStatus.DRAFT, **common
@@ -11022,9 +11043,19 @@ def two_claims(seeded_settings: None) -> dict[str, object]:
             status=ClaimStatus.APPROVED,
             approved_by=manager,
             approved_at=timezone.now(),
-            # BR-051: an approved claim without its seal cannot be proved
-            # unedited, and the check constraint refuses to store one.
+            # A seal that does NOT recompute — the state the card has to shout.
             content_hash="0" * 64,
+            **common,
+        ),
+        "sealed": sealed,
+        # The base equation is the constraint, so a non-zero partner burden has
+        # to be subtracted for the row to exist at all (C-02).
+        "discounted": PartnerClaim.objects.create(
+            code="CLM-CL-DISC",
+            status=ClaimStatus.DRAFT,
+            gross_collected=Decimal("100.0000"),
+            discount_partner_burden=Decimal("10.0000"),
+            distribution_base=Decimal("90.0000"),
             **common,
         ),
     }
@@ -11158,5 +11189,160 @@ def test_the_claims_register_carries_no_inline_style_and_no_script() -> None:
 
     assert "style=" not in source
     assert "<script" not in source
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the claim card (templates/settlements/claim_detail.html)
+# ---------------------------------------------------------------------------
+CLAIM_CARD_TEMPLATE = Path("templates/settlements/claim_detail.html")
+
+
+def _claim_card(client: Client, role: str, code: str, tag: str) -> str:
+    client.force_login(_user(role, f"cd.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:claim-detail", args=[code]))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def test_a_broken_seal_is_not_announced_in_the_colour_of_success(
+    client: Client, two_claims: dict[str, object]
+) -> None:
+    """
+    The worst state this screen can report — an approved claim whose content
+    hash no longer recomputes, so nobody can prove it was not edited after
+    being sealed (BR-051) — was a sentence inside a GREEN `.note ok`, sharing
+    the box with «مطالبة معتمدة ومختومة». Red is the colour of exactly this,
+    and it now has its own alert.
+    """
+    page = _claim_card(client, Role.AUDIT_ACCOUNT, "CLM-CL-DONE", "broken")
+
+    assert "note danger" in page, "the mismatch is not alerted at all"
+    assert "بصمة المحتوى غير مطابقة" in page
+    assert "note ok" not in page, "the green box is gone from this screen"
+    # …and the alert is the box the mismatch is in, not a sentence trailing one.
+    assert page.index("note danger") < page.index("بصمة المحتوى غير مطابقة")
+
+
+def test_a_seal_that_verifies_is_stated_and_not_celebrated(
+    client: Client, two_claims: dict[str, object]
+) -> None:
+    """A hash that recomputes is the normal case, and normal is not an alert."""
+    page = _claim_card(client, Role.AUDIT_ACCOUNT, "CLM-CL-SEAL", "intact")
+
+    assert "بصمة المحتوى مطابقة" in page
+    assert "بصمة المحتوى غير مطابقة" not in page
+    assert "note ok" not in page and "note danger" not in page
+    assert "لا تُعدَّل بعد الاعتماد" in page, "the seal still explains itself"
+
+
+def test_the_discount_line_explains_itself_only_where_it_is_true(
+    client: Client, two_claims: dict[str, object]
+) -> None:
+    """
+    «حصة الشريك من الخصم صفر لأن…» was printed unconditionally. It is true
+    today because ``claim_base_adjustment`` returns zero, but printed over a
+    non-zero figure the screen contradicts its own column. The sentence is now
+    drawn off the value the service actually produced (polish rules §2.1).
+    """
+    zero = _claim_card(client, Role.AUDIT_ACCOUNT, "CLM-CL-DRAFT", "zero")
+    assert "حصة الشريك من الخصم صفر" in zero
+
+    charged = _claim_card(client, Role.AUDIT_ACCOUNT, "CLM-CL-DISC", "charged")
+    assert "حصة الشريك من الخصم صفر" not in charged, "the screen contradicts its own column"
+    # The row itself is untouched — the figure is still shown, only the claim
+    # about it is conditional.
+    assert "حصة الشريك من الخصم" in charged
+
+
+@pytest.mark.parametrize("role", CLAIMS_READERS)
+def test_the_two_acts_keep_the_guards_they_had_when_they_moved_into_the_head(
+    client: Client, two_claims: dict[str, object], role: str
+) -> None:
+    """
+    Moving a button must not grant it. §3.5/27 gives EDIT to the finance
+    officer and APPROVE to the manager, and the draft here was built by the
+    officer — so D-18 leaves approval to the manager and to nobody else.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_edit = Action.EDIT in allowed_actions(role, "claims")
+    may_approve = Action.APPROVE in allowed_actions(role, "claims")
+
+    page = _claim_card(client, role, "CLM-CL-DRAFT", "acts")
+
+    assert ("تطبيق المقاصّات" in page) is may_edit
+    assert ("اعتماد وختم" in page) is may_approve
+
+
+@pytest.mark.parametrize("role", CLAIMS_READERS)
+def test_a_sealed_claim_offers_no_act_to_anybody(
+    client: Client, two_claims: dict[str, object], role: str
+) -> None:
+    """BR-051 · D-12 — the service refuses either way; the card must not ask."""
+    page = _claim_card(client, role, "CLM-CL-SEAL", "sealedacts")
+
+    assert "تطبيق المقاصّات" not in page
+    assert "اعتماد وختم" not in page
+
+
+def test_both_tables_on_the_card_say_what_their_emptiness_means(
+    client: Client, two_claims: dict[str, object]
+) -> None:
+    """
+    The participants table had no empty state, and the deductions table did not
+    exist at all when there was nothing in it — so a reader never learned that
+    deduction is a step, which is precisely what «تطبيق المقاصّات» does
+    (polish rules §8.1).
+    """
+    page = _claim_card(client, Role.AUDIT_ACCOUNT, "CLM-CL-DRAFT", "empties")
+
+    assert "لا مشاركين على هذه المطالبة" in page
+    assert "لا حسومات على هذه المطالبة" in page
+    assert "BR-036" in page, "…and it says where an obligation goes instead"
+
+
+def test_the_card_teaches_d18_to_the_reader_who_cannot_approve(
+    client: Client, two_claims: dict[str, object]
+) -> None:
+    """
+    D-18 was said only inside the `can_approve` branch, as the reason a button
+    was missing. The rule belongs to every reader (polish rules §3.5) — the
+    officer who built the claim most of all, since he is the one it refuses.
+    """
+    page = _claim_card(client, Role.FINANCE_OFFICER, "CLM-CL-DRAFT", "d18")
+
+    assert "D-18" in page
+    assert "لا يعتمد أحد مطالبة أنشأها بنفسه" in page
+
+
+def test_the_claim_card_uses_no_class_defined_nowhere() -> None:
+    """A class in neither sheet renders bare."""
+    import re
+
+    source = CLAIM_CARD_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_claim_card_carries_no_inline_style_and_names_its_last_column() -> None:
+    """8J-5 removed inline styles; the seventh column had never been named."""
+    source = CLAIM_CARD_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert "style=" not in source
+    assert "<script" not in source
+    assert "aria-label" in markup
+    assert "sr-only" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

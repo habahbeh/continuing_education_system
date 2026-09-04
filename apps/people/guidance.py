@@ -535,6 +535,22 @@ GUIDES: dict[str, Guide] = {
         ),
         stops=_("لا يعدّل أحد مطالبة معتمدة (BR-051)."),
     ),
+    "claim-detail": Guide(
+        what=_("مطالبة واحدة: كيف تكوّن وعاؤها، ومن دخل فيها ومن لم يدخل، وما حُسم عليها."),
+        who=_("الموظف المالي يطبّق المقاصّات، ومدير المركز يعتمد، وحساب التدقيق يقرأ."),
+        after=_("بعد الاعتماد تدخل المطالبة مخالصة الفترة."),
+        links=(
+            (Screen.CLAIMS, "settlements:claims", _("المطالبات")),
+            (Screen.OBLIGATIONS, "settlements:obligations", _("التزامات الشركاء")),
+        ),
+        # Two rules refuse on this page and only one of them was ever said out
+        # loud, to the approver alone. D-18 belongs to every reader: it is why
+        # the button is missing for the person who built the claim.
+        stops=_(
+            "لا يعتمد أحد مطالبة أنشأها بنفسه (D-18)، ولا تُعدَّل مطالبة بعد "
+            "اعتمادها — التصحيح يكون بحسم على مطالبة لاحقة (BR-051 · BR-036)."
+        ),
+    ),
     "settlements": Guide(
         what=_("مخالصة الفترة مع الشريك، والتوقيع النهائي عليها."),
         who=_("الموظف المالي يُنشئ، ومدير المركز يعتمد."),

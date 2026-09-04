@@ -1,16 +1,97 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ claim.code }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  بطاقة مطالبة واحدة: كيف تكوّن وعاؤها، ومن دخل فيها ومن لم يدخل ولماذا، وما
+  حُسم عليها، ثم الفعلان الوحيدان — تطبيق المقاصّات والاعتماد.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا حقل، ولا مبلغ يُحتسب على
+  القالب. كل رقم يأتي من `claim_service.get_claim` كما هو، و`hash_verifies`
+  قراءةٌ محضة تُعيد حساب البصمة وتقارنها ولا تكتب شيئاً.
+
+  ما تغيّر:
+
+  * أخطر ما على الشاشة كان يُعرض بلون النجاح: عدم تطابق بصمة المحتوى — أي أن
+    مطالبةً معتمدة لا يمكن إثبات أنها لم تُعدَّل بعد الختم (BR-051) — كان
+    سطراً داخل `.note ok` خضراء. صار له صندوقه: `.note danger` بـ `role=alert`،
+    والأحمر هنا في موضعه تماماً. والتطابق في المقابل ليس إنجازاً يُنبَّه عليه،
+    فنزل إلى `.hint`؛
+  * وجملة «لا تُعدَّل بعد الاعتماد» تركت الصندوق الأخضر إلى شريحة في الترويسة
+    و`.hint` تحتها، كما استقرّ على بطاقة الاتفاقية: الشرح للجميع، واللون
+    للحظة الرفض (قواعد التحسين §6.5 · §7)؛
+  * «حصة الشريك من الخصم صفر لأن…» كانت تُطبع دائماً. الجملة صحيحة اليوم لأن
+    `discount_service.claim_base_adjustment` تُعيد صفراً، لكن طباعتها فوق قيمة
+    غير صفرية تجعل الشاشة تكذب على قارئها. صارت تُرسم حين تكون القيمة صفراً
+    فعلاً — الشرط على ما تعرضه الخدمة، لا على ما نتوقّعه منها (قواعد التحسين
+    §2.1)؛
+  * لقطات الاعتماد — الأساس والنموذج والنسبة — خرجت من داخل تلك الكتلة إلى
+    `.dl`، وهي بيانات لا تعليق. وتحتها سطرٌ يقول لماذا هي لقطات: البنود تُجمَّد
+    عند الاعتماد فلا يُعيد تعديلٌ لاحق على الاتفاقية صياغةَ مطالبة موقّعة
+    (BR-051 · ADR-007)؛
+  * العمود السابع في جدول المشاركين كان بلا اسم، فسُمّي بـ `aria-label`؛
+  * جدولا المشاركين والحسومات أخذا حالة فارغة مكتوبة. وجدول الحسومات كان
+    يختفي كلّه حين لا حسم، فلا يعرف القارئ أن الحسم بابٌ أصلاً — وهو الباب
+    الذي يفتحه زرّ «تطبيق المقاصّات» فوقه (قواعد التحسين §8.1)؛
+  * الفعلان صعدا إلى `.acts` في الترويسة كما على كل بطاقة مصقولة، فلا يُبحث
+    عنهما تحت ثلاث بطاقات. ولا رايةَ تغيّرت: `can_edit` و`can_approve` تأتيان
+    من العرض كما هما، وشرط D-18 على زرّ الاعتماد هو شرطه نفسه.
+
+  وقاعدة D-18 — لا يعتمد أحد مطالبة أنشأها — انتقلت إلى `stops` في سجلّ
+  الإرشاد، فيقرأها كل من يفتح الشاشة لا من يملك الاعتماد وحده (قواعد التحسين
+  §3.5).
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ claim.code }}</span></h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ claim.code }}</span></h1>
+    <p class="sub">
+      {{ claim.partner_name }} —
+      {% blocktranslate with start=claim.period_from end=claim.period_to %}الفترة من {{ start }} إلى {{ end }}{% endblocktranslate %}
+    </p>
+  </div>
+  <div class="acts">
+    <span class="chip {{ claim.status|status_tone }} dot">{{ claim.status_display }}</span>
+    {% if claim.is_frozen %}<span class="chip">{% translate "مختومة" %}</span>{% endif %}
+    {% if can_edit %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="offsets">
+        <button class="btn2" type="submit">{% translate "تطبيق المقاصّات" %}</button>
+      </form>
+    {% endif %}
+    {% if can_approve and claim.created_by_id != current_user_id %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="approve">
+        <button class="btn2 primary" type="submit">{% translate "اعتماد وختم" %}</button>
+      </form>
+    {% elif can_approve %}
+      <span class="chip warn">{% translate "الاعتماد لغير من أنشأ المطالبة" %}</span>
+    {% endif %}
+    <a class="btn2 ghost" href="{% url 'settlements:claims' %}">{% translate "عودة إلى المطالبات" %}</a>
+  </div>
 </div>
 
-{% if claim.is_frozen %}
-  <div class="note ok">
-    {% translate "مطالبة معتمدة ومختومة — لا تُعدَّل بعد الاعتماد." %}
-    {% if claim.hash_verifies %} {% translate "بصمة المحتوى مطابقة." %}
-    {% elif claim.hash_verifies is False %} <strong>{% translate "⚠ بصمة المحتوى غير مطابقة." %}</strong>{% endif %}
+{% guided_help "claim-detail" %}
+
+{% if claim.hash_verifies is False %}
+  <div class="note danger" role="alert">
+    <div>
+      <strong>{% translate "بصمة المحتوى غير مطابقة." %}</strong>
+      {% translate "هذه مطالبة معتمدة لا يمكن إثبات أنها لم تُعدَّل بعد ختمها (BR-051). لا تُبنى عليها مخالصة قبل مراجعة سجل التدقيق." %}
+    </div>
   </div>
+{% endif %}
+
+{% if claim.is_frozen %}
+  <p class="hint">
+    {% translate "مطالبة معتمدة ومختومة — لا تُعدَّل بعد الاعتماد (BR-051 · D-12)." %}
+    {% if claim.hash_verifies %}{% translate "وبصمة المحتوى مطابقة." %}{% endif %}
+  </p>
 {% endif %}
 
 <div class="kpi-grid">
@@ -29,12 +110,22 @@
     <div class="calc-row"><span>− {% translate "التأمينات المستثناة" %}</span><span class="val num">{{ claim.excluded_deposits }}</span></div>
     <div class="calc-row"><span>− {% translate "حصة الشريك من الخصم" %}</span><span class="val num">{{ claim.discount_partner_burden }}</span></div>
     <div class="calc-row"><strong>= {% translate "وعاء القسمة" %}</strong><strong class="val num">{{ claim.distribution_base }}</strong></div>
-    <div class="note">
-      {% translate "حصة الشريك من الخصم صفر لأن الخصم خفّض المقبوض أصلاً — فحسمها مرة ثانية يخصم الخصم مرتين." %}
-      {% translate "الوعاء" %}: <span dir="ltr">{{ claim.base_mode_snapshot }}</span> ·
-      {% translate "النموذج" %}: <span dir="ltr">{{ claim.model_snapshot }}</span>
-      {% if claim.rate_snapshot %} · {{ claim.rate_snapshot }}%{% endif %}
-    </div>
+
+    {% if not claim.discount_partner_burden %}
+      <p class="hint">{% translate "حصة الشريك من الخصم صفر لأن الخصم خفّض المقبوض أصلاً — فحسمها مرة ثانية يخصم الخصم مرتين." %}</p>
+    {% endif %}
+
+    <dl class="dl">
+      <dt>{% translate "أساس الاحتساب" %}</dt>
+      <dd dir="ltr" translate="no">{{ claim.base_mode_snapshot|default:"—" }}</dd>
+      <dt>{% translate "نموذج الاحتساب" %}</dt>
+      <dd dir="ltr" translate="no">{{ claim.model_snapshot|default:"—" }}</dd>
+      {% if claim.rate_snapshot %}
+        <dt>{% translate "النسبة" %}</dt>
+        <dd class="num" dir="ltr" translate="no">{{ claim.rate_snapshot }}%</dd>
+      {% endif %}
+    </dl>
+    <p class="hint">{% translate "هذه لقطات لا إحالات: تُجمَّد بنود الاتفاقية على المطالبة عند الاعتماد، فلا يُعيد تعديل لاحق على العقد صياغة مطالبة موقّعة (BR-051 · ADR-007)." %}</p>
   </div>
 </div>
 
@@ -42,14 +133,21 @@
   <div class="card2-head"><h2>{% translate "المشاركون" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرقم" %}</th><th>{% translate "الاسم" %}</th><th>{% translate "الحالة" %}</th>
-        <th>{% translate "المقبوض" %}</th><th>{% translate "الوعاء" %}</th><th>{% translate "الحصة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرقم" %}</th>
+          <th>{% translate "الاسم" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th class="num">{% translate "المقبوض" %}</th>
+          <th class="num">{% translate "الوعاء" %}</th>
+          <th class="num">{% translate "الحصة" %}</th>
+          <th aria-label="{% translate 'الأهلية' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for line in claim.lines %}
           <tr>
-            <td dir="ltr">{{ line.participant_number }}</td>
+            <td dir="ltr" translate="no">{{ line.participant_number }}</td>
             <td>{{ line.participant_name }}</td>
             <td>{{ line.enrollment_status }}</td>
             <td class="num">{{ line.paid_amount }}</td>
@@ -60,44 +158,46 @@
               {% else %}<span class="chip danger">{{ line.exclusion_reason }}</span>{% endif %}
             </td>
           </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty">
+            <span class="empty-title">{% translate "لا مشاركين على هذه المطالبة" %}</span>
+            <span class="empty-body">{% translate "لم يُحصَّل شيء على تسجيلات الفترة، أو لا تسجيل فيها أصلاً. المطالبة تتبع النقد المقبوض لا الفاتورة (BR-044)، ووعاؤها يبقى صفراً حتى يُقبض." %}</span>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "غير المستحقّين يبقون في الكشف بأسبابهم ولا يُحذفون منه (BR-045): مطالبة تُسقطهم بصمت تبدو مطالبةً لم يراجعها أحد." %}</p>
+  </div>
 </div>
 
-{% if claim.deductions %}
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الحسومات" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "البيان" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "النوع" %}</th>
+          <th>{% translate "البيان" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for d in claim.deductions %}
-          <tr><td>{{ d.deduction_type }}</td><td>{{ d.label_ar }}</td><td class="num">{{ d.amount }}</td></tr>
+          <tr>
+            <td>{{ d.deduction_type }}</td>
+            <td>{{ d.label_ar }}</td>
+            <td class="num">{{ d.amount }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="3" class="empty">
+            <span class="empty-title">{% translate "لا حسومات على هذه المطالبة" %}</span>
+            <span class="empty-body">{% translate "لا التزام مفتوح على الشريك قوبل بهذه الفترة. ما على الشريك — غرامة غياب أو دفعة مقدّمة مستردّة — يُخصم من مطالبة لاحقة ولا يُطالَب به بفاتورة (BR-036)." %}</span>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
-{% endif %}
-
-{% if can_edit or can_approve %}
-  <div class="toolbar">
-    {% if can_edit %}
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="offsets">
-        <button class="btn2" type="submit">{% translate "تطبيق المقاصّات" %}</button>
-      </form>
-    {% endif %}
-    {% if can_approve and claim.created_by_id != current_user_id %}
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="approve">
-        <button class="btn2 primary" type="submit">{% translate "اعتماد وختم" %}</button>
-      </form>
-    {% elif can_approve %}
-      <span class="chip warn">{% translate "الاعتماد لغير من أنشأ المطالبة" %}</span>
-    {% endif %}
-  </div>
-{% endif %}
 {% endblock %}
