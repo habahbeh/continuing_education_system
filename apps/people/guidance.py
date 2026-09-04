@@ -562,6 +562,21 @@ GUIDES: dict[str, Guide] = {
         # payment that clears the balance never read the reason for it.
         stops=_("لا تُوقَّع مخالصة ورصيدها غير صفري، ولا تُفتح ثانيةٌ على اتفاقية لها مخالصة مفتوحة."),
     ),
+    "settlement-detail": Guide(
+        what=_("مخالصة واحدة: ما ضُمّ إليها من مطالبات، وما دُفع عليها، وما بقي قبل التوقيع."),
+        who=_("الموظف المالي يضمّ ويسجّل الدفع، ومدير المركز يوقّع، وحساب التدقيق يقرأ."),
+        after=_("بالتوقيع ينتهي أثر الفترة مع هذا الشريك."),
+        links=(
+            (Screen.SETTLEMENTS, "settlements:settlements", _("المخالصات")),
+            (Screen.CLAIMS, "settlements:claims", _("المطالبات")),
+        ),
+        # The order is the rule: attach, pay, then sign. Stated once here so
+        # the officer who clears the balance reads why he is clearing it.
+        stops=_(
+            "لا تُضمّ مطالبة غير معتمدة، ولا يُوقَّع على رصيد غير صفري — الضمّ ثم "
+            "الدفع ثم التوقيع، وبعد التوقيع لا يُسجَّل على الفترة شيء (BR-053)."
+        ),
+    ),
     "obligations": Guide(
         what=_("ما على الشريك: غرامات الغياب والدفعات المقدّمة المستردّة."),
         who=_("مدير المركز والموظف المالي."),

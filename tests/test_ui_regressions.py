@@ -11506,3 +11506,211 @@ def test_the_money_on_the_page_is_the_figure_the_module_states() -> None:
     assert "16%" in source and "800" in source and "10,000" in source
     for figure in ("16%", "800", "10,000"):
         assert figure in markup, f"the screen dropped «{figure}»"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the settlement card (templates/settlements/settlement_detail.html)
+# ---------------------------------------------------------------------------
+SETTLEMENT_CARD_TEMPLATE = Path("templates/settlements/settlement_detail.html")
+
+
+@pytest.fixture
+def two_settlements(seeded_settings: None) -> dict[str, object]:
+    """One open cycle carrying a balance, and one already signed."""
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.partners.models import (
+        Agreement,
+        AgreementStatus,
+        CalculationModel,
+        PartnerStatus,
+        PartnerType,
+    )
+    from apps.partners.services import partner_service
+    from apps.settlements.models import PartnerSettlement, SettlementStatus
+
+    manager = _user(Role.CENTER_MANAGER, "sd.fixture.manager")
+    partner = partner_service.create_partner(
+        actor=manager,
+        data={
+            "code": "PN-SD-1",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+        },
+    )
+    today = timezone.localdate()
+    agreement = Agreement.objects.create(
+        agreement_number="2026/SD-LIVE",
+        title_ar="اتفاقية سارية",
+        partner=partner,
+        signed_on=date(2026, 8, 1),
+        calculation_model=CalculationModel.PERCENT,
+        percent_rate=Decimal("50.0000"),
+        valid_from=today - timedelta(days=30),
+        valid_to=today + timedelta(days=365),
+        status=AgreementStatus.ACTIVE,
+    )
+    common = {
+        "partner": partner,
+        "agreement": agreement,
+        "cycle_type": "END_OF_COURSE",
+        "period_from": today - timedelta(days=30),
+        "period_to": today,
+        "created_by": manager,
+    }
+    return {
+        # The balance equation is the constraint: due − paid, or no row.
+        "owing": PartnerSettlement.objects.create(
+            code="STL-SD-OPEN",
+            status=SettlementStatus.OPEN,
+            total_due=Decimal("500.0000"),
+            total_paid=Decimal("200.0000"),
+            balance=Decimal("300.0000"),
+            **common,
+        ),
+        "signed": PartnerSettlement.objects.create(
+            code="STL-SD-DONE",
+            status=SettlementStatus.SIGNED,
+            signed_on=today,
+            **common,
+        ),
+    }
+
+
+def _settlement_card(client: Client, role: str, code: str, tag: str) -> str:
+    client.force_login(_user(role, f"sd.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:settlement-detail", args=[code]))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_the_balance_says_it_blocks_the_signature_to_every_reader(
+    client: Client, two_settlements: dict[str, object], role: str
+) -> None:
+    """
+    The rule that stops a signature (BR-053) was stated in a yellow box inside
+    the approver's own card — so the finance officer, who records the very
+    payment that clears the balance, never met the reason for recording it.
+    It is now a `.kpi .foot` under the balance itself, which everybody reads.
+    """
+    page = _settlement_card(client, role, "STL-SD-OPEN", "foot")
+
+    assert "رصيد قائم — لا تُوقَّع المخالصة حتى يُصفَّر" in page
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_the_yellow_stays_where_something_is_actually_refused(
+    client: Client, two_settlements: dict[str, object], role: str
+) -> None:
+    """
+    Teaching everybody must not mean alarming everybody. The alert keeps its
+    colour at the point of refusal — over the signature form — and is drawn
+    for the one role that can reach that refusal (polish rules §6.5).
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_sign = Action.APPROVE in allowed_actions(role, "settlements")
+
+    page = _settlement_card(client, role, "STL-SD-OPEN", "warn")
+
+    assert ("note warn" in page) is may_sign
+    assert ("توقيع المخالصة" in page) is may_sign
+
+
+def test_a_settlement_with_no_balance_does_not_claim_one(
+    client: Client, two_settlements: dict[str, object]
+) -> None:
+    """The foot follows the figure, not the template's expectation of it."""
+    page = _settlement_card(client, Role.AUDIT_ACCOUNT, "STL-SD-DONE", "nobal")
+
+    assert "لا رصيد قائم على الفترة" in page
+    assert "لا تُوقَّع المخالصة حتى يُصفَّر" not in page
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_a_signed_settlement_says_so_and_offers_nothing(
+    client: Client, two_settlements: dict[str, object], role: str
+) -> None:
+    """
+    ``can_edit`` and ``can_approve`` are both conditioned on ``is_open`` in the
+    view, so a signed cycle drew no card at all and said nothing about why.
+    """
+    page = _settlement_card(client, role, "STL-SD-DONE", "signed")
+
+    assert "مخالصة موقّعة" in page
+    for act in ("ضمّ المطالبات المعتمدة", "تسجيل الدفع", "توقيع المخالصة"):
+        assert act not in page, act
+
+
+def test_the_attach_step_is_visible_even_when_nothing_is_attachable(
+    client: Client, two_settlements: dict[str, object]
+) -> None:
+    """
+    The whole card vanished when `attachable` was empty, and with it any sign
+    that attaching is a step. It is drawn with a written empty state now — but
+    the button is still conditioned on there being something to attach, since
+    a button that does nothing is worse than no button (§2.2 · §8.1).
+    """
+    page = _settlement_card(client, Role.FINANCE_OFFICER, "STL-SD-OPEN", "attach")
+
+    assert "مطالبات قابلة للضمّ" in page
+    assert "لا مطالبة قابلة للضمّ الآن" in page
+    assert "المسودة لا تُضمّ" in page
+    assert "ضمّ المطالبات المعتمدة" not in page, "no act is offered that would do nothing"
+
+
+def test_the_attached_claims_table_says_what_its_emptiness_means(
+    client: Client, two_settlements: dict[str, object]
+) -> None:
+    """«لم تُضمّ مطالبات بعد» was a title with no reason and no next step."""
+    page = _settlement_card(client, Role.AUDIT_ACCOUNT, "STL-SD-OPEN", "attached")
+
+    assert "لم تُضمّ مطالبات بعد" in page
+    assert "تُفتح فارغة ثم تُضمّ إليها المطالبات المعتمدة" in page
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_the_settlement_card_teaches_its_order_to_everybody(
+    client: Client, two_settlements: dict[str, object], role: str
+) -> None:
+    """Attach, then pay, then sign — in the guide, where prose is unfiltered."""
+    page = _settlement_card(client, role, "STL-SD-OPEN", "order")
+
+    assert "ما يوقف العملية" in page
+    assert "الضمّ ثم الدفع ثم التوقيع" in page
+
+
+def test_the_settlement_card_uses_no_class_defined_nowhere() -> None:
+    """A class in neither sheet renders bare."""
+    import re
+
+    source = SETTLEMENT_CARD_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_settlement_card_carries_no_inline_style_and_no_script() -> None:
+    """8J-5 removed inline styles from the delivery; they do not come back."""
+    source = SETTLEMENT_CARD_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert "style=" not in source
+    assert "<script" not in source
+    assert 'class="form-acts"' in markup
+    assert "novalidate" in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
