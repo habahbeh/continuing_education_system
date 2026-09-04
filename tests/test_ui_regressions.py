@@ -11467,3 +11467,42 @@ def test_the_settlements_register_carries_no_inline_style_and_no_script() -> Non
     assert "<script" not in source
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+@pytest.mark.parametrize("role", ENTITLEMENT_READERS)
+def test_the_open_assumption_says_what_it_is_worth_without_raising_its_voice(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Q-28 — whether the partner's base is read before or after tax — was stated
+    as an open question and left at that. ``assumptions.py`` calls it the one
+    that "deserves the loudest warning" and gives the reason in money: at a 16%
+    rate the gap is roughly 800 dinars per 10,000 of partner claims, accruing
+    across every cohort and term, and ending inside SIGNED settlements.
+
+    The page now says that. The treatment stays calm on purpose — a recorded
+    assumption is not a refusal, and yellow is the colour of a refusal (polish
+    rules §6.5) — but calm is a decision about colour, not about content.
+    """
+    page = _entitlement_page(client, role, "q28")
+
+    assert "Q-28" in page
+    assert "16%" in page, "the rate that makes the difference material"
+    assert "800" in page and "10,000" in page, "…and what it is worth"
+    assert "فرضية مسجَّلة لا قرار" in page, "it is still an assumption, not a decision"
+    for alert in ("note warn", "note danger"):
+        assert alert not in page, f"the assumption is still not an alarm ({alert})"
+
+
+def test_the_money_on_the_page_is_the_figure_the_module_states() -> None:
+    """
+    A number about the client's money must not be invented on a template. Both
+    figures are read back out of ``assumptions.py`` so that a revised estimate
+    there fails here rather than leaving two numbers in the delivery.
+    """
+    source = Path("apps/settlements/services/assumptions.py").read_text(encoding="utf-8")
+    markup = ENTITLEMENT_TEMPLATE.read_text(encoding="utf-8").split("{% endcomment %}", 1)[-1]
+
+    assert "16%" in source and "800" in source and "10,000" in source
+    for figure in ("16%", "800", "10,000"):
+        assert figure in markup, f"the screen dropped «{figure}»"
