@@ -514,7 +514,10 @@ GUIDES: dict[str, Guide] = {
     ),
     "entitlement": Guide(
         what=_("كيف يصير الشريك مستحقاً: من الاتفاقية حتى المخالصة."),
-        who=_("مدير المركز والموظف المالي."),
+        # §3.5/26 gives V P to the manager, the finance officer AND the audit
+        # account. The line named two of the three, so the reader it omitted
+        # met a page that did not admit he was one of its readers.
+        who=_("مدير المركز والموظف المالي، وحساب التدقيق يقرأ."),
         after=_("الحساب الفعلي يجري على شاشة المطالبات."),
         links=((Screen.CLAIMS, "settlements:claims", _("المطالبات")),),
         status=_GUIDED,

@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from django.http import HttpResponse
 from django.test import Client
 from django.urls import reverse
 
@@ -10802,5 +10803,153 @@ def test_the_agreement_editor_added_no_dead_class_and_no_dependency() -> None:
     for alert in ("note info", "note warn", "note ok"):
         assert alert not in markup, f"a statement is still being alerted in «{alert}»"
     assert "note danger" in markup, "the form's own errors lost their alert"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the entitlement guide (templates/settlements/entitlement.html)
+# ---------------------------------------------------------------------------
+#: §3.5/26 grants V P to exactly these three. Written out here rather than read
+#: from the matrix so a role quietly added to the row fails against this list.
+ENTITLEMENT_READERS = [Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT]
+
+ENTITLEMENT_TEMPLATE = Path("templates/settlements/entitlement.html")
+
+
+def _entitlement(client: Client, role: str, tag: str) -> HttpResponse:
+    """The guide as one of its three readers meets it."""
+    client.force_login(_user(role, f"ent.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:entitlement"))
+    assert response.status_code == 200
+    return response
+
+
+def _entitlement_page(client: Client, role: str, tag: str) -> str:
+    """…with the sidebar stripped, so a nav entry never answers for the page."""
+    body = _entitlement(client, role, tag).content.decode("utf-8")
+    return body.split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize("role", ENTITLEMENT_READERS)
+def test_the_entitlement_guide_alarms_nobody_on_a_page_that_only_explains(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Two framed colours stood on a screen that refuses nothing and computes
+    nothing: a blue box saying the page is a guide, and a yellow one saying
+    Q-28 is still open. Yellow and blue are for the moment something is
+    refused or genuinely needs attention (polish rules §6.5) — a page
+    explaining itself is neither, and a recorded assumption is not a refusal.
+    """
+    page = _entitlement_page(client, role, "tone")
+
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in page, f"the guide still alerts in «{alert}»"
+
+
+@pytest.mark.parametrize("role", ENTITLEMENT_READERS)
+def test_the_guide_still_says_out_loud_that_it_computes_no_amount(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Losing the blue box must not lose the sentence. A read-only page that does
+    not say so reads as a broken functional one (polish rules §2.4), so the
+    claim is asserted for every role that may open it — not only for the
+    finance officer that ``test_demo_readiness`` happens to check.
+    """
+    page = _entitlement_page(client, role, "says")
+
+    assert "صفحة دليل" in page, "the page no longer admits it is a guide"
+    assert "لا تحتسب مبلغاً" in page
+    assert "صفحة إرشادية" in page, "the guided-help chip carries the same claim"
+
+
+def test_the_guide_names_the_third_reader_the_matrix_gives_it(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «من يستخدمها» named the manager and the finance officer. §3.5/26 gives the
+    audit account V P as well, so the one reader the line omitted was reading a
+    page that did not admit he was one of its readers.
+    """
+    page = _entitlement_page(client, Role.AUDIT_ACCOUNT, "who")
+
+    assert "حساب التدقيق" in page
+
+
+@pytest.mark.parametrize("role", ENTITLEMENT_READERS)
+def test_no_link_on_the_guide_sends_its_reader_into_a_refusal(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The guide's whole job is to hand the reader on to the screen that does the
+    work. A link his role cannot open would drop him into a 403 and write a
+    DENIED_ATTEMPT whose only cause was that this page invited him (polish
+    rules §3.4 · BR-085). Asserted by following every link actually drawn.
+    """
+    response = _entitlement(client, role, "links")
+
+    drawn = response.context["links"]
+    assert drawn, "every reader of the guide may open at least one of its screens"
+    for link in drawn:
+        assert client.get(link["url"]).status_code == 200, link["label"]
+
+
+@pytest.mark.parametrize("role", ENTITLEMENT_READERS)
+def test_the_guide_explains_that_its_link_list_is_cut_by_permission(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Links go by permission and the teaching goes to everybody (polish rules
+    §3.5): whoever is not shown a screen still needs to know the step exists
+    and that somebody else performs it.
+    """
+    page = _entitlement_page(client, role, "why")
+
+    assert "الشاشات التي يسمح دورك بفتحها" in page
+
+
+def test_the_ineligibility_table_says_what_its_emptiness_would_mean() -> None:
+    """
+    The one list on this page read from a service — ``INELIGIBLE_STATUSES``,
+    the BR-045 rule itself — had no empty state. It cannot be emptied from the
+    screen, which is exactly why the empty state has to be written rather than
+    rendered into existence: an empty table here is a changed RULE, not missing
+    data, and the row now says so (polish rules §8.1).
+
+    The two other lists on the page are fixed prose in the view, so no empty
+    state was invented for them; markup that can never render is dead.
+    """
+    markup = ENTITLEMENT_TEMPLATE.read_text(encoding="utf-8").split("{% endcomment %}", 1)[-1]
+
+    assert "{% empty %}" in markup
+    assert "لا حالة تسجيل مستثناة" in markup
+    assert "تغييرٌ في القاعدة نفسها" in markup
+
+
+def test_the_entitlement_guide_uses_no_class_defined_nowhere() -> None:
+    """Same guard the agreements register got: an undefined class renders bare."""
+    import re
+
+    source = ENTITLEMENT_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_entitlement_guide_carries_no_inline_style_and_no_script() -> None:
+    """8J-5 removed inline styles from the delivery; they do not come back."""
+    source = ENTITLEMENT_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "style=" not in source
+    assert "<script" not in source
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
