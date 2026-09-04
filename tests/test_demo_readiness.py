@@ -828,6 +828,9 @@ GUIDED_HELP_SCREENS = [
     ("cashbox:payments", "payments", "payments"),
     ("cashbox:payment-new", "payment-new", "payment-new"),
     ("cashbox:closing", "cashbox-closing", "closing"),
+    # Sprint 8I-1 — the discounts register joined the taught set with its
+    # own polish slice.
+    ("billing:discounts", "discounts", "discounts"),
     ("operations:transfers", "transfers", "transfers"),
     ("operations:transfer-new", "transfer-new", "transfer-new"),
     ("operations:special-cases", "special-cases", "special-cases"),

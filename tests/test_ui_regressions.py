@@ -6337,3 +6337,383 @@ def test_the_slice_templates_kept_their_structural_guarantees(key: str, template
     assert "{% comment %}" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The discounts register — page polish
+# ---------------------------------------------------------------------------
+# §3.4/19 «V C E A P · — · V P · — · — · V P». Three roles read it; only the
+# centre manager grants, and only a manager who did not raise the row may
+# countersign it (D-18). The screen was a bare ``<h1>``, a blue alert carrying
+# a rule, an unnamed tenth column and an empty state that said «لا خصومات».
+DISCOUNTS_TEMPLATE = Path("templates/billing/discounts.html")
+
+#: role, may grant, may countersign — read straight off §3.4/19.
+DISCOUNT_READERS = (
+    (Role.CENTER_MANAGER, True, True),
+    (Role.FINANCE_OFFICER, False, False),
+    (Role.AUDIT_ACCOUNT, False, False),
+)
+
+#: The roles §3.4/19 leaves empty. An empty cell is an explicit deny (BR-080).
+DISCOUNT_NON_READERS = (Role.REGISTRATION_OFFICER, Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+@pytest.fixture
+def a_discount(seeded_settings: None, active_semester: object, participant_data: dict) -> object:
+    """
+    One granted discount, raised through the service that decides the split.
+
+    Built the long way for the reason the receipt fixture is: ``university_burden``
+    and ``discount_split_mode_snapshot`` are the service's answer to the
+    agreement behind the cohort, and a hand-built row could carry a split the
+    algorithm never produces.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from django.core.management import call_command
+
+    from apps.billing.models import DiscountType
+    from apps.billing.services import charge_service, discount_service
+    from apps.catalog.models import PriceList, PriceListStatus, Program
+    from apps.catalog.services import pricing_service
+    from apps.operations.models import Cohort, Enrollment
+    from apps.people.services import participant_service
+
+    call_command("seed_catalog_demo", "--approve", verbosity=0)
+    actor = _user(Role.CENTER_MANAGER, "dc.fixture.actor")
+    program = Program.objects.get(code="SC-NET")
+    cohort = Cohort.objects.create(
+        code="CO-DC-1",
+        program=program,
+        semester=active_semester,
+        name_ar=f"دفعة {program.name_ar}",
+        starts_on=date(2026, 9, 20),
+        ends_on=date(2026, 12, 20),
+        capacity=25,
+    )
+    participant = participant_service.create_participant(actor=actor, data=participant_data)
+    quote = pricing_service.resolve_price(
+        program=program, participant_category="UNIVERSITY", as_of=date(2026, 9, 20)
+    )
+    enrollment = Enrollment.objects.create(
+        code="EN-DC-1",
+        participant=participant,
+        cohort=cohort,
+        enrolled_on=date(2026, 9, 20),
+        price_list=PriceList.objects.get(status=PriceListStatus.APPROVED),
+    )
+    charge_service.charge_lines_from_quote(
+        actor=actor, enrollment=enrollment, quote=quote, charged_on=date(2026, 9, 20)
+    )
+    return discount_service.grant_discount(
+        actor=actor,
+        enrollment=enrollment,
+        discount_type=DiscountType.AMOUNT,
+        amount=Decimal("25.000"),
+        reason_ar="حالة اجتماعية موثّقة",
+        president_approval_ref="PR-2026-77",
+        president_approval_date=date(2026, 9, 20),
+    )
+
+
+def _discounts_page(client: Client) -> str:
+    response = client.get(reverse("billing:discounts"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_grant", "_may_approve"), DISCOUNT_READERS)
+def test_the_discounts_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_grant: bool, _may_approve: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "discounts")
+    client.force_login(_user(role, f"dc.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:discounts")).status_code == 200
+
+
+@pytest.mark.parametrize("role", DISCOUNT_NON_READERS)
+def test_the_discounts_register_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "discounts")
+    client.force_login(_user(role, f"dc.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("billing:discounts")).status_code == 403
+
+
+def test_the_discounts_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("billing:discounts")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_grant", "_may_approve"), DISCOUNT_READERS)
+def test_the_grant_form_is_drawn_only_where_create_is_granted(
+    client: Client, seeded_settings: None, role: str, may_grant: bool, _may_approve: bool
+) -> None:
+    """
+    The form follows ``can_create`` exactly as it did, and a reader without it
+    gets a page with no form, no button and no CSRF token at all.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "discounts")) is may_grant
+    client.force_login(_user(role, f"dc.grant.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("billing:discounts"))
+    assert response.context["can_create"] is may_grant
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert ('name="action" value="grant"' in page) is may_grant
+    if not may_grant:
+        assert "<form" not in page
+        assert "<button" not in page
+        assert "csrfmiddlewaretoken" not in page
+
+
+def test_the_grant_form_still_carries_every_field_it_carried(
+    client: Client, seeded_settings: None
+) -> None:
+    """Presentation only: same fields, same names, one form, one button."""
+    client.force_login(_user(Role.CENTER_MANAGER, "dc.fields"))
+
+    response = client.get(reverse("billing:discounts"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for name in response.context["form"].fields:
+        assert f'name="{name}"' in page, name
+    assert page.count("<form") == 1
+    assert page.count("<button") == 1
+    assert 'class="form-acts"' in page
+
+
+@pytest.mark.parametrize(("role", "_may_grant", "may_approve"), DISCOUNT_READERS)
+def test_the_countersign_button_follows_approve_and_never_the_raiser(
+    client: Client, a_discount: object, role: str, _may_grant: bool, may_approve: bool
+) -> None:
+    """
+    D-18 is a service refusal AND a drawing condition: the manager who raised
+    the row is offered no button, and every other reader is offered one only
+    if the matrix grants APPROVE. Both directions, as the rules require.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.APPROVE in allowed_actions(role, "discounts")) is may_approve
+    client.force_login(_user(role, f"dc.appr.{role}".lower().replace("_", ".")))
+    assert ('name="action" value="approve"' in _discounts_page(client)) is may_approve
+    client.logout()
+
+    # The raiser themselves — same role, same permission, no button.
+    from apps.people.models import User
+
+    client.force_login(User.objects.get(username="dc.fixture.actor"))
+    page = _discounts_page(client)
+    assert 'name="action" value="approve"' not in page
+    assert "بانتظار اعتماد غير المُنشئ" in page
+
+
+def test_the_discounts_register_prints_only_keys_the_row_already_carried(
+    client: Client, a_discount: object
+) -> None:
+    """The nine data columns are the projection's own values, unchanged."""
+    client.force_login(_user(Role.FINANCE_OFFICER, "dc.row"))
+
+    response = client.get(reverse("billing:discounts"))
+    row = response.context["discounts"][0]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for key in ("enrollment_code", "participant_name", "reason_ar", "president_approval_ref"):
+        assert str(row[key]) in page, key
+    assert row["split_mode"] in page
+    from django.template.defaultfilters import floatformat
+
+    for key in ("amount", "base_amount", "university_burden", "partner_burden"):
+        assert floatformat(row[key], -3) in page, key
+
+
+def test_the_discounts_head_reads_like_every_polished_screen(
+    client: Client, a_discount: object
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the sentence and the count the other
+    finance registers carry — all off the view's own ``title`` and no new
+    context key.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "dc.head"))
+
+    page = _discounts_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشؤون المالية" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+    assert 'class="card2-head"' in page
+
+
+def test_the_discounts_table_names_its_tenth_column(client: Client, a_discount: object) -> None:
+    """
+    Ten columns and the tenth had no name. Named by ``aria-label`` and not by
+    `.sr-only`, which is ``position:absolute`` with no positioned ancestor and
+    lands off the left edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "dc.col"))
+
+    page = _discounts_page(client)
+
+    assert 'aria-label="الاعتماد الداخلي"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 10
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_discounts_rule_is_explained_and_no_longer_alerted(
+    client: Client, a_discount: object
+) -> None:
+    """
+    §5.1 and the partner's single absorption were a blue `.note info` above the
+    page. Blue is an alert and explaining a rule is not one (polish rules §6.5),
+    so the same sentence now sits as a `.hint` beneath the columns it explains.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "dc.rule"))
+
+    page = _discounts_page(client)
+
+    assert "لا تُحسم مرة ثانية من وعاء المطالبة" in page
+    assert "note info" not in page
+    assert '<p class="hint">' in page
+    assert page.index("وعاء المطالبة") > page.index('class="tbl"'), "the rule left its columns"
+
+
+def test_the_discounts_empty_state_says_what_the_emptiness_means(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «لا خصومات» told a reader neither what a discount is nor how one appears.
+    The body now names the two conditions, and the state offers no action: the
+    reader who may grant one finds the form below, and the reader who may not
+    is never invited into a refusal (BR-085).
+    """
+    from apps.billing.models import Discount
+
+    assert not Discount.objects.exists()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "dc.empty"))
+
+    page = _discounts_page(client)
+
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "BR-030" in page
+    assert "empty-act" not in page
+
+
+def test_the_discounts_register_renders_on_an_empty_database(
+    client: Client, seeded_settings: None
+) -> None:
+    """Settings and nothing else — the screen still draws for all three readers."""
+    for role, _grant, _approve in DISCOUNT_READERS:
+        client.force_login(_user(role, f"dc.bare.{role}".lower().replace("_", ".")))
+        assert client.get(reverse("billing:discounts")).status_code == 200
+        client.logout()
+
+
+def test_the_discounts_register_kept_its_enrolment_filter_untouched(
+    client: Client, a_discount: object
+) -> None:
+    """
+    The view has always narrowed by ``?enrollment=``, and the polish neither
+    added a control for it nor changed what it does.
+    """
+    client.force_login(_user(Role.FINANCE_OFFICER, "dc.filter"))
+
+    matched = client.get(reverse("billing:discounts"), {"enrollment": "EN-DC-1"})
+    missed = client.get(reverse("billing:discounts"), {"enrollment": "EN-NOT-THERE"})
+
+    assert len(matched.context["discounts"]) == 1
+    assert len(missed.context["discounts"]) == 0
+    source = Path("apps/billing/views.py").read_text(encoding="utf-8")
+    assert 'request.GET.get("enrollment", "").strip()' in source
+
+
+def test_the_discounts_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The screen grants a discount and countersigns one. The help may not imply
+    the row is edited or deleted, nor that money is taken here — and it names
+    the three refusals a reader meets as a message they could not predict.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["discounts"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "BR-030" in text
+    assert "D-18" in text
+    assert "§5.1" in text
+    for absent in ("حذف", "تعديل الخصم", "استيفاء", "إلغاء السند"):
+        assert absent not in text, f"the discounts guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_grant", "_may_approve"), DISCOUNT_READERS)
+def test_the_discounts_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_grant: bool, _may_approve: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"dc.links.{role}".lower().replace("_", ".")))
+    page = _discounts_page(client)
+
+    guide = GUIDES["discounts"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_discounts_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = DISCOUNTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the discounts register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert 'class="form-acts"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

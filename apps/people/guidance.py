@@ -140,6 +140,24 @@ GUIDES: dict[str, Guide] = {
             "السند نفسه في سجل الدفعات، لا على ملخّص الإقفال."
         ),
     ),
+    "discounts": Guide(
+        what=_("الخصومات على الرسوم الدراسية: مبلغ كل خصم ووعاؤه وحصّة الجامعة والشريك منه."),
+        who=_("مدير المركز يمنح الخصم، ويعتمده مديرٌ آخر؛ الموظف المالي وحساب التدقيق يقرآن."),
+        after=_("أثر الخصم يظهر في رصيد التسجيل، ويُقبض المتبقّي في الصندوق."),
+        links=(
+            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
+            (Screen.PAYMENTS, "cashbox:payments", _("الدفعات وسندات القبض")),
+        ),
+        # Three refusals, and each one is met as a message the operator cannot
+        # predict from the form: the president's reference is a plain text
+        # field, the ordering rule is invisible until a payment exists, and
+        # D-18 hides the button rather than explaining it.
+        stops=_(
+            "الخصم على الرسوم الدراسية وحدها ولا يمسّ رسم التسجيل (§5.1 · BR-029)، ولا "
+            "يُمنح بلا رقم موافقة رئيس الجامعة (BR-030 · D-31)، ولا بعد قبض مبلغ عليها. "
+            "ولا يعتمد الخصمَ من أنشأه (D-18)."
+        ),
+    ),
     "transfers": Guide(
         what=_("طلبات النقل بين الدورات: فحصها واعتمادها وتنفيذها."),
         who=_("موظف التسجيل يفتح الطلب، ومدير المركز يعتمده (BR-066)."),
