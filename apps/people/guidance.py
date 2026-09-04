@@ -553,9 +553,14 @@ GUIDES: dict[str, Guide] = {
     ),
     "settlements": Guide(
         what=_("مخالصة الفترة مع الشريك، والتوقيع النهائي عليها."),
-        who=_("الموظف المالي يُنشئ، ومدير المركز يعتمد."),
+        # §3.5/28 gives V P to the audit account as well.
+        who=_("الموظف المالي يُنشئ، ومدير المركز يعتمد، وحساب التدقيق يقرأ."),
         after=_("بها ينتهي أثر الفترة مع هذا الشريك."),
         links=((Screen.CLAIMS, "settlements:claims", _("المطالبات")),),
+        # The nil-balance rule genuinely refuses, and it was said on the card
+        # inside the approver's own branch — so the officer who records the
+        # payment that clears the balance never read the reason for it.
+        stops=_("لا تُوقَّع مخالصة ورصيدها غير صفري، ولا تُفتح ثانيةٌ على اتفاقية لها مخالصة مفتوحة."),
     ),
     "obligations": Guide(
         what=_("ما على الشريك: غرامات الغياب والدفعات المقدّمة المستردّة."),

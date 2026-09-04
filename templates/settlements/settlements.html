@@ -1,39 +1,95 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل مخالصات الشركاء، وتحته كتلة فتح مخالصة لمن يملك الإنشاء.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا مرشّح ولا عمود بدّل موضعه.
+  الصفوف هي ما يعيده `settlement_service.list_settlements` بأسمائه، والنموذج
+  يُرسم من `partials/_form.html` ويُرسل `action=open` إلى المسار نفسه. ولا
+  توقيع هنا ولا دفع: كلاهما على بطاقة المخالصة، ولكلٍّ حارسه هناك.
+
+  ما تغيّر:
+
+  * الترويسة صارت كترويسة كل سجلّ مصقول، وفوق الجدول عدّاد ما رُسم من صفوف؛
+  * كتلتا `.note info` الزرقاوان صارتا `.hint`: الأولى تشرح ما المخالصة —
+    وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5) — والثانية تشرح ما يعرضه
+    النموذج، فنزلت فوق حقوله بـ `.hint boxed`؛
+  * العمود العاشر كان بلا اسم، فسُمّي بـ `aria-label`؛
+  * والحالة الفارغة كانت تحيل كل قارئ إلى «النموذج أدناه»، والنموذج لا يُرسم
+    إلا لمن يملك الإنشاء. فكان من لا يملكه يُرسَل إلى كتلةٍ ليست على صفحته.
+    صار السبب للجميع والإحالة لمن يملك الفتح وحده (قواعد التحسين §8.2)؛
+  * زرّ الإرسال دخل `.form-acts`، والنموذج أخذ `novalidate` فتصل الرسالة
+    العربية من الخادم لا من المتصفّح.
+
+  ورصيدُ الصفّ يبقى رقماً كما تعطيه الخدمة: القاعدة التي تمنع التوقيع على
+  رصيد غير صفري تُنفَّذ على البطاقة، وتُقال هنا في سطر الشرح، ولا تُصبغ على
+  عمودٍ في سجلّ لا يُوقَّع منه شيء.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "إقرار كل فترة مع شريكها: ما استحقّ عليها، وما دُفع منه، وما بقي قبل التوقيع." %}</p>
+  </div>
 </div>
 
 {% guided_help "settlements" %}
-<div class="note info">
-  {% translate "المخالصة إقرار بعدم بقاء مستحقات في الفترة — لا تُوقَّع ورصيدها غير صفري. وفترتها تُشتق من دورة الاتفاقية: كل أربعة أشهر للدبلوم، ونهاية كل دورة للقصيرة." %}
-</div>
+
+<p class="hint">{% translate "المخالصة إقرار بعدم بقاء مستحقات في الفترة — لا تُوقَّع ورصيدها غير صفري. وفترتها تُشتق من دورة الاتفاقية: كل أربعة أشهر للدبلوم، ونهاية كل دورة للقصيرة." %}</p>
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "المخالصات المسجَّلة" %}</h2>
+    <div class="acts">
+      <span class="count muted">{% blocktranslate count n=settlements|length %}مخالصة واحدة{% plural %}{{ n }} مخالصات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الاتفاقية" %}</th>
-        <th>{% translate "الفترة" %}</th><th>{% translate "المطالبات" %}</th><th>{% translate "المستحق" %}</th>
-        <th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "الشريك" %}</th>
+          <th>{% translate "الاتفاقية" %}</th>
+          <th>{% translate "الفترة" %}</th>
+          <th class="num">{% translate "المطالبات" %}</th>
+          <th class="num">{% translate "المستحق" %}</th>
+          <th class="num">{% translate "المدفوع" %}</th>
+          <th class="num">{% translate "الرصيد" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for s in settlements %}
           <tr>
-            <td dir="ltr">{{ s.code }}</td><td>{{ s.partner_name }}</td>
-            <td dir="ltr">{{ s.agreement_number }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ s.code }}</strong></td>
+            <td>{{ s.partner_name }}</td>
+            <td dir="ltr" translate="no">{{ s.agreement_number }}</td>
             <td class="num">{{ s.period_from }} — {{ s.period_to }}</td>
             <td class="num">{{ s.claim_count }}</td>
             <td class="num">{{ s.total_due }}</td>
             <td class="num">{{ s.total_paid }}</td>
             <td class="num">{{ s.balance }}</td>
-            <td><span class="chip {{ s.status|status_tone }}">{{ s.status_display }}</span></td>
-            <td><a class="btn2 ghost" href="{% url 'settlements:settlement-detail' s.code %}">{% translate "عرض" %}</a></td>
+            <td><span class="chip {{ s.status|status_tone }} dot">{{ s.status_display }}</span></td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'settlements:settlement-detail' s.code %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="10" class="empty">
-              <span class="empty-title">{% translate "لا مخالصات مفتوحة" %}</span>
-              <span class="empty-body">{% translate "المخالصة تُفتح على اتفاقية سارية لا مخالصة مفتوحة لها — والنموذج أدناه يعرض المتاح منها." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="10" class="empty">
+            <span class="empty-title">{% translate "لا مخالصات مفتوحة" %}</span>
+            <span class="empty-body">{% translate "المخالصة تُفتح على اتفاقية سارية لا مخالصة مفتوحة لها — مخالصة واحدة مفتوحة لكل اتفاقية." %}</span>
+            {% if can_create %}
+              <span class="empty-body">{% translate "افتح أولى المخالصات من كتلة «فتح مخالصة» أسفل هذه الصفحة." %}</span>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
@@ -43,13 +99,14 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "فتح مخالصة" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
-        {% translate "تُعرض الاتفاقيات السارية التي لا مخالصة مفتوحة لها — مخالصة واحدة مفتوحة لكل اتفاقية." %}
-      </div>
-      <form method="post">{% csrf_token %}
+      <p class="hint boxed">{% translate "تُعرض الاتفاقيات السارية التي لا مخالصة مفتوحة لها — مخالصة واحدة مفتوحة لكل اتفاقية." %}</p>
+      <form method="post" novalidate>
+        {% csrf_token %}
         <input type="hidden" name="action" value="open">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "فتح المخالصة" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "فتح المخالصة" %}</button>
+        </div>
       </form>
     </div>
   </div>

@@ -11346,3 +11346,124 @@ def test_the_claim_card_carries_no_inline_style_and_names_its_last_column() -> N
     assert "sr-only" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 2 — the settlements register (templates/settlements/settlements.html)
+# ---------------------------------------------------------------------------
+SETTLEMENTS_TEMPLATE = Path("templates/settlements/settlements.html")
+
+#: §3.5/28 — the officer opens and pays, the manager signs, the audit reads.
+SETTLEMENTS_READERS = [Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT]
+
+
+def _settlements_page(client: Client, role: str, tag: str) -> str:
+    client.force_login(_user(role, f"st.{tag}.{role}".lower().replace("_", ".")))
+    response = client.get(reverse("settlements:settlements"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_the_empty_register_does_not_send_a_reader_to_a_block_that_is_not_there(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    «والنموذج أدناه يعرض المتاح منها» was printed for everybody, and the form
+    it names is drawn only for CREATE. The manager and the audit account were
+    being sent down the page to a block that is not on their copy of it.
+
+    The reason stays for everyone; the direction goes by permission (§8.2).
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    may_open = Action.CREATE in allowed_actions(role, "settlements")
+    assert may_open is (role == Role.FINANCE_OFFICER)
+
+    page = _settlements_page(client, role, "empty")
+
+    assert "لا مخالصات مفتوحة" in page
+    assert "اتفاقية سارية لا مخالصة مفتوحة لها" in page, "the reason is for everybody"
+    assert ("كتلة «فتح مخالصة» أسفل هذه الصفحة" in page) is may_open
+    assert ("فتح المخالصة" in page) is may_open
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_the_settlements_register_explains_without_alerting(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Two blue boxes stood on a register that refuses nothing — one saying what
+    a settlement is, one saying what the form offers. Blue is an alert and
+    explaining a rule is not one (polish rules §6.5).
+    """
+    page = _settlements_page(client, role, "tone")
+
+    for alert in ("note info", "note warn", "note ok"):
+        assert alert not in page, f"the register still alerts in «{alert}»"
+    assert "لا تُوقَّع ورصيدها غير صفري" in page, "…and the rule is still said"
+
+
+@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
+def test_the_nil_balance_rule_reaches_the_reader_who_does_not_sign(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    The rule that stops a signature was said on the card, inside the approver's
+    own branch — so the officer who records the payment that clears the balance
+    never met the reason for it. It is in the guide now, and the guide's prose
+    is never filtered (polish rules §3.5).
+    """
+    page = _settlements_page(client, role, "stops")
+
+    assert "ما يوقف العملية" in page
+    assert "ورصيدها غير صفري" in page
+
+
+def test_the_settlements_guide_names_the_reader_who_only_reads(
+    client: Client, seeded_settings: None
+) -> None:
+    """§3.5/28 gives the audit account V P; «من يستخدمها» named only the two
+    roles that act."""
+    page = _settlements_page(client, Role.AUDIT_ACCOUNT, "who")
+
+    assert "حساب التدقيق" in page
+
+
+def test_the_settlements_action_column_is_named() -> None:
+    """The tenth column had no name; `aria-label` gives it one without the
+    `.sr-only` that drags the page sideways in RTL."""
+    markup = SETTLEMENTS_TEMPLATE.read_text(encoding="utf-8").split("{% endcomment %}", 1)[-1]
+
+    assert "aria-label" in markup
+    assert "sr-only" not in markup
+    assert 'class="form-acts"' in markup
+    assert "novalidate" in markup
+
+
+def test_the_settlements_register_uses_no_class_defined_nowhere() -> None:
+    """A class in neither sheet renders bare."""
+    import re
+
+    source = SETTLEMENTS_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+
+
+def test_the_settlements_register_carries_no_inline_style_and_no_script() -> None:
+    """8J-5 removed inline styles from the delivery; they do not come back."""
+    source = SETTLEMENTS_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "style=" not in source
+    assert "<script" not in source
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
