@@ -1,37 +1,125 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n status_ui guided_help %}
+
+{% block title %}{{ partner.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  بطاقة الشريك: بياناته التعريفية والاتفاقيات المعقودة معه. صفحة قراءة —
+  العرض لا يقبل POST ولا خدمة تعديل خلفه، فلا يُرسم زرّ تعديل ولو بدا مفيداً:
+  زرٌّ بلا مسار أسوأ من غياب الزرّ.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس، ولا معنى تعاقدياً أو
+  مالياً مُسّ. كل قيمة معروضة مفتاحٌ يحمله الصف أصلاً من `get_partner`.
+
+  الترويسة كانت `<h1>` سائباً بلا سياق ولا طريق عودة. والرابط إلى سجل الشركاء
+  آمنٌ لكل من يفتح هذه الصفحة: من وصل إليها مرّ من بوّابة الشاشة نفسها
+  (`list_partners` تفرض VIEW على §3.5/23)، فلا يُدعى أحد إلى رفض.
+
+  و«منتهية» تُذكر حين يكون `is_expired` صحيحاً: القيمة محسوبة في الخدمة
+  (Sprint 8F-1) لا في القالب، ووُجدت لهذا الغرض بعينه — أن تقول الشاشة إن
+  العقد انقضى دون أن يقارن أحد التواريخ في رأسه. والحالة المخزَّنة تبقى إلى
+  جانبها كما هي: «سارية» حالةٌ سُجِّلت، و«منتهية» واقعةُ تاريخ، ولا تُستبدل
+  إحداهما بالأخرى.
+
+  ولا تُعرض هنا نسبةٌ ولا استثناءٌ ولا دورة مخالصة: تلك بنود الاتفاقية، ولها
+  صفحتها. الجدول يدلّ عليها ولا ينوب عنها.
+{% endcomment %}
+
 {% block content %}
-<h1>{{ partner.name_ar }}</h1>
-<div class="card2"><div class="card2-body">
-  <dl class="dl">
-    <dt>{% translate "الرمز" %}</dt><dd dir="ltr">{{ partner.code }}</dd>
-    <dt>{% translate "النوع" %}</dt><dd>{{ partner.partner_type_display }}</dd>
-    <dt>{% translate "الحالة" %}</dt><dd>{{ partner.status_display }}</dd>
-    <dt>{% translate "السجل التجاري" %}</dt><dd dir="ltr">{{ partner.registry_number|default:"—" }} {% if partner.registry_date %}· {{ partner.registry_date }}{% endif %}</dd>
-    <dt>{% translate "جهة الاتصال" %}</dt><dd>{{ partner.contact_name|default:"—" }}</dd>
-    <dt>{% translate "الهاتف" %}</dt><dd dir="ltr">{{ partner.phone|default:"—" }}</dd>
-  </dl>
-</div></div>
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
+    <h1>{{ partner.name_ar }}</h1>
+    <p class="sub">
+      <span dir="ltr" translate="no">{{ partner.code }}</span> ·
+      {{ partner.partner_type_display }} —
+      {% translate "بيانات الطرف المتعاقد كما ترد في الاتفاقية، والاتفاقيات المعقودة معه. لا تعديل من هذه الشاشة." %}
+    </p>
+  </div>
+  <div class="acts">
+    <a class="btn2 ghost" href="{% url 'partners:partners' %}">{% translate "عودة إلى الشركاء" %}</a>
+  </div>
+</div>
+
+{% guided_help "partner-detail" %}
+
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "الاتفاقيات" %}</h2></div>
+  <div class="card2-head">
+    <h2>{% translate "بيانات الشريك" %}</h2>
+    <div class="acts">
+      <span class="chip {{ partner.status|status_tone }} dot">{{ partner.status_display }}</span>
+    </div>
+  </div>
+  <div class="card2-body">
+    <dl class="dl">
+      <dt>{% translate "الرمز" %}</dt>
+      <dd dir="ltr" translate="no"><strong class="num">{{ partner.code }}</strong></dd>
+      <dt>{% translate "النوع" %}</dt>
+      <dd><span class="chip">{{ partner.partner_type_display }}</span></dd>
+      <dt>{% translate "السجل التجاري" %}</dt>
+      <dd>
+        {% if partner.registry_number %}
+          <span dir="ltr" translate="no">{{ partner.registry_number }}</span>
+          {% if partner.registry_date %} · <span dir="ltr">{{ partner.registry_date|date:"Y/m/d" }}</span>{% endif %}
+        {% else %}<span class="muted">{% translate "غير مسجَّل" %}</span>{% endif %}
+      </dd>
+      <dt>{% translate "جهة الاتصال" %}</dt>
+      <dd>{{ partner.contact_name|default:"—" }}</dd>
+      <dt>{% translate "الهاتف" %}</dt>
+      <dd dir="ltr">{{ partner.phone|default:"—" }}</dd>
+      <dt>{% translate "البريد الإلكتروني" %}</dt>
+      <dd dir="ltr">{{ partner.email|default:"—" }}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الاتفاقيات" %}</h2>
+    <div class="acts">
+      <span class="count">{% blocktranslate count n=partner.agreements|length %}اتفاقية واحدة{% plural %}{{ n }} اتفاقيات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرقم" %}</th><th>{% translate "العنوان" %}</th><th>{% translate "النموذج" %}</th>
-        <th>{% translate "السريان" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرقم" %}</th>
+          <th>{% translate "العنوان" %}</th>
+          <th>{% translate "النموذج" %}</th>
+          <th class="num">{% translate "السريان" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for a in partner.agreements %}
           <tr>
-            <td dir="ltr">{{ a.agreement_number }}</td><td>{{ a.title_ar }}</td>
+            <td dir="ltr" translate="no"><strong class="num">{{ a.agreement_number }}</strong></td>
+            <td>{{ a.title_ar }}</td>
             <td>{{ a.calculation_model_display }}</td>
-            <td class="num">{{ a.valid_from }} — {{ a.valid_to }}</td>
-            <td><span class="chip {{ a.status|status_tone }}">{{ a.status_display }}</span></td>
-            <td><a class="btn2 ghost" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a></td>
+            <td class="num">
+              <span dir="ltr">{{ a.valid_from|date:"Y/m/d" }} — {{ a.valid_to|date:"Y/m/d" }}</span>
+            </td>
+            <td>
+              <span class="chip {{ a.status|status_tone }} dot">{{ a.status_display }}</span>
+              {% if a.is_expired %}<span class="chip">{% translate "انقضت مدّتها" %}</span>{% endif %}
+            </td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'partners:agreement-detail' a.agreement_number %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا اتفاقيات" %}</span></td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="6" class="empty">
+            <span class="empty-title">{% translate "لا اتفاقيات لهذا الشريك" %}</span>
+            <span class="empty-body">{% translate "الشريك مسجَّل ولا عقد تحته بعد. الاتفاقية الموقّعة هي ما يحمل النسبة والاستثناءات ودورة المخالصة، ولا تبدأ الشروط قبل تسجيلها وسريانها." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "الجدول يدلّ على الاتفاقيات ولا ينوب عنها: النسبة والاستثناءات ودورة المخالصة تُقرأ في صفحة الاتفاقية نفسها." %}</p>
   </div>
 </div>
 {% endblock %}

@@ -9010,3 +9010,387 @@ def test_the_partners_register_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The partner card — page polish (Wave 1)
+# ---------------------------------------------------------------------------
+# Reached through §3.5/23, and it reads §3.5/24 too: ``get_partner`` calls
+# ``list_agreements``, so a reader needs VIEW on both. The three roles that
+# hold PARTNERS hold AGREEMENTS as well, which is why the page opens at all.
+# It was a bare <h1> with no section, no way back, an unnamed sixth column, an
+# empty state saying «لا اتفاقيات», and a status printed as plain text on a
+# screen whose own register draws it as a chip.
+PARTNER_DETAIL_TEMPLATE = Path("templates/partners/partner_detail.html")
+
+
+@pytest.fixture
+def a_partner_with_agreements(seeded_settings: None) -> object:
+    """
+    One partner holding a live agreement and one whose term has run out.
+
+    The second exists for the flag: ``is_expired`` is computed in the service
+    (Sprint 8F-1) precisely so a screen can say a contract has ended without
+    anybody comparing dates by eye, and it was going unused.
+    """
+    from datetime import date
+    from decimal import Decimal
+
+    from apps.partners.models import (
+        Agreement,
+        AgreementStatus,
+        CalculationModel,
+        PartnerStatus,
+        PartnerType,
+    )
+    from apps.partners.services import partner_service
+
+    manager = _user(Role.CENTER_MANAGER, "pd.fixture.manager")
+    partner = partner_service.create_partner(
+        actor=manager,
+        data={
+            "code": "PN-PD-1",
+            "name_ar": "شركة تناغم للتدريب",
+            "partner_type": PartnerType.COMPANY,
+            "status": PartnerStatus.ACTIVE,
+            "registry_number": "12345",
+            "registry_date": date(2020, 3, 1),
+            "contact_name": "أبو محمد",
+            "phone": "0791234567",
+            "email": "tanaghom@example.com",
+        },
+    )
+    Agreement.objects.create(
+        agreement_number="2026/PD-1",
+        partner=partner,
+        title_ar="اتفاقية سارية",
+        signed_on=date(2026, 8, 1),
+        valid_from=date(2026, 9, 1),
+        valid_to=date(2099, 8, 31),
+        calculation_model=CalculationModel.PERCENT,
+        percent_rate=Decimal("50.0000"),
+        status=AgreementStatus.ACTIVE,
+    )
+    Agreement.objects.create(
+        agreement_number="2020/PD-0",
+        partner=partner,
+        title_ar="اتفاقية انقضت",
+        signed_on=date(2019, 8, 1),
+        valid_from=date(2019, 9, 1),
+        valid_to=date(2020, 8, 31),
+        calculation_model=CalculationModel.PERCENT,
+        percent_rate=Decimal("40.0000"),
+        status=AgreementStatus.ACTIVE,
+    )
+    return partner
+
+
+def _partner_card(client: Client, code: str = "PN-PD-1") -> str:
+    response = client.get(reverse("partners:partner-detail", args=[code]))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_create"), PARTNER_READERS)
+def test_the_partner_card_opens_exactly_where_the_matrix_says(
+    client: Client, a_partner_with_agreements: object, role: str, _may_create: bool
+) -> None:
+    """
+    The card needs VIEW on §3.5/23 AND on §3.5/24, because it lists agreements.
+    All three partner readers hold both — asserted, not assumed.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "partners")
+    assert Action.VIEW in allowed_actions(role, "agreements")
+    client.force_login(_user(role, f"pd.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:partner-detail", args=["PN-PD-1"])).status_code == 200
+
+
+@pytest.mark.parametrize("role", PARTNER_NON_READERS)
+def test_the_partner_card_still_refuses_the_roles_it_always_did(
+    client: Client, a_partner_with_agreements: object, role: str
+) -> None:
+    """The polish moved no guard: an empty cell is a deny, before and after."""
+    client.force_login(_user(role, f"pd.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("partners:partner-detail", args=["PN-PD-1"])).status_code == 403
+
+
+def test_the_partner_card_refuses_an_anonymous_visitor(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    response = client.get(reverse("partners:partner-detail", args=["PN-PD-1"]))
+    assert response.status_code in (302, 403)
+
+
+def test_an_unknown_partner_is_still_a_404(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """The polish did not turn a missing record into an empty card."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.missing"))
+    assert client.get(reverse("partners:partner-detail", args=["PN-NOPE"])).status_code == 404
+
+
+def test_the_partner_card_stayed_read_only(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    No editing service exists behind this page and the view has no POST branch,
+    so the polish may not have drawn an edit button — a button with no route is
+    worse than no button.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pd.readonly"))
+
+    page = _partner_card(client)
+
+    assert "<form" not in page
+    assert "<button" not in page
+    assert "csrfmiddlewaretoken" not in page
+    assert "قراءة فقط" in page, "the read-only chip states what the page is"
+
+
+def test_the_partner_card_offers_the_way_back_to_its_own_register(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    It had no way back at all. The link is safe for every reader who can be on
+    this page: they passed the same screen's gate to reach it.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.back"))
+
+    page = _partner_card(client)
+
+    href = reverse("partners:partners")
+    assert f'href="{href}"' in page
+    assert client.get(href).status_code == 200
+
+
+def test_the_partner_card_prints_only_keys_the_projection_carried(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """Every value on the card is ``get_partner``'s own; nothing is derived here."""
+    client.force_login(_user(Role.FINANCE_OFFICER, "pd.keys"))
+
+    response = client.get(reverse("partners:partner-detail", args=["PN-PD-1"]))
+    partner = response.context["partner"]
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    for key in ("code", "name_ar", "registry_number", "contact_name", "phone", "email"):
+        assert str(partner[key]) in page, key
+    assert str(partner["partner_type_display"]) in page
+    assert str(partner["status_display"]) in page
+
+
+def test_the_partner_card_shows_no_agreement_term_of_its_own(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    The rate, the exclusions and the settlement cycle belong to the agreement
+    and have their own page. A card that printed «50%» here would invite a
+    reader to take a commercial figure off the wrong document.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.terms"))
+
+    page = _partner_card(client)
+    # The prose above and below the table NAMES these terms in order to send
+    # the reader to the agreement, so the guarantee is about the table itself:
+    # no row may carry a commercial value.
+    table = page[page.index('class="tbl"') : page.index("</table>")]
+
+    for term in ("50.0000", "40.0000", "%", "الاستثناءات", "دورة المخالصة", "حصة الشريك"):
+        assert term not in table, f"the agreements table prints «{term}»"
+    # …and the card says where they are, rather than leaving it to be guessed.
+    assert "لا ينوب عنها" in page
+
+
+def test_the_expired_agreement_is_named_without_overwriting_its_status(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    «سارية» is a recorded status; running out of term is a fact about the
+    calendar. The service computes ``is_expired`` for exactly this, and the two
+    are shown side by side — replacing one with the other would either hide a
+    lapsed contract or contradict the record.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.expired"))
+
+    response = client.get(reverse("partners:partner-detail", args=["PN-PD-1"]))
+    rows = {a["agreement_number"]: a for a in response.context["partner"]["agreements"]}
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert rows["2020/PD-0"]["is_expired"] is True
+    assert rows["2026/PD-1"]["is_expired"] is False
+    # One chip, on the one row that earned it — and the stored status survives
+    # on BOTH rows. Counted as chip markup: the word «سارية» also appears in a
+    # fixture's title, and a substring count would be counting the wrong thing.
+    table = page[page.index('class="tbl"') : page.index("</table>")]
+    assert table.count("انقضت مدّتها") == 1
+    assert rows["2020/PD-0"]["status"] == rows["2026/PD-1"]["status"] == "ACTIVE"
+    # Scoped to the table: the partner's OWN status chip sits in the card head
+    # above it, and a page-wide count would be counting that too.
+    assert table.count('class="chip ok dot"') == 2, "a row lost its recorded status"
+    # The template reads the flag; it does not compare dates itself.
+    source = PARTNER_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    assert "a.is_expired" in source
+    assert "now" not in source, "the card is comparing dates in the template"
+
+
+def test_every_agreement_row_links_to_a_page_its_reader_may_open(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    The «عرض» link is guarded by AGREEMENTS VIEW, which every reader who got
+    onto this card already holds — so the link opens rather than refusing.
+    """
+    for role, _may_create in PARTNER_READERS:
+        client.force_login(_user(role, f"pd.link.{role}".lower().replace("_", ".")))
+        response = client.get(reverse("partners:partner-detail", args=["PN-PD-1"]))
+        page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+        for row in response.context["partner"]["agreements"]:
+            href = reverse("partners:agreement-detail", args=[row["agreement_number"]])
+            assert f'href="{href}"' in page, f"{role} · {row['agreement_number']}"
+            assert client.get(href).status_code == 200, f"{role} · {href}"
+        client.logout()
+
+
+def test_the_partner_card_head_reads_like_every_polished_detail_page(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    A bare ``<h1>`` gained the section, the identity line and a count over the
+    agreements listed — all off the projection and no new context key.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.head"))
+
+    page = _partner_card(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الشركاء والمخالصات" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count"' in page
+    assert "2 اتفاقيات" in page
+    assert 'class="dl"' in page
+
+
+def test_the_partner_card_names_its_sixth_column(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and lands off the left
+    edge in RTL, dragging the page sideways.
+    """
+    import re
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.col"))
+
+    page = _partner_card(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 6
+    assert 'class="tbl-wrap"' in page
+
+
+def test_a_partner_with_no_agreement_gets_a_written_empty_state(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    «لا اتفاقيات» said nothing about what is missing or why it matters. The
+    body now names what an agreement carries, and offers no action: recording
+    one is the agreement editor's job, on its own screen.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.empty"))
+
+    response = client.get(reverse("partners:partner-detail", args=["PN-UI-2"]))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["partner"]["agreements"] == []
+    assert 'class="empty-title"' in page
+    assert 'class="empty-body"' in page
+    assert "دورة المخالصة" in page
+    assert "empty-act" not in page
+
+
+def test_a_partner_with_no_registry_number_says_so(
+    client: Client, three_partners: list[object]
+) -> None:
+    """An unregistered partner is a real case, not a blank cell."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pd.noreg"))
+
+    page = _partner_card(client, code="PN-UI-2")
+
+    assert "غير مسجَّل" in page
+
+
+def test_the_partner_card_guidance_invents_no_action_the_screen_lacks() -> None:
+    """
+    The page reads. The help may not imply the partner is edited or deleted
+    here, and it names the confusion the table invites: a recorded status is
+    not a live term.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["partner-detail"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert guide.status is not None, "a read-only screen says so"
+    assert "لا يصلح لمطالبة جديدة" in text
+    for absent in ("حذف", "تعديل الشريك", "إنشاء اتفاقية"):
+        assert absent not in text, f"the partner-card guidance offers «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_create"), PARTNER_READERS)
+def test_the_partner_card_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, a_partner_with_agreements: object, role: str, _may_create: bool
+) -> None:
+    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"pd.links.{role}".lower().replace("_", ".")))
+    page = _partner_card(client)
+
+    guide = GUIDES["partner-detail"]
+    assert str(guide.what) in page
+    assert str(guide.stops) in page
+    assert page.index(str(guide.what)) < page.index('class="card2"')
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_partner_card_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = PARTNER_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the partner card uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert 'class="dl"' in markup
+    assert "sr-only" not in markup
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in markup, f"a fact is still being alerted in «{alert}»"
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"

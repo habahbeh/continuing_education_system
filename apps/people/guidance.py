@@ -437,6 +437,26 @@ GUIDES: dict[str, Guide] = {
             "مخالصة — تلك كلّها على الاتفاقية، ولا تبدأ قبل سريانها."
         ),
     ),
+    "partner-detail": Guide(
+        what=_("بطاقة الطرف المتعاقد: بياناته التعريفية والاتفاقيات المعقودة معه."),
+        who=_("مدير المركز والموظف المالي وحساب التدقيق يقرؤونها."),
+        after=_("بنود كل اتفاقية — النسبة والاستثناءات ودورة المخالصة — في صفحتها."),
+        links=(
+            (Screen.AGREEMENTS, "partners:agreements", _("الاتفاقيات")),
+            (Screen.PARTNERS, "partners:partners", _("الشركاء المتعاقدون")),
+        ),
+        # Read-only, and the chip says so: §3.5/23 grants the manager EDIT but
+        # no editing service exists behind this page, so the screen draws no
+        # edit button and the guide may not promise one.
+        status=_READ_ONLY,
+        # «سارية» is a recorded status and «انقضت مدّتها» is a fact about the
+        # calendar. A reader who takes the first for the second raises a claim
+        # under a contract that ended.
+        stops=_(
+            "حالة الاتفاقية المسجَّلة شيء وانقضاء مدّتها شيء آخر: العقد المنقضي يبقى "
+            "معروضاً لأنه العقد الذي قامت عليه مطالبات سابقة، ولا يصلح لمطالبة جديدة."
+        ),
+    ),
     "agreements": Guide(
         what=_("اتفاقيات الشركاء: نموذج الاحتساب، والاستثناءات، ولقطة الأسعار."),
         who=_("مدير المركز يُنشئ ويعتمد."),
