@@ -29,3 +29,7 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+
+# Agent tooling — local only, never shared
+.claude/
+memory/
