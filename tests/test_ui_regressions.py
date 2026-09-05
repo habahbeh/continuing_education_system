@@ -12462,13 +12462,11 @@ def test_the_status_column_keeps_the_word_the_whole_project_uses(
 ) -> None:
     """
     «الحالة» is this project's word for a status column — it heads one on
-    thirty-six templates. The certificate register already used it correctly
-    and the polish left it alone.
+    thirty-six templates. The certificate register always used it correctly.
 
-    The deviation is `clearances.html`, which calls the CASE TYPE «الحالة» and
-    the status «الوضع» — and «الوضع» appears nowhere else in the project. That
-    is recorded, not fixed: correcting it reaches the clearance card and the
-    printed clearance form, both outside this slice.
+    The two clearance screens used to deviate and have since been reconciled,
+    so «الوضع» is now gone from the project entirely. This test holds the whole
+    convention rather than one screen's copy of it.
     """
     source = CERTIFICATES_TEMPLATE.read_text(encoding="utf-8")
     markup = source.split("{% endcomment %}", 1)[-1]
@@ -12479,12 +12477,6 @@ def test_the_status_column_keeps_the_word_the_whole_project_uses(
     client.force_login(_user(Role.AUDIT_ACCOUNT, "crt.status.word"))
     page = _certificates_page(client)
     assert "الحالة" in page
-
-    # The clearance register is untouched by this slice and still deviates.
-    clearances = CLEARANCES_TEMPLATE.read_text(encoding="utf-8")
-    assert '{% translate "الوضع" %}' in clearances, (
-        "if this fails the two screens were reconciled — update this test with them"
-    )
 
 
 def test_the_replacement_marker_lost_the_colour_of_a_refusal(
@@ -12634,5 +12626,209 @@ def test_the_certificate_register_added_no_dead_class_and_no_dependency() -> Non
     markup = source.split("{% endcomment %}", 1)[-1]
     assert 'class="tbl-wrap"' in markup
     assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The clearance card, and the «الحالة» unification across §3.6
+# ---------------------------------------------------------------------------
+# The card put the case type and the clearance status in ONE `<dl>` row headed
+# «الحالة», and the register headed the case type «الحالة» and the status
+# «الوضع» — a word appearing nowhere else in the project. Thirty-six templates
+# head a status column «الحالة», so that is the convention both now follow, and
+# the case type took the name that says what it actually is.
+CLEARANCE_DETAIL_TEMPLATE = Path("templates/operations/clearance_detail.html")
+CLEARANCE_PRINT_TEMPLATE = Path("templates/print/clearance_form.html")
+
+
+def _clearance_card(client: Client, code: str) -> str:
+    response = client.get(reverse("operations:clearance-detail", args=[code]))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+def test_the_word_wadaa_is_gone_from_the_project() -> None:
+    """
+    «الوضع» meant «status» on exactly one screen and nowhere else. The whole
+    point of the unification is that it no longer exists to be confused with
+    «الحالة», so the assertion is over every template rather than over one.
+    """
+    offenders = [
+        str(path)
+        for root in TEMPLATE_ROOTS
+        for path in root.rglob("*.html")
+        if '{% translate "الوضع" %}' in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, f"«الوضع» came back in: {', '.join(offenders)}"
+
+
+def test_both_clearance_screens_now_name_the_two_facts_the_same_way(
+    client: Client, two_clearances: object
+) -> None:
+    """
+    One fact, one wording, on the register and on the card (polish rules §7):
+    «سبب الإنهاء» is the case type, «الحالة» is the clearance status.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "clr.naming"))
+
+    register = _clearances_page(client)
+    assert "سبب الإنهاء" in register
+    assert "الحالة" in register
+
+    card = _clearance_card(client, "CLR-UIX-0")
+    assert "سبب الإنهاء" in card
+    assert "الحالة" in card
+
+
+def test_the_card_separates_the_case_type_from_the_status(
+    client: Client, two_clearances: object
+) -> None:
+    """
+    They shared one `<dd>` — «تخرج · <chip>مفتوحة</chip>» under a single
+    «الحالة» — so neither had a heading of its own and the heading fitted only
+    the first. Two rows now, each with its own name.
+    """
+    source = CLEARANCE_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert (
+        '<dt>{% translate "سبب الإنهاء" %}</dt><dd>{{ clearance.case_type_display }}</dd>' in markup
+    )
+    assert "case_type_display }} ·" not in markup, "the two facts still share a row"
+
+    client.force_login(_user(Role.CENTER_MANAGER, "clr.split"))
+    card = _clearance_card(client, "CLR-UIX-1")
+    assert "انسحاب" in card
+    assert "مكتملة" in card
+
+
+def test_the_clearance_card_opens_where_the_matrix_says_and_refuses_the_cashier(
+    client: Client, two_clearances: object
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role, _may_create in CLEARANCE_READERS:
+        assert Action.VIEW in allowed_actions(role, "clearance")
+        client.force_login(_user(role, f"clr.card.{role}".lower().replace("_", ".")))
+        assert (
+            client.get(reverse("operations:clearance-detail", args=["CLR-UIX-0"])).status_code
+            == 200
+        )
+        client.logout()
+
+    client.force_login(_user(Role.CASHIER, "clr.card.cashier"))
+    assert client.get(reverse("operations:clearance-detail", args=["CLR-UIX-0"])).status_code == 403
+
+
+def test_the_clearance_card_head_reads_like_every_polished_detail_page(
+    client: Client, two_clearances: object
+) -> None:
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "clr.card.head"))
+
+    card = _clearance_card(client, "CLR-UIX-0")
+
+    assert 'class="eyebrow"' in card
+    assert "الإنهاء والشهادات" in card
+    assert 'class="sub"' in card
+    assert "عودة إلى البراءات" in card
+    assert "طباعة النموذج" in card
+    assert 'class="action-bar"' not in card, "the lone action bar became the head's acts"
+
+
+def test_the_money_block_keeps_all_three_of_its_colours(
+    client: Client, two_clearances: object
+) -> None:
+    """
+    Deliberately NOT flattened. BR-073 stops the financial step in BOTH
+    directions — a debt and a credit alike — so red and yellow are refusals,
+    and green says the one condition the step turns on is met. This is the
+    moment colour is for (polish rules §6.5).
+    """
+    source = CLEARANCE_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert "note danger" in markup
+    assert "note warn" in markup
+    assert "note ok" in markup
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "clr.money"))
+    card = _clearance_card(client, "CLR-UIX-0")
+    assert "الرصيد صفر — الحساب مسوّى." in card
+
+
+def test_the_role_notes_became_teaching_rather_than_notices(
+    client: Client, two_clearances: object
+) -> None:
+    """
+    «هذه الخطوة للدور X» tells a reader who cannot act why not. That is
+    teaching, and the reader it addresses has done nothing wrong.
+    """
+    source = CLEARANCE_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert markup.count('<p class="hint">{% translate "هذه الخطوة للدور" %}') == 2
+    assert '<div class="note">{% translate "هذه الخطوة للدور" %}' not in markup
+    assert "BR-074 · D-30" in markup, "the second signature names the rule that refuses it"
+
+
+def test_every_post_form_on_the_card_lets_the_server_speak(
+    client: Client, two_clearances: object
+) -> None:
+    """`novalidate` on each, so the Arabic server message wins over the browser."""
+    source = CLEARANCE_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert markup.count('<form method="post">') == 0
+    assert markup.count('<form method="post" novalidate>') == 8
+    assert markup.count('class="form-acts"') == 8
+
+
+def test_the_printed_clearance_form_says_what_the_screens_say() -> None:
+    """
+    The paper the participant signs is where a mismatch would cost most: the
+    screen would say «سبب الإنهاء» and the form in their hand «الحالة» for the
+    same fact. The print template carried a THIRD variant besides — «وضع
+    البراءة» for the status — and both labels now match the two screens.
+
+    Only the two labels changed. Nothing about the layout, the fields or the
+    signature blocks was touched, and that is asserted here so a later edit
+    cannot quietly ride along on this test's name.
+    """
+    source = CLEARANCE_PRINT_TEMPLATE.read_text(encoding="utf-8")
+
+    assert (
+        '<dt>{% translate "سبب الإنهاء" %}</dt><dd>{{ clearance.case_type_display }}</dd>' in source
+    )
+    assert '<dt>{% translate "الحالة" %}</dt><dd>{{ clearance.status_display }}</dd>' in source
+    assert "وضع البراءة" not in source
+    # The rest of the printed form is untouched: the fields around the two
+    # labels, and the signature block the centre actually stamps.
+    assert "{{ clearance.enrollment_code }}" in source
+    assert '{% translate "تاريخ الفتح" %}' in source
+
+
+def test_the_clearance_card_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = CLEARANCE_DETAIL_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the clearance card uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
