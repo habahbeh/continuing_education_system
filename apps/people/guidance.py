@@ -422,10 +422,16 @@ GUIDES: dict[str, Guide] = {
     ),
     "certificates": Guide(
         what=_("إصدار الشهادات وإعادة طباعتها بأرقامها."),
-        who=_("مدير المركز."),
+        who=_("مدير المركز يُصدر، والتسجيل والمالية وحساب التدقيق يقرؤون."),
         after=_("بها ينتهي مسار المشارك."),
         links=((Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),),
-        stops=_("لا شهادة بلا براءة ذمة مكتملة (BR-075)."),
+        # BR-038/C-08 belongs beside BR-075: certificate_service refuses a
+        # replacement whose 15-dinar fee was merely charged rather than
+        # collected, and an operator meets that refusal on this screen.
+        stops=_(
+            "لا شهادة بلا براءة ذمة مكتملة (BR-075). وبدل الفاقد لا يصدر حتى "
+            "يُقبض بدله فعلاً لا أن يُقيَّد فقط (BR-038)."
+        ),
     ),
     "partners": Guide(
         what=_("الأطراف المتعاقدة كما ترد في الاتفاقيات الموقّعة، وكم اتفاقية يحمل كلٌّ منها."),

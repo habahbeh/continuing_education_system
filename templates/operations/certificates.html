@@ -1,14 +1,66 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل الشهادات الصادرة، وتحته كتلة إصدار شهادة لمن يملك الإنشاء.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا حقل ولا عمود بدّل موضعه. الصفوف
+  هي ما يعيده `certificate_service.list_certificates` بأسمائه، والأفعال الأربعة
+  — إصدار · تسليم · بدل فاقد · تسجيل إعادة طباعة — تبقى نماذج POST إلى المسار
+  نفسه بقيم `action` نفسها، وكلٌّ منها خلف صلاحيته كما كان.
+
+  عن «الحالة»: عمود الحالة هنا هو حالة الشهادة (صادرة · مُسلَّمة · استُبدلت)،
+  وهذا هو عُرف المشروع كلّه — «الحالة» عنوانُ عمود الحالة في ستٍّ وثلاثين
+  شاشة. الشاشة الشاذّة هي `clearances.html` وحدها: تسمّي نوعَ الحالة «الحالة»
+  وحالةَ البراءة «الوضع»، و«الوضع» لا يرد في المشروع كلّه إلا فيها. فلم يُمسّ
+  عنوان هذا العمود لأنه الصحيح، والتصحيح يخصّ الشاشة الأخرى ويمتدّ إلى بطاقة
+  البراءة وإلى نموذج الطباعة، وكلاهما خارج هذه الشريحة — مرفوعٌ للقرار لا
+  منفَّذ هنا (قواعد التحسين §7 · §10.2).
+
+  ما تغيّر:
+
+  * الترويسة صارت كترويسة كل سجلّ مصقول، وفوق الجدول عدّاد ما رُسم من صفوف
+    بـ `count muted`؛
+  * الكتلتان الزرقاوان — شروط الشهادة، وشرطُ ما يظهر في قائمة الإصدار — تركتا
+    `.note info` إلى `.hint boxed`. كلتاهما تشرحان قواعد لا تُنذران بشيء،
+    والأزرق تنبيه (قواعد التحسين §6.5). ونصّاهما باقيان حرفاً بحرف؛
+  * العمود التاسع كان بلا اسم، فسُمّي بـ `aria-label`؛
+  * تواريخ الإصدار والتسليم تُصاغ Y/m/d داخل `dir="ltr"`، ورقم الشهادة ورقم
+    المشارك `translate="no"`؛
+  * شريحة الحالة أخذت `dot`؛
+  * حقلا التاريخ في «تسليم» و«بدل فاقد» كانا بلا تسمية يقرؤها قارئ الشاشة —
+    `<input type="date">` عارٍ لا يقول ما هو — فأخذ كلٌّ منهما `aria-label`؛
+  * النماذج الثلاثة داخل خلية الإجراء أخذت `.inline-form`، فكانت كتلاً تتراصّ
+    عمودياً وتُطيل الصف بلا سبب؛
+  * رابط الطباعة صار خلف `can_print` كبقية الأفعال. لا دور يتأثر اليوم —
+    §3.6/31 تمنح P لكل من يملك V — لكن كل رابط يمرّ على الصلاحية قبل أن
+    يُرسم (قواعد التحسين §3.1)؛
+  * الحالة الفارغة صارت تدلّ على كتلة الإصدار، لمن يملك الإصدار وحده.
+
+  وشريحة «بدل» فقدت `warn`. هي واقعةُ نسبٍ تقول إن هذه الشهادة تحلّ محلّ أخرى،
+  ورقمُ الأصل مكتوب فيها — والأصفر للحظة يُرفض فيها شيء، لا لواقعة. وهي القياس
+  نفسه الذي نُزع به الأصفر عن «انقضت مدّتها» على بطاقة الاتفاقية في الموجة
+  الأولى. وحالةُ REPLACED نفسها تبقى ملوّنة كما تعطيها `status_tone` (وهي
+  `_INFO`)، فالإشارة لم تُفقد بل رجعت إلى العمود الذي يحملها.
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الإنهاء والشهادات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "الشهادات الصادرة بأرقامها وتقاديرها، وما سُلّم منها وما استُبدل." %}</p>
+  </div>
 </div>
 
 {% guided_help "certificates" %}
-<div class="note info">
+
+<p class="hint boxed">
   {% translate "تصدرها الجامعة لا الشريك · بلا رسوم · بدل الفاقد 15 ديناراً ولا يصدر قبل قبضه · رقم تلقائي من عشر خانات · التقدير يُكتب يدوياً فالنظام لا يحتسبه · إعادة الطباعة لا تُغيّر الرقم." %}
-</div>
+</p>
+
 <form method="get" class="filterbar" role="search">
   <div class="fld">
     <label for="f_q">{% translate "بحث" %}</label>
@@ -18,47 +70,68 @@
 </form>
 
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الشهادات الصادرة" %}</h2>
+    <div class="acts">
+      <span class="count muted">{% blocktranslate count n=certificates|length %}شهادة واحدة{% plural %}{{ n }} شهادات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرقم" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "البرنامج" %}</th>
-        <th>{% translate "المدة" %}</th><th>{% translate "الساعات" %}</th><th>{% translate "التقدير" %}</th>
-        <th>{% translate "الإصدار" %}</th><th>{% translate "الحالة" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرقم" %}</th>
+          <th>{% translate "المشارك" %}</th>
+          <th>{% translate "البرنامج" %}</th>
+          <th>{% translate "المدة" %}</th>
+          <th class="num">{% translate "الساعات" %}</th>
+          <th>{% translate "التقدير" %}</th>
+          <th>{% translate "الإصدار" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in certificates %}
           <tr>
-            <td dir="ltr">{{ c.certificate_number }}
-              {% if c.is_replacement %}<br><span class="chip warn">{% translate "بدل" %} <span dir="ltr">{{ c.replaces }}</span></span>{% endif %}
+            <td dir="ltr" translate="no"><strong class="num">{{ c.certificate_number }}</strong>
+              {% if c.is_replacement %}<br><span class="chip">{% translate "بدل" %} <span dir="ltr">{{ c.replaces }}</span></span>{% endif %}
             </td>
-            <td>{{ c.participant_name }}<br><small class="muted" dir="ltr">{{ c.participant_number }}</small></td>
+            <td>{{ c.participant_name }}<br><small class="muted" dir="ltr" translate="no">{{ c.participant_number }}</small></td>
             <td>{{ c.program_name }}</td>
             <td>{{ c.duration_text|default:"—" }}</td>
             <td class="num">{{ c.training_hours|default:"—" }}</td>
             <td>{{ c.grade }}</td>
-            <td class="num">{{ c.issued_on }}</td>
-            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span>
-                {% if c.delivered_on %}<br><small class="muted num">{{ c.delivered_on }}</small>{% endif %}</td>
+            <td class="num"><span dir="ltr">{{ c.issued_on|date:"Y/m/d" }}</span></td>
             <td>
-              <a class="btn2" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "طباعة" %}</a>
+              <span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span>
+              {% if c.delivered_on %}<br><small class="muted num" dir="ltr">{{ c.delivered_on|date:"Y/m/d" }}</small>{% endif %}
+            </td>
+            <td class="acts">
+              {% if can_print %}
+                <a class="btn2" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "طباعة" %}</a>
+              {% endif %}
               {% if can_create and c.status == "ISSUED" %}
-                <form method="post">{% csrf_token %}
+                <form method="post" class="inline-form" novalidate>
+                  {% csrf_token %}
                   <input type="hidden" name="action" value="deliver">
                   <input type="hidden" name="number" value="{{ c.certificate_number }}">
-                  <input type="date" name="on_date" required>
+                  <input type="date" name="on_date" required aria-label="{% translate 'تاريخ التسليم' %}">
                   <button class="btn2" type="submit">{% translate "تسليم" %}</button>
                 </form>
               {% endif %}
               {% if can_create and c.status != "REPLACED" %}
-                <form method="post">{% csrf_token %}
+                <form method="post" class="inline-form" novalidate>
+                  {% csrf_token %}
                   <input type="hidden" name="action" value="replace">
                   <input type="hidden" name="number" value="{{ c.certificate_number }}">
-                  <input type="date" name="on_date" required>
+                  <input type="date" name="on_date" required aria-label="{% translate 'تاريخ بدل الفاقد' %}">
                   <button class="btn2" type="submit">{% translate "بدل فاقد" %}</button>
                 </form>
               {% endif %}
               {% if can_print %}
-                <form method="post">{% csrf_token %}
+                <form method="post" class="inline-form">
+                  {% csrf_token %}
                   <input type="hidden" name="action" value="reprint">
                   <input type="hidden" name="number" value="{{ c.certificate_number }}">
                   <button class="btn2" type="submit">{% translate "تسجيل إعادة طباعة" %}</button>
@@ -66,10 +139,15 @@
               {% endif %}
             </td>
           </tr>
-        {% empty %}<tr><td colspan="9" class="empty">
-              <span class="empty-title">{% translate "لا شهادات" %}</span>
-              <span class="empty-body">{% translate "الشهادة تصدر بعد إغلاق براءة الذمة، لا قبله (BR-075)." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا شهادات" %}</span>
+            <span class="empty-body">{% translate "الشهادة تصدر بعد إغلاق براءة الذمة، لا قبله (BR-075)." %}</span>
+            {% if can_create %}
+              <span class="empty-body">{% translate "أصدر أولى الشهادات من كتلة «إصدار شهادة» أسفل هذه الصفحة." %}</span>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
@@ -79,13 +157,14 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "إصدار شهادة" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
-        {% translate "تُعرض التسجيلات التي أُكملت براءة ذمتها ولم تصدر لها شهادة بعد — المحجوبون لا يظهرون." %}
-      </div>
-      <form method="post">{% csrf_token %}
+      <p class="hint boxed">{% translate "تُعرض التسجيلات التي أُكملت براءة ذمتها ولم تصدر لها شهادة بعد — المحجوبون لا يظهرون." %}</p>
+      <form method="post" novalidate>
+        {% csrf_token %}
         <input type="hidden" name="action" value="issue">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "إصدار" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "إصدار" %}</button>
+        </div>
       </form>
     </div>
   </div>

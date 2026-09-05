@@ -12323,3 +12323,316 @@ def test_the_clearance_register_added_no_dead_class_and_no_dependency() -> None:
     assert "sr-only" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The certificate register — page polish (§3.6 الإنهاء والشهادات)
+# ---------------------------------------------------------------------------
+# §3.6/31 opens it to four roles and gives CREATE to the manager alone. The page
+# carried a bare `<h1>`, two blue notices explaining rules that refuse nothing,
+# an unnamed ninth column, unformatted dates, three block-level forms stacking
+# inside one action cell, and two bare `<input type="date">` with no label a
+# screen reader could read.
+CERTIFICATES_TEMPLATE = Path("templates/operations/certificates.html")
+
+#: §3.6/31 «V C P · V P · V P · — · — · V P» — (role, may CREATE). BR-072 keeps
+#: issuing with the manager; everyone who may read may also PRINT.
+CERTIFICATE_READERS = (
+    (Role.CENTER_MANAGER, True),
+    (Role.REGISTRATION_OFFICER, False),
+    (Role.FINANCE_OFFICER, False),
+    (Role.AUDIT_ACCOUNT, False),
+)
+
+#: The two §3.6/31 leaves empty. An empty cell is an explicit deny (BR-080).
+CERTIFICATE_NON_READERS = (Role.FINANCE_MANAGER, Role.CASHIER)
+
+
+def _certificates_page(client: Client) -> str:
+    response = client.get(reverse("operations:certificates"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_create"), CERTIFICATE_READERS)
+def test_the_certificate_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "certificates")
+    client.force_login(_user(role, f"crt.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("operations:certificates")).status_code == 200
+
+
+@pytest.mark.parametrize("role", CERTIFICATE_NON_READERS)
+def test_the_certificate_register_still_refuses_the_roles_it_always_did(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The finance manager certifies the money and never touches the document."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(role, "certificates")
+    client.force_login(_user(role, f"crt.deny.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("operations:certificates")).status_code == 403
+
+
+def test_the_certificate_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("operations:certificates")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_create"), CERTIFICATE_READERS)
+def test_the_issuing_block_follows_create_and_nothing_else(
+    client: Client, seeded_settings: None, role: str, may_create: bool
+) -> None:
+    """
+    Three of the four readers may not issue, and the route still refuses their
+    POST — the polish moved the markup and never the guard.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "certificates")) is may_create
+    client.force_login(_user(role, f"crt.make.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("operations:certificates"))
+    assert response.context["can_create"] is may_create
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert ("إصدار شهادة" in page) is may_create, role
+    if not may_create:
+        refused = client.post(reverse("operations:certificates"), {"action": "issue"})
+        assert refused.status_code == 403, role
+
+
+def test_the_certificate_head_reads_like_every_polished_register(
+    client: Client, seeded_settings: None
+) -> None:
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "crt.head"))
+
+    page = _certificates_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الإنهاء والشهادات" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count muted"' in page
+
+
+def test_the_certificate_rules_are_explained_and_no_longer_alerted(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The conditions of a certificate and the condition on the issuing list are
+    both explanations. Neither refuses anything, and blue is a notice (polish
+    rules §6.5). The words did not change.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "crt.rules"))
+
+    page = _certificates_page(client)
+
+    assert "تصدرها الجامعة لا الشريك" in page
+    assert "تُعرض التسجيلات التي أُكملت براءة ذمتها" in page
+    assert 'class="hint boxed"' in page
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in page, f"a rule is still being explained in «{alert}»"
+
+
+def test_the_certificate_table_names_its_ninth_column(
+    client: Client, seeded_settings: None
+) -> None:
+    import re
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "crt.col"))
+
+    page = _certificates_page(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 9
+    assert 'class="tbl-wrap"' in page
+
+
+def test_the_status_column_keeps_the_word_the_whole_project_uses(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «الحالة» is this project's word for a status column — it heads one on
+    thirty-six templates. The certificate register already used it correctly
+    and the polish left it alone.
+
+    The deviation is `clearances.html`, which calls the CASE TYPE «الحالة» and
+    the status «الوضع» — and «الوضع» appears nowhere else in the project. That
+    is recorded, not fixed: correcting it reaches the clearance card and the
+    printed clearance form, both outside this slice.
+    """
+    source = CERTIFICATES_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert '{% translate "الحالة" %}' in markup
+    assert "الوضع" not in markup, "the certificate register must not invent a second word"
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "crt.status.word"))
+    page = _certificates_page(client)
+    assert "الحالة" in page
+
+    # The clearance register is untouched by this slice and still deviates.
+    clearances = CLEARANCES_TEMPLATE.read_text(encoding="utf-8")
+    assert '{% translate "الوضع" %}' in clearances, (
+        "if this fails the two screens were reconciled — update this test with them"
+    )
+
+
+def test_the_replacement_marker_lost_the_colour_of_a_refusal(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    «بدل» states where a certificate came from and prints the number it
+    replaces. Yellow is the colour of a refusal, and provenance is not one —
+    the same reason expiry lost its yellow on the agreement card.
+
+    The signal is not lost: REPLACED is `_INFO` in `status_tone`, so the status
+    column still carries the colour for a superseded certificate.
+    """
+    from apps.core.templatetags.status_ui import status_tone
+
+    source = CERTIFICATES_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert '<span class="chip">{% translate "بدل" %}' in markup
+    assert "chip warn" not in markup
+    assert status_tone("REPLACED") == "info"
+
+
+def test_every_date_input_says_what_it_is(client: Client, seeded_settings: None) -> None:
+    """
+    A bare `<input type="date">` announces itself as nothing at all. Both the
+    delivery date and the replacement date now carry an `aria-label`, and the
+    three per-row forms stopped stacking as blocks inside one cell.
+    """
+    source = CERTIFICATES_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+
+    assert markup.count('<input type="date"') == 2
+    assert markup.count("aria-label=\"{% translate 'تاريخ") == 2
+    assert markup.count('class="inline-form"') == 3
+
+
+def test_the_print_link_passes_the_permission_before_it_is_drawn(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    §3.6/31 gives PRINT to everyone holding VIEW, so no role's page changes —
+    but a link is drawn off a permission rather than off nothing (polish rules
+    §3.1), and the flag is the view's own `can_print`.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    for role, _may_create in CERTIFICATE_READERS:
+        assert Action.PRINT in allowed_actions(role, "certificates"), role
+        client.force_login(_user(role, f"crt.print.{role}".lower().replace("_", ".")))
+        response = client.get(reverse("operations:certificates"))
+        assert response.context["can_print"] is True, role
+        client.logout()
+
+    import re
+
+    source = CERTIFICATES_TEMPLATE.read_text(encoding="utf-8")
+    markup = source.split("{% endcomment %}", 1)[-1]
+    guarded = (
+        r"{%\s*if can_print\s*%}\s*"
+        r"<a class=\"btn2\" href=\"{%\s*url 'operations:certificate-print'"
+    )
+    assert re.search(guarded, markup), "the print link is drawn outside its permission check"
+
+
+def test_the_empty_certificate_register_says_what_to_do_and_to_whom(
+    client: Client, seeded_settings: None
+) -> None:
+    """The screen works on a database seeded with settings alone."""
+    from apps.operations.models import Certificate
+
+    assert not Certificate.objects.exists()
+
+    client.force_login(_user(Role.CENTER_MANAGER, "crt.empty.mgr"))
+    manager_page = _certificates_page(client)
+    assert "لا شهادات" in manager_page
+    assert "BR-075" in manager_page
+    assert "أصدر أولى الشهادات" in manager_page
+
+    client.logout()
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "crt.empty.reg"))
+    registrar_page = _certificates_page(client)
+    assert "لا شهادات" in registrar_page
+    assert "أصدر أولى الشهادات" not in registrar_page
+
+
+def test_the_certificate_guidance_names_its_readers_and_both_refusals() -> None:
+    """
+    §3.6/31 gives three roles VIEW beside the manager, and the help named only
+    the manager. BR-038 joins BR-075: a replacement is refused until its fee is
+    collected, not merely charged — a refusal an operator meets on this screen.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["certificates"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "حساب التدقيق" in text
+    assert "BR-075" in text
+    assert "BR-038" in text
+    for absent in ("يحتسب التقدير", "بلا براءة"):
+        assert absent not in str(guide.what), f"the certificates guidance claims «{absent}»"
+
+
+@pytest.mark.parametrize(("role", "_may_create"), CERTIFICATE_READERS)
+def test_the_certificate_guidance_offers_only_steps_the_reader_may_open(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"crt.next.{role}".lower().replace("_", ".")))
+    page = _certificates_page(client)
+
+    guide = GUIDES["certificates"]
+    assert str(guide.what) in page
+    for screen, route, _label in guide.links:
+        may_open = Action.VIEW in allowed_actions(role, screen)
+        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
+        if may_open:
+            assert client.get(reverse(route)).status_code == 200, route
+
+
+def test_the_certificate_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = CERTIFICATES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the certificate register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
