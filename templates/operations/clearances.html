@@ -1,14 +1,61 @@
 {% extends "base.html" %}
 {% load i18n status_ui guided_help %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  سجل براءات الذمة، وتحته كتلة فتح براءة جديدة لمن يملك الإنشاء.
+
+  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا حقل ولا عمود بدّل موضعه. صفوف
+  الجدول هي ما يعيده `clearance_service.list_clearances` بأسمائه نفسها، والنموذج
+  يُرسم من `partials/_form.html` كما كان، ويُرسل `action=open` إلى المسار نفسه.
+
+  ورايةُ الكتلة السفلى `can_create` تُحسب من CREATE على §3.6/30: مدير المركز
+  وحده يفتح براءة، بينما يقرأ السجلَّ خمسةُ أدوار — ومنهم موظف التسجيل والمدير
+  المالي وحساب التدقيق، فلا يُعرض لهم نموذج لا يستطيعون إرساله.
+
+  ما تغيّر:
+
+  * الترويسة صارت كترويسة كل سجلّ مصقول — كتلة عنوان بسياقها وسطرها — وفوق
+    الجدول عدّادُ ما رُسم من صفوف، بـ `count muted` لأن `.count` وحده معرَّف
+    داخل `.filterbar` لا في ترويسة البطاقة؛
+  * جملة «نموذج CS Fm 7.18» تركت `.note info` إلى `.hint boxed`: هي تعليمُ
+    مسارٍ من ثلاث خطوات، والأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
+    (قواعد التحسين §6.5). ونصّها باقٍ كما هو؛
+  * وكذلك جملة «تُعرض التسجيلات المنتهية» فوق حقول النموذج — شرطُ ما يظهر في
+    القائمة، لا إنذار؛
+  * العمود الثامن كان بلا اسم، فسُمّي بـ `aria-label` — لا `.sr-only`، فهي
+    `position:absolute` بلا جدٍّ مموضَع وتجرّ الصفحة عرضاً في RTL؛
+  * تاريخ الفتح يُصاغ Y/m/d داخل `dir="ltr"`، ورمز البراءة ورقم المشارك
+    `translate="no"` فلا يترجمهما المتصفّح؛
+  * شريحة الحالة أخذت `dot` كما في كل سجلّ مصقول؛
+  * الحالة الفارغة كانت تقول ما البراءة ولا تقول الخطوة التالية، فصارت تدلّ
+    على كتلة الفتح أسفل الصفحة — لمن يملك الفتح وحده (قواعد التحسين §8.2)؛
+  * زرّ الإرسال دخل `.form-acts`، والنموذج أخذ `novalidate` فتصل الرسالة
+    العربية من الخادم بدل رسالة المتصفّح.
+
+  ولم يُلمس عمودا «الحالة» و«الوضع» رغم أن تجاورهما ملتبس: الأول نوع الحالة
+  (تخرج · انسحاب · فصل) والثاني حالة البراءة. `clearance_detail.html` يسمّي
+  الأول «الحالة» أيضاً، وتغييرُ الاسم هنا وحده يجعل الواقعة الواحدة تُسمّى
+  باسمين على شاشتين (قواعد التحسين §7). يُحسم الاسمان معاً حين تُصقل بطاقة
+  البراءة، وهي خارج هذه الشريحة (قواعد التحسين §10.2).
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <span class="eyebrow">{% translate "الإنهاء والشهادات" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "إخلاء طرف المشارك قبل الشهادة: أين وقفت كل براءة، ومَن الخطوة القائمة عليه." %}</p>
+  </div>
 </div>
 
 {% guided_help "clearance" %}
-<div class="note info">
+
+<p class="hint boxed">
   {% translate "نموذج CS Fm 7.18 Rev A — ثلاث خطوات لا تُعاد ترتيبها: استرجاع العُهد (المركز) · التحقق المالي بتوقيعين (المالية) · تسليم الشهادة (المركز). ولا شهادة بلا براءة ذمة مكتملة." %}
-</div>
+</p>
+
 <form method="get" class="filterbar" role="search">
   <div class="fld">
     <label for="f_q">{% translate "بحث" %}</label>
@@ -16,30 +63,51 @@
   </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
 </form>
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "البراءات المسجَّلة" %}</h2>
+    <div class="acts">
+      <span class="count muted">{% blocktranslate count n=clearances|length %}براءة واحدة{% plural %}{{ n }} براءات{% endblocktranslate %}</span>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr>
-        <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "البرنامج" %}</th>
-        <th>{% translate "الحالة" %}</th><th>{% translate "فُتحت" %}</th>
-        <th>{% translate "الخطوة القائمة" %}</th><th>{% translate "الوضع" %}</th><th></th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "المشارك" %}</th>
+          <th>{% translate "البرنامج" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "فُتحت" %}</th>
+          <th>{% translate "الخطوة القائمة" %}</th>
+          <th>{% translate "الوضع" %}</th>
+          <th aria-label="{% translate 'الإجراء' %}"></th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in clearances %}
           <tr>
-            <td dir="ltr">{{ c.code }}</td>
-            <td>{{ c.participant_name }}<br><small class="muted" dir="ltr">{{ c.participant_number }}</small></td>
+            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+            <td>{{ c.participant_name }}<br><small class="muted" dir="ltr" translate="no">{{ c.participant_number }}</small></td>
             <td>{{ c.program_name }}</td>
             <td>{{ c.case_type_display }}</td>
-            <td class="num">{{ c.opened_on }}</td>
+            <td class="num"><span dir="ltr">{{ c.opened_on|date:"Y/m/d" }}</span></td>
             <td>{% if c.pending_step %}{{ c.pending_step }} — {{ c.pending_step_name }}{% else %}—{% endif %}</td>
-            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
-            <td><a class="btn2 ghost" href="{% url 'operations:clearance-detail' c.code %}">{% translate "عرض" %}</a></td>
+            <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
+            <td class="acts">
+              <a class="btn2 ghost" href="{% url 'operations:clearance-detail' c.code %}">{% translate "عرض" %}</a>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="8" class="empty">
-              <span class="empty-title">{% translate "لا براءات ذمة مفتوحة" %}</span>
-              <span class="empty-body">{% translate "البراءة تمرّ بالعُهد ثم التحقق المالي ثم التسليم. ولا شهادة تصدر بلا براءة مكتملة (BR-075)." %}</span>
-            </td></tr>{% endfor %}
+        {% empty %}
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا براءات ذمة مفتوحة" %}</span>
+            <span class="empty-body">{% translate "البراءة تمرّ بالعُهد ثم التحقق المالي ثم التسليم. ولا شهادة تصدر بلا براءة مكتملة (BR-075)." %}</span>
+            {% if can_create %}
+              <span class="empty-body">{% translate "افتح أولى البراءات من كتلة «فتح براءة ذمة» أسفل هذه الصفحة." %}</span>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
@@ -49,13 +117,14 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "فتح براءة ذمة" %}</h2></div>
     <div class="card2-body">
-      <div class="note info">
-        {% translate "تُعرض التسجيلات المنتهية (تخرج · انسحاب · فصل) التي لا براءة قائمة لها." %}
-      </div>
-      <form method="post">{% csrf_token %}
+      <p class="hint boxed">{% translate "تُعرض التسجيلات المنتهية (تخرج · انسحاب · فصل) التي لا براءة قائمة لها." %}</p>
+      <form method="post" novalidate>
+        {% csrf_token %}
         <input type="hidden" name="action" value="open">
         {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "فتح البراءة" %}</button>
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">{% translate "فتح البراءة" %}</button>
+        </div>
       </form>
     </div>
   </div>

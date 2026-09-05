@@ -405,12 +405,19 @@ GUIDES: dict[str, Guide] = {
     ),
     "clearance": Guide(
         what=_("إخلاء طرف المشارك، على ثلاث خطوات لا يُعاد ترتيبها."),
-        who=_("المركز في الخطوتين الأولى والثالثة، والمالية في الثانية."),
+        who=_(
+            "المركز في الخطوتين الأولى والثالثة، والمالية في الثانية بتوقيعين؛ وحساب التدقيق يقرأ."
+        ),
         after=_("باكتمالها تُصدَر الشهادة."),
         links=((Screen.CERTIFICATES, "operations:certificates", _("الشهادات")),),
+        # Two rules refuse on this screen, and the second one surprises people:
+        # step 2 is not one signature by "finance" but two by two PEOPLE, and
+        # the same person may not supply both (BR-074 · D-30, refused in
+        # clearance_service and again by the separation check).
         stops=_(
             "الرصيد يجب أن يكون صفراً في الاتجاهين: الرصيد الدائن يوقف البراءة كما "
-            "يوقفها الدَّين (BR-073)."
+            "يوقفها الدَّين (BR-073). والخطوة المالية توقيعان من شخصين مختلفين، "
+            "فلا يصادق أحدٌ على تصديق نفسه (BR-074 · D-30)."
         ),
     ),
     "certificates": Guide(

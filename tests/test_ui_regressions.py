@@ -12025,3 +12025,301 @@ def test_the_absence_register_carries_no_inline_style_and_no_script() -> None:
     assert "sr-only" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The clearance register — page polish (§3.6 الإنهاء والشهادات)
+# ---------------------------------------------------------------------------
+# §3.6/30 opens it to five of the six roles and gives CREATE to the manager
+# alone. The page carried a bare `<h1>`, two `.note info` blocks explaining
+# rules rather than warning about anything, an unnamed eighth column, and an
+# unformatted date — the same four defects the partner and settlement registers
+# were polished out of.
+CLEARANCES_TEMPLATE = Path("templates/operations/clearances.html")
+
+#: §3.6/30 «V C E A P · V E P · V E A P · V A P · — · V P» — (role, may CREATE).
+#: BR-072 gives the manager steps 1 and 3, so opening a clearance is his alone.
+CLEARANCE_READERS = (
+    (Role.CENTER_MANAGER, True),
+    (Role.REGISTRATION_OFFICER, False),
+    (Role.FINANCE_OFFICER, False),
+    (Role.FINANCE_MANAGER, False),
+    (Role.AUDIT_ACCOUNT, False),
+)
+
+
+@pytest.fixture
+def two_clearances(two_enrollments: object) -> object:
+    """
+    Two clearances on the two seeded enrolments, in two states.
+
+    Built as rows rather than through ``open_clearance``: this is a rendering
+    test, and driving the service would run BR-072 and write audit rows for a
+    page that only reads.
+    """
+    from datetime import date
+
+    from django.utils import timezone
+
+    from apps.operations.models import (
+        Clearance,
+        ClearanceCaseType,
+        ClearanceStatus,
+        Enrollment,
+    )
+
+    opener = _user(Role.CENTER_MANAGER, "clr.fixture.opener")
+    enrollments = list(Enrollment.objects.order_by("code"))
+    assert len(enrollments) == 2
+
+    for index, (enrollment, case_type, status) in enumerate(
+        (
+            (enrollments[0], ClearanceCaseType.GRADUATION, ClearanceStatus.OPEN),
+            (enrollments[1], ClearanceCaseType.WITHDRAWAL, ClearanceStatus.COMPLETED),
+        )
+    ):
+        Clearance.objects.create(
+            code=f"CLR-UIX-{index}",
+            participant=enrollment.participant,
+            enrollment=enrollment,
+            case_type=case_type,
+            opened_on=date(2026, 3, 4 + index),
+            opened_by=opener,
+            status=status,
+            # operations_clearance_completed_has_timestamp — the model refuses a
+            # COMPLETED row with no completion time, and a fixture may not be
+            # the one place that state exists without it.
+            completed_at=timezone.now() if status == ClearanceStatus.COMPLETED else None,
+        )
+    return enrollments
+
+
+def _clearances_page(client: Client) -> str:
+    response = client.get(reverse("operations:clearances"))
+    assert response.status_code == 200
+    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+
+@pytest.mark.parametrize(("role", "_may_create"), CLEARANCE_READERS)
+def test_the_clearance_register_opens_exactly_where_the_matrix_says(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW in allowed_actions(role, "clearance")
+    client.force_login(_user(role, f"clr.open.{role}".lower().replace("_", ".")))
+    assert client.get(reverse("operations:clearances")).status_code == 200
+
+
+def test_the_clearance_register_still_refuses_the_cashier(
+    client: Client, seeded_settings: None
+) -> None:
+    """§3.6/30 leaves the cashier's cell empty, and BR-080 makes that a deny."""
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert Action.VIEW not in allowed_actions(Role.CASHIER, "clearance")
+    client.force_login(_user(Role.CASHIER, "clr.deny.cashier"))
+    assert client.get(reverse("operations:clearances")).status_code == 403
+
+
+def test_the_clearance_register_refuses_an_anonymous_visitor(
+    client: Client, seeded_settings: None
+) -> None:
+    assert client.get(reverse("operations:clearances")).status_code in (302, 403)
+
+
+@pytest.mark.parametrize(("role", "may_create"), CLEARANCE_READERS)
+def test_the_opening_block_follows_create_and_nothing_else(
+    client: Client, two_clearances: object, role: str, may_create: bool
+) -> None:
+    """
+    Four of the five readers may not open a clearance, and a form they cannot
+    submit is worse than no form. The flag is the view's, off §3.6/30, and the
+    polish moved the markup and never the guard — proved in both directions,
+    including that the route itself still refuses their POST.
+    """
+    from apps.people.constants import Action
+    from apps.people.permissions.matrix import allowed_actions
+
+    assert (Action.CREATE in allowed_actions(role, "clearance")) is may_create
+    client.force_login(_user(role, f"clr.make.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("operations:clearances"))
+    assert response.context["can_create"] is may_create
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert ("فتح براءة ذمة" in page) is may_create, role
+    assert ('<form method="post"' in page) is may_create, role
+    if not may_create:
+        refused = client.post(reverse("operations:clearances"), {"action": "open"})
+        assert refused.status_code == 403, role
+
+
+def test_the_clearance_head_reads_like_every_polished_register(
+    client: Client, two_clearances: object
+) -> None:
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "clr.head"))
+
+    page = _clearances_page(client)
+
+    assert 'class="eyebrow"' in page
+    assert "الإنهاء والشهادات" in page
+    assert "<h1>" in page
+    assert 'class="sub"' in page
+    assert 'class="count muted"' in page
+    assert "2 براءات" in page
+
+
+def test_the_three_steps_are_taught_and_no_longer_alerted(
+    client: Client, two_clearances: object
+) -> None:
+    """
+    CS Fm 7.18 is a procedure, and the sentence under the create card is the
+    condition on what the list offers. Neither is a refusal, and blue is the
+    colour of a notice (polish rules §6.5). The words did not change.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "clr.steps"))
+
+    page = _clearances_page(client)
+
+    assert "نموذج CS Fm 7.18 Rev A" in page
+    assert "تُعرض التسجيلات المنتهية" in page
+    assert 'class="hint boxed"' in page
+    for alert in ("note info", "note warn", "note danger", "note ok"):
+        assert alert not in page, f"a rule is still being explained in «{alert}»"
+
+
+def test_the_clearance_table_names_its_eighth_column(
+    client: Client, two_clearances: object
+) -> None:
+    """
+    Named by ``aria-label`` and not by `.sr-only`, which is
+    ``position:absolute`` with no positioned ancestor and drags the page
+    sideways in RTL.
+    """
+    import re
+
+    client.force_login(_user(Role.FINANCE_OFFICER, "clr.col"))
+
+    page = _clearances_page(client)
+
+    assert 'aria-label="الإجراء"' in page
+    assert "sr-only" not in page
+    assert len(re.findall(r"<th[\s>]", page)) == 8
+    assert 'class="tbl-wrap"' in page
+
+
+def test_each_row_renders_its_date_and_links_where_its_reader_may_go(
+    client: Client, two_clearances: object
+) -> None:
+    """The date reads Y/m/d in an LTR span, and every «عرض» link opens."""
+    client.force_login(_user(Role.FINANCE_MANAGER, "clr.rows"))
+
+    response = client.get(reverse("operations:clearances"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "2026/03/04" in page
+    assert "2026/03/05" in page
+    for row in response.context["clearances"]:
+        href = reverse("operations:clearance-detail", args=[row["code"]])
+        assert f'href="{href}"' in page, row["code"]
+        assert client.get(href).status_code == 200, href
+
+
+def test_the_empty_register_says_what_to_do_and_only_to_whoever_may_do_it(
+    client: Client, seeded_settings: None
+) -> None:
+    """The screen works on a database seeded with settings alone."""
+    from apps.operations.models import Clearance
+
+    assert not Clearance.objects.exists()
+
+    client.force_login(_user(Role.CENTER_MANAGER, "clr.empty.mgr"))
+    manager_page = _clearances_page(client)
+    assert "لا براءات ذمة مفتوحة" in manager_page
+    assert "BR-075" in manager_page
+    assert "افتح أولى البراءات" in manager_page
+
+    client.logout()
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "clr.empty.aud"))
+    auditor_page = _clearances_page(client)
+    assert "لا براءات ذمة مفتوحة" in auditor_page
+    # The reader who cannot open one is not told to open one.
+    assert "افتح أولى البراءات" not in auditor_page
+
+
+def test_the_clearance_guidance_names_the_second_signature_and_its_readers() -> None:
+    """
+    §3.6/30 gives the audit account `V P` and the help named none of the
+    readers. BR-074 is the rule that surprises people: step 2 is two signatures
+    by two PEOPLE, and D-30 refuses the same person supplying both.
+    """
+    from apps.people.guidance import GUIDES
+
+    guide = GUIDES["clearance"]
+    text = " ".join(str(part) for part in (guide.what, guide.who, guide.after, guide.stops))
+
+    assert "حساب التدقيق" in text
+    assert "BR-073" in text
+    assert "BR-074" in text
+    assert "D-30" in text
+    assert "توقيعين" in text or "توقيعان" in text
+
+
+@pytest.mark.parametrize(("role", "_may_create"), CLEARANCE_READERS)
+def test_the_guidance_offers_the_certificates_step_only_where_it_opens(
+    client: Client, seeded_settings: None, role: str, _may_create: bool
+) -> None:
+    """
+    The one genuinely two-directional link in this section: §3.6/31 leaves the
+    finance manager's cell empty, so the reader who certifies the money may not
+    open the certificates screen. The prose still teaches that the certificate
+    comes next — links are filtered, teaching is not (polish rules §3.5).
+    """
+    from apps.people.constants import Action
+    from apps.people.guidance import GUIDES
+    from apps.people.permissions.matrix import allowed_actions
+
+    client.force_login(_user(role, f"clr.next.{role}".lower().replace("_", ".")))
+    page = _clearances_page(client)
+
+    guide = GUIDES["clearance"]
+    assert str(guide.what) in page
+    assert str(guide.after) in page, "the next step is taught to every reader"
+
+    may_open = Action.VIEW in allowed_actions(role, "certificates")
+    assert may_open is (role != Role.FINANCE_MANAGER)
+    href = reverse("operations:certificates")
+    assert (f'href="{href}"' in page) is may_open, role
+    if may_open:
+        assert client.get(href).status_code == 200, role
+
+
+def test_the_clearance_register_added_no_dead_class_and_no_dependency() -> None:
+    """Every class it draws with already existed; the page needed no new CSS."""
+    import re
+
+    source = CLEARANCES_TEMPLATE.read_text(encoding="utf-8")
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+    built = Path("static/css/app.css").read_text(encoding="utf-8")
+
+    for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters", "right", "tight"]:
+        assert f'"{dead}"' not in source, f"the clearance register uses «{dead}»"
+    assert "<script" not in source
+    assert "style=" not in source
+    assert "http://" not in source and "https://" not in source
+
+    used = {
+        c
+        for m in re.finditer(r'class="([^"]*)"', source)
+        for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
+    }
+    for name in used:
+        assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
+    markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="tbl-wrap"' in markup
+    assert "sr-only" not in markup
+    for line in source.splitlines():
+        assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
