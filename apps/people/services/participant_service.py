@@ -138,6 +138,32 @@ def get_participant(*, actor: Any, participant_number: str, request: Any = None)
     return project(participant, actor)
 
 
+def participant_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
+    """
+    (participant_number, "number — name") pairs for a form.
+
+    The number stays the value because it is what every service downstream
+    looks the participant up by; only what the operator READS changes. Nobody
+    remembers a nine-digit number, and the enrolment form was asking them to.
+
+    Newest registration first, which is the order the work actually happens in:
+    an application is entered and the enrolment follows it minutes later, so
+    the participant just created is the first one offered.
+
+    The label carries ``name_ar`` alongside the number, and both are in
+    ``RESTRICTED_FIELDS`` — the narrowest projection BR-101 defines — so this
+    discloses nothing to any role that Screen.STUDENTS VIEW does not already.
+    """
+    policy.require(actor, Screen.STUDENTS, Action.VIEW, request=request)
+
+    return [
+        (p.participant_number, f"{p.participant_number} — {p.name_ar}")
+        for p in Participant.objects.order_by("-registered_on", "-participant_number").only(
+            "participant_number", "name_ar"
+        )
+    ]
+
+
 def field_labels() -> dict[str, str]:
     """Arabic labels for the projected keys, taken from the model itself."""
     return {
@@ -458,6 +484,7 @@ __all__ = [
     "get_participant",
     "get_participant_display",
     "list_participants",
+    "participant_choices",
     "participant_instance",
     "project",
     "update_participant",

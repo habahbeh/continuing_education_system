@@ -148,7 +148,6 @@ def test_an_unapproved_cohort_is_not_offered_and_cannot_be_forced(
     response = signed_in(registrar).post(
         reverse("operations:enrollments"),
         {
-            "code": "EN-UI-1",
             "participant_number": participant.participant_number,
             "cohort_code": cohort.code,
             "enrolled_on": "2026-09-20",
@@ -156,7 +155,7 @@ def test_an_unapproved_cohort_is_not_offered_and_cannot_be_forced(
         follow=True,
     )
     assert response.status_code == 200
-    assert not Enrollment.objects.filter(code="EN-UI-1").exists()
+    assert not Enrollment.objects.filter(cohort=cohort).exists()
 
 
 def test_an_approved_cohort_enrols_and_raises_the_charges(
@@ -175,16 +174,58 @@ def test_an_approved_cohort_enrols_and_raises_the_charges(
     response = signed_in(registrar).post(
         reverse("operations:enrollments"),
         {
-            "code": "EN-UI-2",
             "participant_number": participant.participant_number,
             "cohort_code": cohort.code,
             "enrolled_on": "2026-09-20",
         },
         follow=True,
     )
-    row = next(r for r in response.context["enrollments"] if r["code"] == "EN-UI-2")
+    row = next(r for r in response.context["enrollments"] if r["cohort_code"] == cohort.code)
+    assert row["code"] == "EN-2026-0001"
     assert row["total_due"] > 0
     assert row["participant_owes"] is True
+
+
+def test_enrolling_the_same_participant_twice_is_a_message_not_a_crash(
+    signed_in, registrar, make_cohort, approve_cohort, make_participant
+):
+    """
+    Q-19 on screen — the operator submits twice and reads a sentence.
+
+    What the database says is ``Duplicate entry '4-1' for key
+    …unique_participant_cohort``. Reaching the operator, that is a 500 on the
+    enrolment screen; the constraint still stands behind the guard.
+    """
+    from apps.operations.models import Enrollment
+
+    cohort = make_cohort("SC-NET", code="CO-UI-DUP")
+    approve_cohort(cohort, course_number="M-UI-DUP")
+    participant = make_participant(index=44)
+    posted = {
+        "participant_number": participant.participant_number,
+        "cohort_code": cohort.code,
+        "enrolled_on": "2026-09-20",
+    }
+
+    signed_in(registrar).post(reverse("operations:enrollments"), posted, follow=True)
+    response = signed_in(registrar).post(
+        reverse("operations:enrollments"), posted, follow=True
+    )
+
+    assert response.status_code == 200
+    assert "لا يمكن إنشاء تسجيل مكرر" in response.content.decode("utf-8")
+    assert Enrollment.objects.filter(participant=participant, cohort=cohort).count() == 1
+
+
+def test_the_enrolment_screen_does_not_ask_for_a_code(signed_in, registrar):
+    """
+    The operator never types the register's own numbering.
+
+    ``EN-AHMAD-001`` came from a QA script. In production the code identifies
+    the row in the ministry's correspondence, so it is minted, not recalled.
+    """
+    listing = signed_in(registrar).get(reverse("operations:enrollments"))
+    assert "code" not in listing.context["form"].fields
 
 
 def test_approval_without_a_voucher_is_refused_on_screen(

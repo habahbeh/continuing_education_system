@@ -422,6 +422,14 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             cohort_choices=cohort_service.cohort_choices(actor=request.user, request=request)
             if policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW)
             else [],
+            # Guarded like the cohorts above it, though §3.2 gives STUDENTS
+            # VIEW to both roles that may create an enrolment — so the list is
+            # empty only for a role that could not have submitted anyway.
+            participant_choices=participant_service.participant_choices(
+                actor=request.user, request=request
+            )
+            if policy.is_allowed(request.user, Screen.STUDENTS, Action.VIEW)
+            else [],
         )
 
     if request.method == "POST":
@@ -522,7 +530,6 @@ def _create_enrollment(request: HttpRequest, form: EnrollmentForm) -> HttpRespon
             participant=participant,
             cohort=cohort,
             enrolled_on=data["enrolled_on"],
-            code=data["code"],
             request=request,
         )
     except DjangoValidationError as exc:

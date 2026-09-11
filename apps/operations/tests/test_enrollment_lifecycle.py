@@ -396,3 +396,243 @@ def test_uploading_after_the_deadline_needs_a_managers_reason(
     assert event is not None and event.changes is not None
     assert event.changes["manager_override"] is True
     assert event.changes["deadline"] == DEADLINE.isoformat()
+
+
+# ---------------------------------------------------------------------------
+# The enrolment code — minted, not typed
+# ---------------------------------------------------------------------------
+def test_an_enrolment_opened_without_a_code_is_given_one(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """
+    ``EN-YYYY-NNNN``, from the year the enrolment was opened in.
+
+    The operator used to type this. A code typed from memory is a code that
+    collides, or repeats last year's, or reads ``EN-AHMAD-001`` — which was a
+    QA example and never an entry in the register.
+    """
+    enrollment = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=make_participant(71),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+    assert enrollment.code == f"EN-{TERM_START.year}-0001"
+
+
+def test_the_sequence_increments_and_restarts_each_year(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """
+    Two enrolments in a year are 0001 and 0002; the next year opens at 0001.
+
+    The year is read from ``enrolled_on``, not from today, so backdating an
+    enrolment files it under the year it belongs to rather than the year it
+    was keyed in.
+    """
+    codes = [
+        enrollment_service.create_enrollment(
+            actor=registrar,
+            participant=make_participant(index),
+            cohort=approved_cohort,
+            enrolled_on=enrolled_on,
+            price_list=priced_catalog,
+        ).code
+        for index, enrolled_on in (
+            (72, TERM_START),
+            (73, TERM_START),
+            (74, date(2027, 1, 12)),
+        )
+    ]
+    assert codes == ["EN-2026-0001", "EN-2026-0002", "EN-2027-0001"]
+
+
+def test_a_minted_code_steps_over_one_that_was_entered_by_hand(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """
+    An import or a legacy migration may already hold ``EN-2026-0001``.
+
+    The counter knows nothing about codes it did not issue, so the mint checks
+    and moves on. Skipping a number costs a gap in the register; refusing
+    would cost the enrolment.
+    """
+    enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=make_participant(75),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+        code="EN-2026-0001",
+    )
+    minted = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=make_participant(76),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+    assert minted.code == "EN-2026-0002"
+
+
+def test_an_explicit_code_is_still_honoured(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """Imports, fixtures and migration paths name the enrolment they carry."""
+    enrollment = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=make_participant(77),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+        code="EN-LEGACY-9",
+    )
+    assert enrollment.code == "EN-LEGACY-9"
+
+
+def test_a_refused_enrolment_returns_its_number(
+    make_cohort, approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """
+    BR-013's refusal must not burn a code.
+
+    The counter is locked inside the creating transaction, so a rollback takes
+    the number back with it. A gap in the register is a question somebody has
+    to answer later.
+    """
+    unapproved = make_cohort("SC-NET", code="CO-NO-MOHE")
+    with pytest.raises(enrollment_service.CohortNotApprovedError):
+        enrollment_service.create_enrollment(
+            actor=registrar,
+            participant=make_participant(78),
+            cohort=unapproved,
+            enrolled_on=TERM_START,
+            price_list=priced_catalog,
+        )
+
+    enrollment = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=make_participant(79),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+    assert enrollment.code == "EN-2026-0001"
+
+
+def test_enrolling_with_charges_mints_the_code_too(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """The screen's own path — one call, and no code passed through it."""
+    enrollment = enrollment_service.enroll_with_charges(
+        actor=registrar,
+        participant=make_participant(80),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+    )
+    assert enrollment.code == "EN-2026-0001"
+    assert enrollment.charge_lines.exists()
+
+
+# ---------------------------------------------------------------------------
+# Q-19 — one enrolment per participant per cohort
+# ---------------------------------------------------------------------------
+def test_a_second_enrolment_on_the_same_cohort_is_refused(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """
+    Q-19, as a sentence rather than as a 500.
+
+    The database has said this all along; what it says is
+    ``Duplicate entry '4-1' for key …unique_participant_cohort``, which tells
+    the operator nothing about the person or the cohort in front of them. The
+    constraint stays as the guard that actually holds.
+    """
+    participant = make_participant(81)
+    enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=participant,
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+
+    with pytest.raises(enrollment_service.DuplicateEnrollmentError) as refusal:
+        enrollment_service.create_enrollment(
+            actor=registrar,
+            participant=participant,
+            cohort=approved_cohort,
+            enrolled_on=TERM_START,
+            price_list=priced_catalog,
+        )
+    assert "مسجّل مسبقاً" in str(refusal.value)
+    assert Enrollment.objects.filter(participant=participant, cohort=approved_cohort).count() == 1
+
+
+def test_the_refused_duplicate_does_not_burn_a_code(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """
+    The refusal happens before the mint, so the register keeps its order.
+
+    A number consumed by an attempt that created nothing is a gap somebody has
+    to account for later, and «it was a double-click» is not an answer anyone
+    can give a year afterwards.
+    """
+    participant = make_participant(82)
+    first = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=participant,
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+    assert first.code == "EN-2026-0001"
+
+    with pytest.raises(enrollment_service.DuplicateEnrollmentError):
+        enrollment_service.create_enrollment(
+            actor=registrar,
+            participant=participant,
+            cohort=approved_cohort,
+            enrolled_on=TERM_START,
+            price_list=priced_catalog,
+        )
+
+    second = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=make_participant(83),
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+    assert second.code == "EN-2026-0002"
+
+
+def test_a_withdrawn_enrolment_still_blocks_a_second_one(
+    approved_cohort, priced_catalog, registrar, make_participant
+) -> None:
+    """Q-19 counts enrolments, not live ones — the constraint is unconditional."""
+    participant = make_participant(84)
+    enrollment = enrollment_service.create_enrollment(
+        actor=registrar,
+        participant=participant,
+        cohort=approved_cohort,
+        enrolled_on=TERM_START,
+        price_list=priced_catalog,
+    )
+    enrollment_service.change_status(
+        actor=registrar,
+        enrollment=enrollment,
+        to_status=EnrollmentStatus.WITHDRAWN,
+        reason_ar="انسحاب بطلب المشارك",
+    )
+
+    with pytest.raises(enrollment_service.DuplicateEnrollmentError):
+        enrollment_service.create_enrollment(
+            actor=registrar,
+            participant=participant,
+            cohort=approved_cohort,
+            enrolled_on=TERM_START,
+            price_list=priced_catalog,
+        )

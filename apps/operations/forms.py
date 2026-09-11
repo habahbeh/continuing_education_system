@@ -53,20 +53,41 @@ class EnrollmentForm(forms.Form):
     Only ministry-approved cohorts are offered, because BR-013 refuses the
     rest anyway and a dropdown that led straight to a refusal would be a trap
     rather than a choice.
+
+    The participant is chosen the same way, and for a plainer reason: the
+    field asked for a nine-digit number typed from memory, when the operator
+    has just entered the application and knows the person by name. The value
+    submitted is still ``participant_number`` — nothing downstream changes —
+    and the number is read back in the label beside the name, so anyone
+    working from a paper form still recognises the row.
+
+    No code is asked for. ``EN-AHMAD-001`` was a QA example, not a register
+    entry; the code is minted by the service (``next_enrollment_code``) so the
+    sequence is the system's to keep rather than the operator's to remember.
     """
 
-    code = forms.CharField(label=_("رمز التسجيل"), max_length=32)
-    participant_number = forms.CharField(label=_("الرقم الجامعي"), max_length=9)
+    participant_number = forms.ChoiceField(
+        label=_("المشارك"),
+        choices=[],
+        help_text=_("اختر المشارك الذي أُدخل طلب التحاقه سابقاً."),
+    )
     cohort_code = forms.ChoiceField(label=_("الدفعة"), choices=[])
     enrolled_on = forms.DateField(
         label=_("تاريخ التسجيل"), widget=forms.DateInput({"type": "date"})
     )
 
     def __init__(
-        self, *args: Any, cohort_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        cohort_choices: list[tuple[str, str]] | None = None,
+        participant_choices: list[tuple[str, str]] | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         cast(forms.ChoiceField, self.fields["cohort_code"]).choices = cohort_choices or []
+        cast(forms.ChoiceField, self.fields["participant_number"]).choices = (
+            participant_choices or []
+        )
 
 
 class ClearanceOpenForm(forms.Form):

@@ -24,6 +24,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.operations.models import (
     AttendanceSource,
     Cohort,
@@ -37,6 +38,49 @@ from apps.people.permissions import policy
 
 ENTITY = "operations.Enrollment"
 
+#: The enrolment code is the system's to mint, not the operator's to remember.
+#: ``EN-YYYY-NNNN`` — the year the enrolment was opened, then a four-digit
+#: sequence within that year, which is how the paper register already reads.
+ENROLLMENT_SCOPE = "enrollment"
+ENROLLMENT_PREFIX = "EN-"
+SEQUENCE_PADDING = 4
+
+#: A minted code can still meet a manually-entered one from an import or a
+#: legacy migration, which the counter knows nothing about. Skipping past it
+#: costs one number; refusing would cost the enrolment.
+MAX_CODE_ATTEMPTS = 8
+
+
+def enrollment_partition(enrolled_on: date) -> str:
+    """The sequence partition an enrolment falls in — its year (BR-076-style)."""
+    return str(enrolled_on.year)
+
+
+def next_enrollment_code(enrolled_on: date) -> str:
+    """
+    Mint the next ``EN-YYYY-NNNN`` for the year ``enrolled_on`` falls in.
+
+    Numbers come from the shared counter (ADR-011), which locks its row inside
+    the caller's transaction: two clerks enrolling at the same moment cannot
+    receive the same code, and a rolled-back enrolment takes its number back
+    with it rather than leaving a hole in the register.
+
+    Must therefore be called INSIDE the transaction that creates the row.
+    """
+    partition = enrollment_partition(enrolled_on)
+    for _attempt in range(MAX_CODE_ATTEMPTS):
+        code = next_number(
+            ENROLLMENT_SCOPE,
+            partition,
+            prefix=f"{ENROLLMENT_PREFIX}{partition}-",
+            padding=SEQUENCE_PADDING,
+        )
+        if not Enrollment.objects.filter(code=code).exists():
+            return code
+    raise ValidationError(
+        f"تعذّر توليد رمز تسجيل غير مكرَّر للسنة {partition} بعد {MAX_CODE_ATTEMPTS} محاولات."
+    )
+
 
 class CohortNotApprovedError(ValidationError):
     """BR-013 / D-21 — enrolment attempted on an unapproved cohort."""
@@ -44,6 +88,10 @@ class CohortNotApprovedError(ValidationError):
 
 class VoucherRequiredError(ValidationError):
     """BR-018 — approval attempted with no voucher recorded."""
+
+
+class DuplicateEnrollmentError(ValidationError):
+    """Q-19 — the participant already holds an enrolment on this cohort."""
 
 
 class AttendanceNotDocumentedError(ValidationError):
@@ -104,7 +152,7 @@ def create_enrollment(
     cohort: Cohort,
     enrolled_on: date,
     price_list: Any,
-    code: str,
+    code: str | None = None,
     request: Any = None,
 ) -> Enrollment:
     """
@@ -112,6 +160,11 @@ def create_enrollment(
 
     The gate runs BEFORE the transaction so a refusal's denied-attempt audit
     row survives the raise (BR-100).
+
+    ``code`` is optional and normally omitted: the system mints it
+    (:func:`next_enrollment_code`). It stays settable for the callers that
+    carry a code from somewhere else — imports, legacy migration, and tests
+    that name the enrolment they are asserting about.
     """
     policy.require(actor, Screen.ENROLLMENTS, Action.CREATE, request=request)
 
@@ -130,6 +183,25 @@ def create_enrollment(
         )
         raise CohortNotApprovedError(
             f"لا يُسمح بالتسجيل — الدفعة {cohort.code} لم تُعتمد من الوزارة (BR-013)."
+        )
+
+    # Q-19 — one enrolment per participant per cohort, whatever its status.
+    # The database says the same thing and is the guard that actually holds;
+    # this one exists so the operator reads a sentence instead of a 500, and
+    # so the refusal happens before a code is minted. A burnt number would
+    # leave a gap in the register that nobody could later account for.
+    if Enrollment.objects.filter(participant=participant, cohort=cohort).exists():
+        raise DuplicateEnrollmentError(
+            f"هذا المشارك مسجّل مسبقاً على الدفعة {cohort.code}. "
+            "لا يمكن إنشاء تسجيل مكرر (Q-19)."
+        )
+
+    if code is None:
+        # Documented in numbering_service: creating the row BEFORE anyone locks
+        # it keeps concurrent callers on a brand-new year out of insert-intention
+        # contention. Inside the transaction it is safe but not free.
+        ensure_sequence(
+            ENROLLMENT_SCOPE, enrollment_partition(enrolled_on), padding=SEQUENCE_PADDING
         )
 
     return _create_enrollment(
@@ -151,9 +223,11 @@ def _create_enrollment(
     cohort: Cohort,
     enrolled_on: date,
     price_list: Any,
-    code: str,
+    code: str | None,
     request: Any,
 ) -> Enrollment:
+    # Minted inside the transaction so a failed creation returns its number.
+    code = code or next_enrollment_code(enrolled_on)
     enrollment = Enrollment.objects.create(
         code=code,
         participant=participant,
@@ -545,7 +619,7 @@ def enroll_with_charges(
     participant: Any,
     cohort: Cohort,
     enrolled_on: date,
-    code: str,
+    code: str | None = None,
     request: Any = None,
 ) -> Enrollment:
     """
@@ -560,6 +634,9 @@ def enroll_with_charges(
     programme is levelled, which category the participant falls in — and
     decisions belong here rather than in a view assembling two service calls
     (ADR-008).
+
+    ``code`` is passed straight through to :func:`create_enrollment`: omitted
+    by the screen, supplied only where a code already exists.
     """
     from apps.billing.services import charge_service
     from apps.catalog.models import PriceList
@@ -640,6 +717,7 @@ def payable_enrollment(*, actor: Any, code: str, request: Any = None) -> Enrollm
 __all__ = [
     "AttendanceNotDocumentedError",
     "CohortNotApprovedError",
+    "DuplicateEnrollmentError",
     "InvalidStatusTransitionError",
     "VoucherRequiredError",
     "approve_enrollment",
@@ -647,9 +725,11 @@ __all__ = [
     "create_enrollment",
     "enroll_with_charges",
     "enrollment_choices",
+    "enrollment_partition",
     "get_enrollment",
     "list_enrollments",
     "mark_uploaded_to_mohe",
+    "next_enrollment_code",
     "payable_enrollment",
     "payable_enrollment_choices",
     "record_attendance",
