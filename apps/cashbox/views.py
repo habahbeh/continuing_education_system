@@ -159,11 +159,10 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
     )
     form = PaymentForm(
         request.POST or None,
+        initial={"received_on": timezone.localdate()} if request.method == "GET" else None,
         enrollment_choices=enrollment_choices,
         method_choices=payment_service.payment_method_choices(),
     )
-
-    minimum_first_payment = _minimum_first_payment_today()
 
     if request.method == "POST" and form.is_valid():
         data = form.cleaned_data
@@ -200,36 +199,28 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
             "title": _("استيفاء دفعة"),
             "active_screen": Screen.PAYMENT_NEW,
             "form": form,
-            # BR-020's figure, read rather than written on the screen. The
-            # template printed «400» as prose while the rule is enforced from
-            # this effective-dated setting, so changing the setting left the
-            # page stating a number the system no longer refused below.
-            "minimum_first_payment": minimum_first_payment,
-            "minimum_breakdown_holds": minimum_first_payment == _BREAKDOWN_HOLDS_AT,
-            # Q-15 — the selected diploma's own floor, when one was chosen and
-            # it carries one. A field read, not a verdict: whether BR-020
-            # applies to THIS payment is the service's call, on the receipt's
-            # date and on whether a first payment was already taken.
-            "selected_program_minimum": _selected_program_minimum(request, enrollment_choices),
+            # A contextual hint only. The service remains the authority for
+            # BR-020 and will still reject invalid payments on save.
+            "selected_minimum_first_payment": _selected_minimum_first_payment(
+                request, enrollment_choices
+            ),
         },
     )
 
 
-def _selected_program_minimum(
+def _selected_minimum_first_payment(
     request: HttpRequest, enrollment_choices: list[tuple[str, str]]
 ) -> Decimal | None:
     """
-    ``minimum_first_payment_override`` of the enrolment the reader picked.
+    The first-payment minimum that appears to apply to the selected enrolment.
 
     Only ever answers on a POST that came back — a GET has no selection, and
-    guessing a programme's floor before one is chosen would be inventing a
-    figure. The posted code is checked against the very list the form was built
-    from before it is resolved, so raw POST input never reaches a lookup, and
-    the enrolment is read through the same service accessor the save path uses.
+    printing a global number beside every payable enrolment makes the balance
+    shown in the dropdown look suspect. The posted code is checked against the
+    very list the form was built from before it is resolved.
 
-    Returns None when nothing was selected, when the code is not one of the
-    offered choices, when it resolves to nothing, or when the programme has no
-    override — all of which mean the same thing on screen: say nothing extra.
+    This mirrors BR-020 only for explanation: diploma, first issued payment,
+    programme override or effective setting. ``take_payment`` still decides.
     """
     if request.method != "POST":
         return None
@@ -245,30 +236,24 @@ def _selected_program_minimum(
         )
     except ObjectDoesNotExist:
         return None
-    return enrollment.cohort.program.minimum_first_payment_override
 
+    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
+    from apps.catalog.models import ProgramType
 
-#: The published split — 300 registration plus 100 for the first subject — is
-#: the reasoning behind ONE value and holds for no other. Nothing in the system
-#: records how a different minimum divides, so the breakdown is shown beside
-#: this figure and dropped beside any other rather than guessed at.
-_BREAKDOWN_HOLDS_AT = Decimal("400")
+    program = enrollment.cohort.program
+    if program.program_type != ProgramType.DIPLOMA:
+        return None
+    if PaymentAllocation.objects.filter(
+        enrollment=enrollment, receipt__status=ReceiptStatus.ISSUED
+    ).exists():
+        return None
 
+    if program.minimum_first_payment_override is not None:
+        return program.minimum_first_payment_override
 
-def _minimum_first_payment_today() -> Decimal | None:
-    """
-    The diploma minimum in effect TODAY, for display only.
-
-    ``as_of`` is today because the reader has not chosen a payment date yet;
-    the rule itself is checked in ``payment_service`` against the date on the
-    receipt, and a diploma may carry its own higher override (Q-15). So this
-    is what the screen SAYS, never what the save decides.
-
-    Returns None when the setting is not configured, and the sentence is then
-    left out entirely rather than guessing a figure.
-    """
-    return get_setting(
-        payment_service.MIN_FIRST_PAYMENT_KEY, as_of=timezone.localdate(), default=None
+    received_on = _parse_date(request.POST.get("received_on", "").strip()) or timezone.localdate()
+    return Decimal(
+        str(get_setting(payment_service.MIN_FIRST_PAYMENT_KEY, as_of=received_on, default="400"))
     )
 
 

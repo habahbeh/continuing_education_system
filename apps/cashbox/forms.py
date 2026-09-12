@@ -24,12 +24,25 @@ class PaymentForm(forms.Form):
 
     enrollment_code = forms.ChoiceField(label=_("التسجيل"), choices=[])
     amount = forms.DecimalField(
-        label=_("المبلغ المقبوض"), max_digits=12, decimal_places=3, min_value=0
+        label=_("المبلغ المقبوض"),
+        max_digits=12,
+        decimal_places=3,
+        min_value=0,
+        help_text=_(
+            "أدخل كامل الرصيد أو دفعة جزئية حسب القواعد المالية. "
+            "سيُوزّع النظام المبلغ على بنود الرسوم عند الحفظ."
+        ),
     )
     payment_method = forms.ChoiceField(label=_("طريقة الدفع"), choices=[])
     received_on = forms.DateField(label=_("تاريخ القبض"), widget=forms.DateInput({"type": "date"}))
     external_receipt_ref = forms.CharField(
-        label=_("رقم سند الدائرة المالية"), max_length=32, required=False
+        label=_("رقم سند الدائرة المالية"),
+        max_length=32,
+        required=False,
+        help_text=_(
+            "اختياري إذا وُجد سند خارجي من الدائرة المالية أو دفتر ورقي. "
+            "رقم سند النظام يصدر تلقائيًا بعد الحفظ."
+        ),
     )
     breakdown_text_ar = forms.CharField(label=_("البيان"), max_length=255, required=False)
 

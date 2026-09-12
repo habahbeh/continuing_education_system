@@ -53,22 +53,12 @@
 <div class="card2">
   <div class="card2-head"><h2>{% translate "بيانات الدفعة" %}</h2></div>
   <div class="card2-body">
-    {% if minimum_first_payment is not None %}
-      <p class="hint boxed">
-        {% if minimum_breakdown_holds %}
-          {% blocktranslate with minimum=minimum_first_payment|floatformat:"-3" %}أقل دفعة أولى للدبلوم {{ minimum }} ديناراً (300 تسجيل + 100 أول مادة) — يفرضها النظام عند الحفظ.{% endblocktranslate %}
-        {% else %}
-          {% blocktranslate with minimum=minimum_first_payment|floatformat:"-3" %}أقل دفعة أولى للدبلوم {{ minimum }} ديناراً — يفرضها النظام عند الحفظ.{% endblocktranslate %}
-        {% endif %}
-      </p>
-    {% endif %}
-    {% if selected_program_minimum is not None %}
+    <p class="hint boxed">
+      {% translate "تسمح المتطلبات بدفعة واحدة أو دفعات على الحساب. وقد يفرض النظام حدًا أدنى للدفعة الأولى للدبلومات فقط حسب حالة التسجيل (BR-020)." %}
+    </p>
+    {% if selected_minimum_first_payment is not None %}
       <p class="hint">
-        {% blocktranslate with own=selected_program_minimum|floatformat:"-3" %}الدبلوم المختار له حدّ أدنى خاص للدفعة الأولى: {{ own }} ديناراً، يتقدّم على الحدّ العام (Q-15).{% endblocktranslate %}
-      </p>
-    {% elif minimum_first_payment is not None %}
-      <p class="hint">
-        {% translate "القاعدة تخصّ الدبلومات وحدها، والدفعة الأولى وحدها، ولبعض الدبلومات حدّ خاص يتجاوز هذا الحدّ (Q-15)." %}
+        {% blocktranslate with minimum=selected_minimum_first_payment|floatformat:"-3" %}للتسجيل المختار، تبدو هذه دفعة أولى لدبلوم؛ الحد الأدنى الذي سيتحقق منه النظام هو {{ minimum }} ديناراً. إذا كان المبلغ غير صالح فستظهر رسالة BR-020 عند الحفظ.{% endblocktranslate %}
       </p>
     {% endif %}
     <form method="post">
