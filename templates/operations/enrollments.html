@@ -114,10 +114,14 @@
             <td class="acts">
               <a class="btn2 ghost" href="{% url 'operations:account' e.code %}">{% translate "كشف الحساب" %}</a>
               {% if can_edit and not e.voucher_received %}
-                <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
-                  {% csrf_token %}<input type="hidden" name="action" value="voucher">
-                  <button class="btn2" type="submit">{% translate "استلام الوصل" %}</button>
-                </form>
+                {% if e.participant_owes %}
+                  <button class="btn2" type="button" disabled>{% translate "الدفع من الصندوق أولًا" %}</button>
+                {% else %}
+                  <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
+                    {% csrf_token %}<input type="hidden" name="action" value="voucher">
+                    <button class="btn2" type="submit">{% translate "استلام الوصل" %}</button>
+                  </form>
+                {% endif %}
               {% endif %}
               {% if can_approve and not e.is_approved %}
                 <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
