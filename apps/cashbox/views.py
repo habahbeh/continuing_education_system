@@ -16,12 +16,14 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
@@ -92,6 +94,7 @@ def receipt_detail_view(request: HttpRequest, number: str) -> HttpResponse:
             "active_screen": Screen.PAYMENTS,
             "receipt": receipt,
             "form": form,
+            "next_enrollment_code": request.GET.get("enrollment", "").strip(),
             # Δ-06 — the cashier ASKS (create) and the finance officer
             # DECIDES (void). Reversing these would let one person do both.
             "can_request_void": policy.is_allowed(request.user, Screen.PAYMENTS, Action.CREATE),
@@ -181,7 +184,10 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
             messages.success(
                 request, _("صدر سند القبض %(n)s") % {"n": receipt.internal_receipt_number}
             )
-            return redirect("cashbox:receipt-detail", number=receipt.internal_receipt_number)
+            receipt_url = reverse(
+                "cashbox:receipt-detail", kwargs={"number": receipt.internal_receipt_number}
+            )
+            return redirect(f"{receipt_url}?{urlencode({'enrollment': enrollment.code})}")
         except DjangoValidationError as exc:
             messages.error(request, _message_of(exc))
         except ObjectDoesNotExist:

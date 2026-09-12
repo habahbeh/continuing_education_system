@@ -36,6 +36,22 @@
 
 {% guided_help "receipt-detail" %}
 
+{% if next_enrollment_code %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "الخطوة التالية" %}</h2></div>
+    <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "تم تسجيل الدفعة بنجاح. الخطوة التالية: تسجيل استلام الوصل ثم اعتماد التسجيل." %}
+      </p>
+      <div class="form-acts">
+        <a class="btn2 primary" href="{% url 'operations:enrollments' %}?q={{ next_enrollment_code|urlencode }}">
+          {% translate "الانتقال للتسجيل لاستلام الوصل" %}
+        </a>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "بيانات السند" %}</h2></div>
   <div class="card2-body">
