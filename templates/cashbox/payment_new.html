@@ -64,10 +64,35 @@
     <form method="post">
       {% csrf_token %}
       {% include "partials/_form.html" %}
+      <p class="hint boxed" id="overpayment-warning" hidden>
+        {% translate "المبلغ أكبر من الرصيد المستحق. سيتم تسجيل الفرق كرصيد دائن للمشارك." %}
+      </p>
       <div class="form-acts">
         <button class="btn2 primary" type="submit">{% translate "إصدار سند القبض" %}</button>
       </div>
     </form>
   </div>
 </div>
+{{ enrollment_balances|json_script:"payment-enrollment-balances" }}
+<script>
+  (() => {
+    const balancesNode = document.getElementById("payment-enrollment-balances");
+    const enrollmentField = document.querySelector("[name='enrollment_code']");
+    const amountField = document.querySelector("[name='amount']");
+    const warning = document.getElementById("overpayment-warning");
+    if (!balancesNode || !enrollmentField || !amountField || !warning) return;
+
+    const balances = JSON.parse(balancesNode.textContent || "{}");
+    const readNumber = (value) => Number(String(value || "").replace(",", "."));
+    const updateWarning = () => {
+      const balance = readNumber(balances[enrollmentField.value]);
+      const amount = readNumber(amountField.value);
+      warning.hidden = !(Number.isFinite(balance) && Number.isFinite(amount) && amount > balance);
+    };
+
+    enrollmentField.addEventListener("change", updateWarning);
+    amountField.addEventListener("input", updateWarning);
+    updateWarning();
+  })();
+</script>
 {% endblock %}

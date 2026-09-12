@@ -204,8 +204,23 @@ def payment_new_view(request: HttpRequest) -> HttpResponse:
             "selected_minimum_first_payment": _selected_minimum_first_payment(
                 request, enrollment_choices
             ),
+            "enrollment_balances": _enrollment_balance_map(enrollment_choices),
         },
     )
+
+
+def _enrollment_balance_map(enrollment_choices: list[tuple[str, str]]) -> dict[str, str]:
+    """Outstanding balance by code, for client-side overpayment guidance only."""
+    from apps.billing.services.account_service import get_account_state
+    from apps.operations.models import Enrollment
+
+    codes = [code for code, _label in enrollment_choices]
+    if not codes:
+        return {}
+    enrollments = Enrollment.objects.filter(code__in=codes)
+    return {
+        enrollment.code: str(get_account_state(enrollment).balance) for enrollment in enrollments
+    }
 
 
 def _selected_minimum_first_payment(
