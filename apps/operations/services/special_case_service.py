@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from apps.billing.services.account_service import ZERO, get_account_state
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.operations.models import (
     Cohort,
     Enrollment,
@@ -40,6 +41,36 @@ from apps.people.permissions import policy
 
 ENTITY = "operations.SpecialCase"
 
+#: A special case is a filed document; its number is the system's to mint —
+#: ``SC-YYYY-NNNN``, the year it occurred and a sequence within it — as the
+#: enrolment and clearance codes are. Callers that carry a code from elsewhere
+#: (a migration, a test) may still pass one.
+SPECIAL_CASE_SCOPE = "special_case"
+SPECIAL_CASE_PREFIX = "SC-"
+SPECIAL_CASE_PADDING = 4
+MAX_CODE_ATTEMPTS = 8
+
+
+def special_case_partition(occurred_on: date) -> str:
+    return str(occurred_on.year)
+
+
+def next_special_case_code(occurred_on: date) -> str:
+    """Mint the next ``SC-YYYY-NNNN``; call INSIDE the transaction that files the case."""
+    partition = special_case_partition(occurred_on)
+    for _attempt in range(MAX_CODE_ATTEMPTS):
+        code = next_number(
+            SPECIAL_CASE_SCOPE,
+            partition,
+            prefix=f"{SPECIAL_CASE_PREFIX}{partition}-",
+            padding=SPECIAL_CASE_PADDING,
+        )
+        if not SpecialCase.objects.filter(code=code).exists():
+            return code
+    raise ValidationError(
+        f"تعذّر توليد رمز حالة خاصة غير مكرَّر للسنة {partition} بعد {MAX_CODE_ATTEMPTS} محاولات."
+    )
+
 
 class DecisionReferenceRequiredError(ValidationError):
     """BR-067 — a dismissal without the decision that ordered it."""
@@ -52,7 +83,7 @@ def dismiss(
     decision_reference: str,
     detail_ar: str,
     occurred_on: date,
-    code: str,
+    code: str = "",
     request: Any = None,
 ) -> SpecialCase:
     """
@@ -62,11 +93,17 @@ def dismiss(
     and any outstanding balance stays a debt that blocks clearance. That is
     severe enough that the decision reference is mandatory in the service and
     in the database both.
+
+    ``code`` is normally omitted and minted (:func:`next_special_case_code`).
     """
     policy.require(actor, Screen.SPECIAL_CASES, Action.CREATE, request=request)
 
     if not decision_reference.strip():
         raise DecisionReferenceRequiredError("الفصل يتطلب مرجع قرار مسجَّلاً (BR-067).")
+    if not code:
+        ensure_sequence(
+            SPECIAL_CASE_SCOPE, special_case_partition(occurred_on), padding=SPECIAL_CASE_PADDING
+        )
     return _dismiss(
         actor=actor,
         enrollment=enrollment,
@@ -90,6 +127,7 @@ def _dismiss(
     request: Any,
 ) -> SpecialCase:
     state = get_account_state(enrollment)
+    code = code or next_special_case_code(occurred_on)
     case = SpecialCase.objects.create(
         code=code,
         case_type=SpecialCaseType.DISMISSAL,
@@ -430,6 +468,7 @@ __all__ = [
     "DecisionReferenceRequiredError",
     "defer_to_cohort",
     "dismiss",
+    "next_special_case_code",
     "record_credit_balance",
     "substitute",
 ]

@@ -29,6 +29,16 @@ urlpatterns = [
     path("operations/special-cases/", views.special_cases_view, name="special-cases"),
     path("operations/mohe/", views.mohe_view, name="mohe"),
     path("operations/mohe/submit/", views.mohe_submit_view, name="mohe-submit"),
+    path(
+        "operations/mohe/names/<str:code>/upload/",
+        views.mohe_name_upload_view,
+        name="mohe-name-upload",
+    ),
+    path(
+        "operations/mohe/names/uploaded.csv",
+        views.mohe_uploaded_export_view,
+        name="mohe-uploaded-export",
+    ),
     path("operations/mohe/<int:submission_id>/", views.mohe_detail_view, name="mohe-detail"),
     path("operations/clearance/", views.clearances_view, name="clearances"),
     path("operations/clearance/<str:code>/", views.clearance_detail_view, name="clearance-detail"),

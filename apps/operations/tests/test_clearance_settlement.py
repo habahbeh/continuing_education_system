@@ -28,7 +28,6 @@ from apps.billing.services import credit_service
 from apps.billing.services.account_service import get_account_state
 from apps.cashbox.models import PaymentAllocation, Receipt, ReceiptStatus
 from apps.core.models import AuditEvent
-from apps.operations.models import ClearanceCaseType
 from apps.operations.services import clearance_service
 
 pytestmark = pytest.mark.django_db
@@ -46,7 +45,9 @@ def finance_manager(seeded_settings):
 
 
 @pytest.fixture
-def overpaid(make_cohort, approve_cohort, make_enrollment, charge_and_pay, manager):
+def overpaid(
+    make_cohort, approve_cohort, make_enrollment, charge_and_pay, finish_enrollment, manager
+):
     """
     An enrolment in credit, with its clearance already through step 1.
 
@@ -59,10 +60,10 @@ def overpaid(make_cohort, approve_cohort, make_enrollment, charge_and_pay, manag
         approve_cohort(cohort, course_number=f"M-{code}")
         enrollment = make_enrollment(cohort, index=1)
         charge_and_pay(enrollment, amount=paid)
+        finish_enrollment(enrollment, to_status="WITHDRAWN")
         clearance = clearance_service.open_clearance(
             actor=manager,
             enrollment=enrollment,
-            case_type=ClearanceCaseType.WITHDRAWAL,
             opened_on=TERM_START,
             code="CLR-CR",
         )
@@ -169,7 +170,13 @@ def test_the_return_links_to_the_row_that_moved_the_money(overpaid, finance) -> 
 
 
 def test_a_return_is_refused_when_nothing_is_owed(
-    make_cohort, approve_cohort, make_enrollment, charge_and_pay, manager, finance
+    make_cohort,
+    approve_cohort,
+    make_enrollment,
+    charge_and_pay,
+    finish_enrollment,
+    manager,
+    finance,
 ) -> None:
     """A settled account produces no payout and no row."""
     cohort = make_cohort("SC-NET", code="CO-EVEN")
@@ -245,6 +252,7 @@ def test_a_programme_without_a_policy_raises_no_deposit_question(
     approve_cohort,
     make_enrollment,
     charge_and_pay,
+    finish_enrollment,
     manager,
     finance,
     finance_manager,
@@ -259,6 +267,7 @@ def test_a_programme_without_a_policy_raises_no_deposit_question(
     approve_cohort(cohort, course_number="M-NODEP")
     enrollment = make_enrollment(cohort, index=3)
     charge_and_pay(enrollment, amount="270.000")
+    finish_enrollment(enrollment)
 
     state = clearance_service.deposit_settlement_state(enrollment)
     assert state["applies"] is False
@@ -267,7 +276,6 @@ def test_a_programme_without_a_policy_raises_no_deposit_question(
     clearance = clearance_service.open_clearance(
         actor=manager,
         enrollment=enrollment,
-        case_type=ClearanceCaseType.GRADUATION,
         opened_on=TERM_START,
         code="CLR-NODEP",
     )
@@ -283,7 +291,13 @@ def test_a_programme_without_a_policy_raises_no_deposit_question(
 
 
 def test_an_unsettled_deposit_holds_the_financial_step(
-    make_cohort, approve_cohort, make_enrollment, charge_and_pay, manager, finance
+    make_cohort,
+    approve_cohort,
+    make_enrollment,
+    charge_and_pay,
+    finish_enrollment,
+    manager,
+    finance,
 ) -> None:
     """
     BR-097 — the English course carries the seeded demo deposit policy.
@@ -297,6 +311,7 @@ def test_an_unsettled_deposit_holds_the_financial_step(
     enrollment = make_enrollment(cohort, index=4)
     quote = charge_and_pay(enrollment, amount=None)
     assert quote.has_deposit is True
+    finish_enrollment(enrollment)
 
     from apps.billing.services.account_service import get_account_state as state_of
     from apps.cashbox.models import PaymentMethod
@@ -316,7 +331,6 @@ def test_an_unsettled_deposit_holds_the_financial_step(
     clearance = clearance_service.open_clearance(
         actor=manager,
         enrollment=enrollment,
-        case_type=ClearanceCaseType.GRADUATION,
         opened_on=TERM_START,
         code="CLR-DEP",
     )
@@ -336,6 +350,7 @@ def test_returning_the_deposit_releases_the_step(
     approve_cohort,
     make_enrollment,
     charge_and_pay,
+    finish_enrollment,
     manager,
     finance,
     finance_manager,
@@ -350,6 +365,7 @@ def test_returning_the_deposit_releases_the_step(
     approve_cohort(cohort, course_number="M-DEP2")
     enrollment = make_enrollment(cohort, index=5)
     charge_and_pay(enrollment, amount=None)
+    finish_enrollment(enrollment)
 
     method = PaymentMethod.objects.first() or PaymentMethod.objects.create(
         code="CASH3", name_ar="نقداً"
@@ -365,7 +381,6 @@ def test_returning_the_deposit_releases_the_step(
     clearance = clearance_service.open_clearance(
         actor=manager,
         enrollment=enrollment,
-        case_type=ClearanceCaseType.GRADUATION,
         opened_on=TERM_START,
         code="CLR-DEP2",
     )

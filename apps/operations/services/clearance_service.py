@@ -37,6 +37,7 @@ from django.utils import timezone
 from apps.billing.services import opening_balance_service
 from apps.billing.services.account_service import ZERO, get_account_state
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.core.services.settings_service import get_setting
 from apps.operations.models import (
     Clearance,
@@ -44,6 +45,7 @@ from apps.operations.models import (
     ClearanceStatus,
     ClearanceStep,
     Enrollment,
+    EnrollmentStatus,
 )
 from apps.people.constants import Action, Screen
 from apps.people.models import Role
@@ -51,6 +53,18 @@ from apps.people.permissions import policy
 from apps.people.permissions.separation import assert_second_certifier_differs
 
 ENTITY = "operations.Clearance"
+
+#: The clearance is a formal document (CS Fm 7.18 Rev A), so its number is the
+#: system's to mint, as the enrolment code is. ``CLR-YYYY-NNNNNN`` — the year
+#: it was opened, then a six-digit sequence within that year.
+CLEARANCE_SCOPE = "clearance"
+CLEARANCE_PREFIX = "CLR-"
+CLEARANCE_PADDING = 6
+
+#: A minted code can still meet a hand-entered one from before this sprint or
+#: from a migration. Skipping past it costs one number; refusing would cost
+#: the clearance.
+MAX_CODE_ATTEMPTS = 8
 STEP_ENTITY = "operations.ClearanceStep"
 
 STEP_NAMES = {
@@ -159,13 +173,90 @@ def _require_step_role(
     )
 
 
+def clearance_partition(opened_on: date) -> str:
+    """The sequence partition a clearance falls in — its year."""
+    return str(opened_on.year)
+
+
+def next_clearance_code(opened_on: date) -> str:
+    """
+    Mint the next ``CLR-YYYY-NNNNNN`` for the year ``opened_on`` falls in.
+
+    Same contract as ``enrollment_service.next_enrollment_code``: the shared
+    counter (ADR-011) locks its row inside the caller's transaction, so two
+    clerks opening at the same moment cannot receive one number, and a rolled
+    back opening takes its number back. Call it INSIDE that transaction.
+    """
+    partition = clearance_partition(opened_on)
+    for _attempt in range(MAX_CODE_ATTEMPTS):
+        code = next_number(
+            CLEARANCE_SCOPE,
+            partition,
+            prefix=f"{CLEARANCE_PREFIX}{partition}-",
+            padding=CLEARANCE_PADDING,
+        )
+        if not Clearance.objects.filter(code=code).exists():
+            return code
+    raise ValidationError(
+        f"تعذّر توليد رمز براءة غير مكرَّر للسنة {partition} بعد {MAX_CODE_ATTEMPTS} محاولات."
+    )
+
+
+#: §6.4 — «عند انتهاء الدورة (أو الانسحاب أو الفصل)»: the three ways an
+#: enrolment ends, and the clearance case each one opens. The clearance does
+#: not decide why the trainee left; the enrolment lifecycle decided that
+#: first, and the case follows from it.
+#:
+#: INCOMPLETE and NOT_ATTENDED are deliberately absent. §6.4 names only these
+#: three cases and nothing in the requirements says what clearance (if any) an
+#: absentee gets — so until that is confirmed they are not offered, rather
+#: than guessed into one of the three.
+CLEARANCE_CASE_FOR_STATUS: dict[str, str] = {
+    EnrollmentStatus.COMPLETED: ClearanceCaseType.GRADUATION,
+    EnrollmentStatus.WITHDRAWN: ClearanceCaseType.WITHDRAWAL,
+    EnrollmentStatus.DISMISSED: ClearanceCaseType.DISMISSAL,
+}
+
+
+class EnrollmentNotClearableError(ValidationError):
+    """The enrolment is not in a status a clearance can be opened for."""
+
+
+def clearance_case_for_enrollment(enrollment: Enrollment) -> str:
+    """The clearance case an enrolment's final status calls for, or a refusal."""
+    case_type = CLEARANCE_CASE_FOR_STATUS.get(enrollment.status)
+    if case_type is None:
+        raise EnrollmentNotClearableError(
+            f"لا تُفتح براءة ذمة لتسجيل في الحالة «{enrollment.get_status_display()}»؛ "
+            "تُفتح بعد الإكمال أو الانسحاب أو الفصل (§6.4)."
+        )
+    return case_type
+
+
+def opening_preview(*, actor: Any, enrollment: Enrollment, request: Any = None) -> dict[str, Any]:
+    """
+    What opening a clearance on this enrolment would do — for the screen's
+    confirmation step. Reads nothing the opening itself would not; refuses
+    exactly what the opening would refuse, so the confirmation never promises
+    what the next click cannot deliver.
+    """
+    policy.require(actor, Screen.CLEARANCE, Action.CREATE, request=request)
+    case_type = clearance_case_for_enrollment(enrollment)
+    return {
+        "enrollment_code": enrollment.code,
+        "participant_name": enrollment.participant.name_ar,
+        "status_display": enrollment.get_status_display(),
+        "case_type": case_type,
+        "case_type_display": ClearanceCaseType(case_type).label,
+    }
+
+
 def open_clearance(
     *,
     actor: Any,
     enrollment: Enrollment,
-    case_type: str,
     opened_on: date,
-    code: str,
+    code: str = "",
     request: Any = None,
 ) -> Clearance:
     """
@@ -174,15 +265,28 @@ def open_clearance(
     All three rows are created up front rather than as each is reached: the
     form is a printed checklist, and a participant standing at the counter is
     entitled to see what is still outstanding.
+
+    The case is not a parameter: it is read off the enrolment's final status
+    (:func:`clearance_case_for_enrollment`), so a graduate cannot be handed a
+    withdrawal clearance by a slip on the form. An enrolment that has not
+    ended is refused here, not only hidden from the dropdown.
+
+    ``code`` is normally omitted and the system mints it
+    (:func:`next_clearance_code`). It stays settable for callers that carry a
+    number from somewhere else — a migration, a test — never for the screen.
     """
     policy.require(actor, Screen.CLEARANCE, Action.CREATE, request=request)
 
-    if case_type not in ClearanceCaseType.values:
-        raise ValidationError(f"حالة براءة غير معروفة: {case_type}")
+    case_type = clearance_case_for_enrollment(enrollment)
 
     live = Clearance.objects.filter(enrollment=enrollment, active_key=1).first()
     if live is not None:
         raise ValidationError(f"للتسجيل {enrollment.code} براءة ذمة قائمة سلفاً ({live.code}).")
+
+    if not code:
+        # As in enrollment_service: the counter row is created before anyone
+        # locks it, keeping a brand-new year out of insert contention.
+        ensure_sequence(CLEARANCE_SCOPE, clearance_partition(opened_on), padding=CLEARANCE_PADDING)
 
     return _open_clearance(
         actor=actor,
@@ -205,7 +309,7 @@ def _open_clearance(
     request: Any,
 ) -> Clearance:
     clearance = Clearance.objects.create(
-        code=code,
+        code=code or next_clearance_code(opened_on),
         participant=enrollment.participant,
         enrollment=enrollment,
         case_type=case_type,
@@ -220,7 +324,7 @@ def _open_clearance(
         action="CREATE",
         entity_type=ENTITY,
         entity_id=str(clearance.pk),
-        reference=code,
+        reference=clearance.code,
         summary_ar=f"فتح براءة ذمة — {enrollment.code} · {case_type}",
         actor=actor,
         changes={"enrollment": enrollment.code, "case_type": case_type},
@@ -886,16 +990,20 @@ def clearable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tup
 
     §6.4 — «عند انتهاء الدورة (أو الانسحاب أو الفصل)». An enrolment still
     running has nothing to clear, and one that already carries a live
-    clearance would be refused, so neither is offered.
+    clearance would be refused, so neither is offered. The label names the
+    case the status will open, since the operator no longer chooses it.
     """
     policy.require(actor, Screen.CLEARANCE, Action.CREATE, request=request)
 
-    finished = ("COMPLETED", "WITHDRAWN", "DISMISSED", "INCOMPLETE", "NOT_ATTENDED")
     busy = set(Clearance.objects.filter(active_key=1).values_list("enrollment_id", flat=True))
     return [
-        (e.code, f"{e.code} — {e.participant.name_ar} ({e.get_status_display()})")
+        (
+            e.code,
+            f"{e.code} — {e.participant.name_ar} ({e.get_status_display()} ← "
+            f"{ClearanceCaseType(CLEARANCE_CASE_FOR_STATUS[e.status]).label})",
+        )
         for e in Enrollment.objects.select_related("participant")
-        .filter(status__in=finished)
+        .filter(status__in=CLEARANCE_CASE_FOR_STATUS)
         .order_by("-enrolled_on")
         if e.pk not in busy
     ]
@@ -939,6 +1047,7 @@ def clearance_document(*, actor: Any, code: str, request: Any = None) -> dict[st
 
 
 __all__ = [
+    "CLEARANCE_CASE_FOR_STATUS",
     "CUSTODY_ROLE_KEY",
     "FINANCE_STEP",
     "HANDOVER_ROLE_KEY",
@@ -946,6 +1055,7 @@ __all__ = [
     "STEP_NAMES",
     "ClearanceBlockedError",
     "DepositNotSettledError",
+    "EnrollmentNotClearableError",
     "ParticipantAcknowledgementRequiredError",
     "SecondCertifierRoleError",
     "StepOutOfOrderError",
@@ -953,6 +1063,7 @@ __all__ = [
     "cancel_clearance",
     "certify_finance_step",
     "clearable_enrollment_choices",
+    "clearance_case_for_enrollment",
     "clearance_document",
     "clearance_instance",
     "close_clearance",
@@ -964,6 +1075,7 @@ __all__ = [
     "handover_role",
     "list_clearances",
     "open_clearance",
+    "opening_preview",
     "return_credit_at_clearance",
     "second_certifier_role",
     "second_certify_finance_step",

@@ -25,7 +25,6 @@ from apps.core.models import AuditEvent
 from apps.operations.models import (
     Certificate,
     CertificateStatus,
-    ClearanceCaseType,
     GradeSource,
 )
 from apps.operations.services import certificate_service, clearance_service
@@ -51,6 +50,7 @@ def cleared(
     approve_cohort,
     make_enrollment,
     charge_and_pay,
+    finish_enrollment,
     manager,
     finance,
     finance_manager,
@@ -62,11 +62,11 @@ def cleared(
         approve_cohort(cohort, course_number=f"M-{code}")
         enrollment = make_enrollment(cohort, index=index)
         charge_and_pay(enrollment, amount="270.000")
+        finish_enrollment(enrollment)
 
         clearance = clearance_service.open_clearance(
             actor=manager,
             enrollment=enrollment,
-            case_type=ClearanceCaseType.GRADUATION,
             opened_on=TERM_START,
             code=f"CLR-{code}",
         )
@@ -130,18 +130,24 @@ def test_a_completed_clearance_lets_the_certificate_out(cleared, manager) -> Non
 
 
 def test_a_blocked_clearance_is_not_a_completed_one(
-    make_cohort, approve_cohort, make_enrollment, charge_and_pay, manager, finance
+    make_cohort,
+    approve_cohort,
+    make_enrollment,
+    charge_and_pay,
+    finish_enrollment,
+    manager,
+    finance,
 ) -> None:
     """The gate reads COMPLETED, not "a clearance exists"."""
     cohort = make_cohort("SC-NET", code="CO-BLK")
     approve_cohort(cohort, course_number="M-BLK")
     enrollment = make_enrollment(cohort, index=9)
     charge_and_pay(enrollment, amount="100.000")  # still owes 170
+    finish_enrollment(enrollment)
 
     clearance = clearance_service.open_clearance(
         actor=manager,
         enrollment=enrollment,
-        case_type=ClearanceCaseType.GRADUATION,
         opened_on=TERM_START,
         code="CLR-BLK",
     )

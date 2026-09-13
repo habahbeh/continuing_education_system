@@ -9,9 +9,11 @@ services, which have tests behind them.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, cast
 
 from django import forms
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -97,25 +99,37 @@ class ClearanceOpenForm(forms.Form):
     Only finished enrolments are offered (completed, withdrawn, dismissed) and
     only those with no live clearance, because the service refuses both and a
     dropdown leading straight to a refusal is a trap rather than a choice.
+
+    No ``case_type`` field: the case follows from the enrolment's final status
+    (``clearance_service.clearance_case_for_enrollment``). A choice here could
+    only agree with that status or contradict it.
     """
 
-    enrollment_code = forms.ChoiceField(label=_("التسجيل"), choices=[])
-    case_type = forms.ChoiceField(
-        label=_("الحالة"),
-        choices=[
-            ("GRADUATION", _("تخرج")),
-            ("WITHDRAWAL", _("انسحاب")),
-            ("DISMISSAL", _("فصل")),
-        ],
+    enrollment_code = forms.ChoiceField(
+        label=_("التسجيل"),
+        choices=[],
+        help_text=_("سبب البراءة يُحدَّد تلقائياً من حالة التسجيل."),
     )
-    code = forms.CharField(label=_("رمز البراءة"), max_length=32)
-    opened_on = forms.DateField(label=_("تفتح في"), widget=forms.DateInput({"type": "date"}))
+    # No ``code`` field: the number is the system's to mint (``CLR-YYYY-NNNNNN``),
+    # not the operator's to invent — the same reason the enrolment form has none.
+    opened_on = forms.DateField(
+        label=_("تفتح في"),
+        widget=forms.DateInput({"type": "date"}),
+        initial=timezone.localdate,
+        help_text=_("اليوم افتراضياً؛ يمكن إدخال تاريخ سابق لبراءة فُتحت ورقياً، لا تاريخ لاحق."),
+    )
 
     def __init__(
         self, *args: Any, enrollment_choices: list[tuple[str, str]] | None = None, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         cast(forms.ChoiceField, self.fields["enrollment_code"]).choices = enrollment_choices or []
+
+    def clean_opened_on(self) -> date:
+        opened_on = cast(date, self.cleaned_data["opened_on"])
+        if opened_on > timezone.localdate():
+            raise forms.ValidationError(_("لا تُفتح براءة ذمة بتاريخ مستقبلي."))
+        return opened_on
 
 
 class CustodyForm(forms.Form):

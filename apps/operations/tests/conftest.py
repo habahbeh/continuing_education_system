@@ -188,6 +188,34 @@ def make_enrollment(priced_catalog, registrar, make_participant):
 
 
 @pytest.fixture
+def finish_enrollment(registrar, manager):
+    """
+    Take an enrolment to its ordinary end — COMPLETED — the way the screens do.
+
+    Voucher, approval, then graduation, each through the service that owns
+    it. A clearance can only be opened on an enrolment that has ended (§6.4),
+    so every clearance fixture goes through here first.
+    """
+    from apps.operations.services import enrollment_service
+
+    def _finish(enrollment, *, to_status: str = "COMPLETED"):
+        enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+        enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+        if to_status == "ACTIVE":
+            pass  # approval is what made it ACTIVE
+        elif to_status == "COMPLETED":
+            enrollment_service.complete_enrollment(actor=manager, enrollment=enrollment)
+        else:
+            enrollment_service.change_status(
+                actor=manager, enrollment=enrollment, to_status=to_status, reason_ar="اختبار"
+            )
+        enrollment.refresh_from_db()
+        return enrollment
+
+    return _finish
+
+
+@pytest.fixture
 def charge_and_pay(priced_catalog, registrar, cashier, cash_method):
     """Raise the quote's charge lines and take money against them."""
     from apps.billing.services import charge_service

@@ -19,7 +19,6 @@ from django.core.exceptions import PermissionDenied
 
 from apps.core.models import AuditEvent
 from apps.core.services.settings_service import get_setting
-from apps.operations.models import ClearanceCaseType
 from apps.operations.services import clearance_service
 
 pytestmark = pytest.mark.django_db
@@ -47,13 +46,13 @@ def second_finance_officer(seeded_settings):
 
 
 @pytest.fixture
-def settled(make_cohort, approve_cohort, make_enrollment, charge_and_pay):
+def settled(make_cohort, approve_cohort, make_enrollment, charge_and_pay, finish_enrollment):
     def _make(index: int = 1, code: str = "CO-POL"):
         cohort = make_cohort("SC-NET", code=code)
         approve_cohort(cohort, course_number=f"M-{code}")
         enrollment = make_enrollment(cohort, index=index)
         charge_and_pay(enrollment, amount="270.000")
-        return enrollment
+        return finish_enrollment(enrollment)
 
     return _make
 
@@ -79,7 +78,6 @@ def _to_first_signature(manager, finance, enrollment, code="CLR-POL"):
     clearance = clearance_service.open_clearance(
         actor=manager,
         enrollment=enrollment,
-        case_type=ClearanceCaseType.GRADUATION,
         opened_on=TERM_START,
         code=code,
     )

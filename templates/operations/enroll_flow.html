@@ -4,16 +4,17 @@
 {% block title %}{% translate "مسار التسجيل والدفع — مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  الخطوات الثماني كما اعتمدها العميل، بترتيبها: من الإعلان عن دفعة معتمدة إلى
-  رفع اسم المتدرب للوزارة. هذه هي الشاشة التي وافق عليها — لا دورة حياة كاملة
-  للمشارك تحمل اسمها.
+  الخطوات الثماني كما اعتمدها العميل، بترتيبها، ثم مسارات ما بعد الاعتماد في
+  قسم مستقل — بطاقات لا خطوات مرقّمة.
 
-  ما بعد الاعتماد حقيقي أيضاً، فله قسمٌ تحتها: بطاقات مدمجة لا خطوات مرقّمة،
-  ليُقرأ ثانوياً بالنظر قبل أن يُقرأ بالنصّ.
+  الشرح للجميع والزرّ بالصلاحية: كل زرّ يأتي من `_link` في العرض وحده.
 
-  «إرشاد» و«تنفيذ» يُقرآن مختلفين: الشرح نصّ، والانتقال إلى الشاشة زرّ، ولا
-  يظهر الزرّ إلا لمن يملك فتح تلك الشاشة. المرحلة تُشرح للجميع ولا تُفتح إلا
-  لمن يستطيع.
+  الشكل: بطاقةٌ تُقرأ في ثوانٍ — رقم، عنوان، دور، جملةٌ واحدة، ثم القواعد
+  مطويّة خلف مُفصح أصلي (`<details>`، لا سكربت) وزرُّ الشاشة بارزاً. «قبلها/
+  بعدها» حاشيةٌ صغيرة أسفل البطاقة، لا محتوى رئيسي.
+
+  `.step` و`.step-body` و`.step-num` أصنافٌ مشتركة مع شاشات أخرى؛ كل تنسيق
+  هنا محصور داخل `.journey-flow`.
 {% endcomment %}
 
 {% block content %}
@@ -21,50 +22,50 @@
   <div>
     <span class="eyebrow">{% translate "دليل العمل" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "ثماني خطوات من الإعلان عن دفعة معتمدة حتى رفع اسم المتدرب إلى الوزارة — كل خطوة ومن ينفّذها والقاعدة التي تحكمها." %}</p>
+    <p class="sub">{% translate "من الإعلان عن دفعة معتمدة حتى رفع اسم المتدرب إلى الوزارة — ثماني خطوات، لكلٍّ منها منفّذها وقاعدتها وشاشتها." %}</p>
   </div>
 </div>
 
 {% guided_help "enroll-flow" %}
 
-<div class="note info">
-  <div>
-    <strong>{% translate "هذه الصفحة لا تنفّذ إجراءات؛ هي خريطة عمل توضّح أين تبدأ وأين تنتقل." %}</strong>
-    {% translate "ولا يُقفَز فوق خطوة: التسجيل يتطلب اعتماد الوزارة، والاعتماد يتطلب وصلاً مُسجَّلاً، ورفع الاسم يتطلب تسجيلاً معتمداً — كلها قواعد تعمل في النظام لا نصائح مكتوبة هنا. ولا يظهر زرّ إلا لشاشة تسمح لك صلاحيتك بفتحها." %}
-  </div>
+<div class="hint boxed">
+  <strong>{% translate "خريطة عمل، لا شاشة تنفيذ." %}</strong>
+  {% translate "لا يُقفَز فوق خطوة: التسجيل يتطلب اعتماد الوزارة، والاعتماد يتطلب وصلاً مُسجَّلاً، ورفع الاسم يتطلب تسجيلاً معتمداً. ولا يظهر زرّ إلا لشاشة تسمح لك صلاحيتك بفتحها." %}
 </div>
 
 <h2 class="sec-title">{% translate "الخطوات الثماني للتسجيل والدفع" %}</h2>
 
-{% for step in steps %}
-  <div class="step">
-    <div class="step-head">
+<ol class="journey-flow">
+  {% for step in steps %}
+    <li class="step">
       <span class="step-num" aria-hidden="true">{{ forloop.counter }}</span>
       <h3>{{ step.title }}</h3>
-      <span class="chip">{{ step.who }}</span>
-    </div>
-    <div class="step-body">
-      <p class="mb-3">{{ step.what }}</p>
+      <span class="chip brand"><span class="sr-only">{% translate "ينفّذها" %}: </span>{{ step.who }}</span>
+      <div class="step-body">
+        <p class="journey-summary">{{ step.what }}</p>
 
-      <dl class="dl">
-        <dt>{% translate "ما يسبقها" %}</dt><dd>{{ step.before }}</dd>
-        <dt>{% translate "ما يليها" %}</dt><dd>{{ step.after }}</dd>
-      </dl>
-
-      {% for rule in step.rules %}
-        <div class="note"><div>{{ rule }}</div></div>
-      {% endfor %}
-
-      {% if step.links %}
-        <div class="form-acts">
+        <div class="journey-actions">
           {% for link in step.links %}
             <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
           {% endfor %}
+          {% if step.rules %}
+            <details class="journey-checks">
+              <summary>{% translate "القواعد" %} <span class="num">{{ step.rules|length }}</span></summary>
+              <ul>
+                {% for rule in step.rules %}<li class="journey-check">{{ rule }}</li>{% endfor %}
+              </ul>
+            </details>
+          {% endif %}
         </div>
-      {% endif %}
-    </div>
-  </div>
-{% endfor %}
+
+        <p class="journey-meta">
+          <span><b>{% translate "قبلها" %}</b> {{ step.before }}</span>
+          <span><b>{% translate "بعدها" %}</b> {{ step.after }}</span>
+        </p>
+      </div>
+    </li>
+  {% endfor %}
+</ol>
 
 <h2 class="sec-title">{% translate "بعد اعتماد التسجيل — مسارات لاحقة عند الحاجة" %}</h2>
 <p class="hint">{% translate "ليست من الخطوات الثماني، ولا تُسلك كلها في كل حالة. تُفتح عند الحاجة، ولكلٍّ منها قواعدها وشاشتها." %}</p>
@@ -81,6 +82,7 @@
       <div class="act-card is-off">
         <span class="t">{{ item.title }}</span>
         <span class="d">{{ item.what }}</span>
+        <span class="chip mt-2">{% translate "خارج صلاحيتك" %}</span>
       </div>
     {% endif %}
   {% endfor %}

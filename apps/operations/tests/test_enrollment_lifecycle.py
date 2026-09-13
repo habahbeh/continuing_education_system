@@ -636,3 +636,293 @@ def test_a_withdrawn_enrolment_still_blocks_a_second_one(
             enrolled_on=TERM_START,
             price_list=priced_catalog,
         )
+
+
+# ---------------------------------------------------------------------------
+# §6.4 — the ordinary exit: ACTIVE → COMPLETED, so a clearance can be opened
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def active_enrollment(approved_cohort, make_enrollment, registrar, manager):
+    """Registered, voucher in, approved — the state Ahmed is stuck in."""
+    enrollment = make_enrollment(approved_cohort, index=61)
+    enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.ACTIVE
+    return enrollment
+
+
+def test_the_manager_completes_an_active_enrolment_and_it_is_recorded(
+    active_enrollment, manager
+) -> None:
+    before = timezone.now()
+    enrollment_service.complete_enrollment(actor=manager, enrollment=active_enrollment)
+
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.COMPLETED
+    assert active_enrollment.status_changed_at >= before
+
+    last = EnrollmentStatusHistory.objects.filter(enrollment=active_enrollment).latest("changed_at")
+    assert (last.from_status, last.to_status) == (
+        EnrollmentStatus.ACTIVE,
+        EnrollmentStatus.COMPLETED,
+    )
+    assert last.changed_by_id == manager.pk
+    assert last.reason_ar == enrollment_service.COMPLETION_REASON_AR
+
+    audit = AuditEvent.objects.filter(
+        entity_type="operations.Enrollment", reference=active_enrollment.code
+    ).latest("occurred_at")
+    assert audit.changes == {
+        "from": EnrollmentStatus.ACTIVE,
+        "to": EnrollmentStatus.COMPLETED,
+        "reason": enrollment_service.COMPLETION_REASON_AR,
+    }
+
+
+@pytest.mark.parametrize("who", ["registrar", "finance", "cashier"])
+def test_only_the_approving_authority_may_record_completion(
+    request, active_enrollment, who
+) -> None:
+    """The registrar may EDIT an enrolment; closing it is the manager's call."""
+    from django.core.exceptions import PermissionDenied
+
+    with pytest.raises(PermissionDenied):
+        enrollment_service.complete_enrollment(
+            actor=request.getfixturevalue(who), enrollment=active_enrollment
+        )
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.ACTIVE
+
+
+def test_the_auditor_may_not_record_completion(active_enrollment, seeded_settings) -> None:
+    from django.core.exceptions import PermissionDenied
+
+    from apps.people.models import Role, User
+
+    auditor = User.objects.create_user(
+        username="audit.complete", password="probe-password-1234", role=Role.AUDIT_ACCOUNT
+    )
+    with pytest.raises(PermissionDenied):
+        enrollment_service.complete_enrollment(actor=auditor, enrollment=active_enrollment)
+
+
+def test_only_an_active_enrolment_can_be_completed(
+    approved_cohort, make_enrollment, active_enrollment, manager
+) -> None:
+    pending = make_enrollment(approved_cohort, index=62)  # still PENDING_FINANCE
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        enrollment_service.complete_enrollment(actor=manager, enrollment=pending)
+
+    enrollment_service.complete_enrollment(actor=manager, enrollment=active_enrollment)
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        enrollment_service.complete_enrollment(actor=manager, enrollment=active_enrollment)
+    assert (
+        EnrollmentStatusHistory.objects.filter(
+            enrollment=active_enrollment, to_status=EnrollmentStatus.COMPLETED
+        ).count()
+        == 1
+    )
+
+
+def test_completion_offers_the_enrolment_to_clearance_without_opening_one(
+    active_enrollment, manager
+) -> None:
+    from apps.operations.models import Clearance
+    from apps.operations.services import clearance_service
+
+    def offered() -> set[str]:
+        return {code for code, _ in clearance_service.clearable_enrollment_choices(actor=manager)}
+
+    assert active_enrollment.code not in offered(), "an ACTIVE enrolment has nothing to clear"
+
+    enrollment_service.complete_enrollment(actor=manager, enrollment=active_enrollment)
+
+    assert active_enrollment.code in offered()
+    assert not Clearance.objects.filter(enrollment=active_enrollment).exists()
+
+
+# ---------------------------------------------------------------------------
+# §6.4 — the other two exits: withdrawal and dismissal, from the same screen
+# ---------------------------------------------------------------------------
+def test_the_manager_withdraws_an_active_enrolment_with_its_reason(
+    active_enrollment, manager
+) -> None:
+    enrollment_service.withdraw_enrollment(
+        actor=manager, enrollment=active_enrollment, reason_ar="ظروف عمل"
+    )
+
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.WITHDRAWN
+    last = EnrollmentStatusHistory.objects.filter(enrollment=active_enrollment).latest("changed_at")
+    assert (last.from_status, last.to_status, last.changed_by_id) == (
+        EnrollmentStatus.ACTIVE,
+        EnrollmentStatus.WITHDRAWN,
+        manager.pk,
+    )
+    assert "ظروف عمل" in last.reason_ar
+    assert (
+        AuditEvent.objects.filter(
+            entity_type="operations.Enrollment", reference=active_enrollment.code
+        )
+        .latest("occurred_at")
+        .changes["to"]
+        == EnrollmentStatus.WITHDRAWN
+    )
+
+
+def test_a_withdrawal_without_a_reason_is_refused(active_enrollment, manager) -> None:
+    with pytest.raises(ValidationError, match="سبباً"):
+        enrollment_service.withdraw_enrollment(
+            actor=manager, enrollment=active_enrollment, reason_ar="   "
+        )
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.ACTIVE
+
+
+def test_the_manager_dismisses_through_the_special_case_rule(active_enrollment, manager) -> None:
+    """BR-067 — the enrolments screen files the same special case the rule requires."""
+    from apps.operations.models import SpecialCase, SpecialCaseType
+
+    enrollment_service.dismiss_enrollment(
+        actor=manager,
+        enrollment=active_enrollment,
+        decision_reference="قرار 12/2026",
+        reason_ar="غياب متكرر موثّق",
+    )
+
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.DISMISSED
+    case = SpecialCase.objects.get(enrollment=active_enrollment)
+    assert case.case_type == SpecialCaseType.DISMISSAL
+    assert case.decision_reference == "قرار 12/2026"
+    assert case.detail_ar == "غياب متكرر موثّق"
+    assert case.code.startswith(f"SC-{timezone.localdate().year}-")
+    last = EnrollmentStatusHistory.objects.filter(enrollment=active_enrollment).latest("changed_at")
+    assert (last.to_status, last.changed_by_id, last.reference) == (
+        EnrollmentStatus.DISMISSED,
+        manager.pk,
+        case.code,
+    )
+
+
+@pytest.mark.parametrize(
+    ("decision_reference", "reason_ar"),
+    [("", "سبب"), ("   ", "سبب"), ("قرار 1", ""), ("قرار 1", "  ")],
+)
+def test_a_dismissal_needs_both_the_decision_and_the_reason(
+    active_enrollment, manager, decision_reference, reason_ar
+) -> None:
+    from apps.operations.models import SpecialCase
+
+    with pytest.raises(ValidationError):
+        enrollment_service.dismiss_enrollment(
+            actor=manager,
+            enrollment=active_enrollment,
+            decision_reference=decision_reference,
+            reason_ar=reason_ar,
+        )
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.ACTIVE
+    assert not SpecialCase.objects.filter(enrollment=active_enrollment).exists()
+
+
+@pytest.mark.parametrize("who", ["finance", "cashier"])
+@pytest.mark.parametrize("exit_", ["withdraw", "dismiss"])
+def test_the_financial_roles_may_neither_withdraw_nor_dismiss(
+    request, active_enrollment, who, exit_
+) -> None:
+    from django.core.exceptions import PermissionDenied
+
+    actor = request.getfixturevalue(who)
+    with pytest.raises(PermissionDenied):
+        if exit_ == "withdraw":
+            enrollment_service.withdraw_enrollment(
+                actor=actor, enrollment=active_enrollment, reason_ar="سبب"
+            )
+        else:
+            enrollment_service.dismiss_enrollment(
+                actor=actor, enrollment=active_enrollment, decision_reference="ق", reason_ar="سبب"
+            )
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == EnrollmentStatus.ACTIVE
+
+
+def test_the_registrar_may_not_withdraw(active_enrollment, registrar) -> None:
+    """Withdrawal is a final decision and sits with APPROVE, like graduation."""
+    from django.core.exceptions import PermissionDenied
+
+    with pytest.raises(PermissionDenied):
+        enrollment_service.withdraw_enrollment(
+            actor=registrar, enrollment=active_enrollment, reason_ar="سبب"
+        )
+
+
+def test_the_auditor_may_neither_withdraw_nor_dismiss(active_enrollment, seeded_settings) -> None:
+    from django.core.exceptions import PermissionDenied
+
+    from apps.people.models import Role, User
+
+    auditor = User.objects.create_user(
+        username="audit.exit", password="probe-password-1234", role=Role.AUDIT_ACCOUNT
+    )
+    with pytest.raises(PermissionDenied):
+        enrollment_service.withdraw_enrollment(
+            actor=auditor, enrollment=active_enrollment, reason_ar="سبب"
+        )
+    with pytest.raises(PermissionDenied):
+        enrollment_service.dismiss_enrollment(
+            actor=auditor, enrollment=active_enrollment, decision_reference="ق", reason_ar="سبب"
+        )
+
+
+@pytest.mark.parametrize("exit_", ["withdraw", "dismiss"])
+def test_only_an_active_enrolment_can_be_withdrawn_or_dismissed(
+    approved_cohort, make_enrollment, active_enrollment, manager, exit_
+) -> None:
+    def attempt(enrollment):
+        if exit_ == "withdraw":
+            enrollment_service.withdraw_enrollment(
+                actor=manager, enrollment=enrollment, reason_ar="سبب"
+            )
+        else:
+            enrollment_service.dismiss_enrollment(
+                actor=manager, enrollment=enrollment, decision_reference="ق", reason_ar="سبب"
+            )
+
+    pending = make_enrollment(approved_cohort, index=64)  # PENDING_FINANCE
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        attempt(pending)
+
+    enrollment_service.complete_enrollment(actor=manager, enrollment=active_enrollment)
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        attempt(active_enrollment)
+
+
+@pytest.mark.parametrize(
+    ("exit_", "status", "case_label"),
+    [
+        ("withdraw", EnrollmentStatus.WITHDRAWN, "انسحاب"),
+        ("dismiss", EnrollmentStatus.DISMISSED, "فصل"),
+    ],
+)
+def test_an_exit_offers_the_enrolment_to_clearance_without_opening_one(
+    active_enrollment, manager, exit_, status, case_label
+) -> None:
+    from apps.operations.models import Clearance
+    from apps.operations.services import clearance_service
+
+    if exit_ == "withdraw":
+        enrollment_service.withdraw_enrollment(
+            actor=manager, enrollment=active_enrollment, reason_ar="سبب"
+        )
+    else:
+        enrollment_service.dismiss_enrollment(
+            actor=manager, enrollment=active_enrollment, decision_reference="ق 3", reason_ar="سبب"
+        )
+
+    active_enrollment.refresh_from_db()
+    assert active_enrollment.status == status
+    assert not Clearance.objects.filter(enrollment=active_enrollment).exists()
+    offered = dict(clearance_service.clearable_enrollment_choices(actor=manager))
+    assert case_label in offered[active_enrollment.code]

@@ -563,6 +563,155 @@ def test_an_approval_recorded_on_screen_is_what_opens_enrolment(
     assert enrollment.pk is not None
 
 
+def test_the_registrar_records_a_trainee_name_upload_from_the_mohe_screen(
+    client: Client,
+    registrar: User,
+    manager: User,
+    cohort: Any,
+    approve_cohort: Any,
+    make_enrollment: Any,
+) -> None:
+    from django.utils import timezone
+
+    from apps.operations.services import enrollment_service
+
+    approve_cohort(cohort, deadline=date(2099, 1, 1))
+    enrollment = make_enrollment(cohort, index=81)
+    enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+
+    client.force_login(registrar)
+    response = client.post(
+        reverse("operations:mohe-name-upload", args=[enrollment.code]), follow=True
+    )
+
+    enrollment.refresh_from_db()
+    assert response.status_code == 200
+    assert enrollment.mohe_uploaded_on == timezone.localdate()
+
+
+# ---------------------------------------------------------------------------
+# "Export Uploaded Names" — the CSV of trainees already sent to the ministry
+# ---------------------------------------------------------------------------
+UPLOADED_ON = date(2026, 9, 12)
+
+
+@pytest.fixture
+def uploaded_and_pending(
+    registrar: User,
+    manager: User,
+    cohort: Any,
+    approve_cohort: Any,
+    make_enrollment: Any,
+) -> tuple[Any, Any]:
+    """Two approved trainees on an approved cohort; only the first is uploaded."""
+    from apps.operations.services import enrollment_service
+
+    approve_cohort(cohort, deadline=DEADLINE, course_number="MOHE/2026/77")
+    uploaded = make_enrollment(cohort, index=91)
+    pending = make_enrollment(cohort, index=92)
+    for enrollment in (uploaded, pending):
+        enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+        enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+    enrollment_service.mark_uploaded_to_mohe(
+        actor=registrar, enrollment=uploaded, uploaded_on=UPLOADED_ON
+    )
+    uploaded.refresh_from_db()
+    pending.refresh_from_db()
+    return uploaded, pending
+
+
+def _csv_rows(response: Any) -> list[list[str]]:
+    import csv
+    import io
+
+    text = response.content.decode("utf-8-sig")
+    return list(csv.reader(io.StringIO(text)))
+
+
+@pytest.mark.parametrize("role", MOHE_READERS)
+def test_every_reader_of_the_register_may_download_the_uploaded_names(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    client.force_login(_user(role, f"export.{role.lower()}"))
+    response = client.get(reverse("operations:mohe-uploaded-export"))
+    assert response.status_code == 200
+    assert response["Content-Type"] == "text/csv; charset=utf-8-sig"
+    assert response["Content-Disposition"].startswith('attachment; filename="mohe-uploaded-names-')
+    assert response["Content-Disposition"].endswith('.csv"')
+
+
+@pytest.mark.parametrize("role", MOHE_OUTSIDERS)
+def test_the_financial_roles_cannot_download_the_uploaded_names(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The download reads through the same gate as the page: 403, not an empty file."""
+    client.force_login(_user(role, f"noexport.{role.lower()}"))
+    assert client.get(reverse("operations:mohe-uploaded-export")).status_code == 403
+
+
+def test_the_export_button_is_on_the_register_for_its_readers(
+    client: Client, registrar: User, seeded_settings: None
+) -> None:
+    client.force_login(registrar)
+    response = client.get(reverse("operations:mohe"))
+    assert reverse("operations:mohe-uploaded-export") in response.content.decode()
+    assert "Export Uploaded Names" in response.content.decode()
+
+
+def test_the_export_holds_the_uploaded_trainees_only(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    uploaded, pending = uploaded_and_pending
+
+    client.force_login(registrar)
+    rows = _csv_rows(client.get(reverse("operations:mohe-uploaded-export")))
+
+    header, *body = rows
+    assert len(header) == 8
+    assert [row[1] for row in body] == [uploaded.code]
+    assert pending.code not in {row[1] for row in body}
+
+    (row,) = body
+    assert row == [
+        uploaded.participant.name_ar,
+        uploaded.code,
+        uploaded.cohort.program.name_ar,
+        uploaded.cohort.code,
+        "MOHE/2026/77",
+        uploaded.approved_at.date().isoformat(),
+        UPLOADED_ON.isoformat(),
+        DEADLINE.isoformat(),
+    ]
+
+
+def test_an_uploaded_trainee_who_is_no_longer_active_leaves_the_export(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    from apps.operations.models import Enrollment, EnrollmentStatus
+
+    uploaded, _pending = uploaded_and_pending
+    Enrollment.objects.filter(pk=uploaded.pk).update(status=EnrollmentStatus.CANCELLED)
+
+    client.force_login(registrar)
+    _header, *body = _csv_rows(client.get(reverse("operations:mohe-uploaded-export")))
+    assert body == []
+
+
+def test_the_export_carries_a_bom_so_excel_reads_the_arabic(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    uploaded, _pending = uploaded_and_pending
+
+    client.force_login(registrar)
+    response = client.get(reverse("operations:mohe-uploaded-export"))
+
+    assert response.content.startswith("﻿".encode())
+    assert response.content.count("﻿".encode()) == 1, "one BOM, at the very start"
+    assert uploaded.participant.name_ar.encode() in response.content
+    assert "المتدرب".encode() in response.content
+
+
 # ---------------------------------------------------------------------------
 # A-05 — the screens read projections, never models
 # ---------------------------------------------------------------------------

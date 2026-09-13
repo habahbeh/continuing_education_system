@@ -26,11 +26,18 @@ Takes one variable: ``statement``.
   <div class="kpi">
     <div class="label">{% translate "الرصيد" %}</div>
     <div class="value num">{{ statement.state.balance }}</div>
-    <div class="muted">
-      {% if statement.state.participant_owes %}{% translate "عليه ذمة" %}
-      {% elif statement.state.centre_owes %}{% translate "رصيد دائن يُردّ عند براءة الذمة" %}
-      {% else %}{% translate "مسوّى" %}{% endif %}
-    </div>
+    {% comment %}
+    The figure alone misleads: a negative balance is accounting-correct but a
+    cashier reads «-30.000» as a debt. The chip names the direction outright.
+    {% endcomment %}
+    {% if statement.state.participant_owes %}
+      <div class="foot"><span class="chip danger dot">{% translate "ذمة على المشارك" %}</span></div>
+    {% elif statement.state.centre_owes %}
+      <div class="foot"><span class="chip ok dot">{% translate "رصيد دائن لصالح المشارك" %}</span></div>
+      <div class="foot">{% translate "المبلغ السالب هو ما دفعه المشارك زيادةً، ويُردّ له عند براءة الذمة." %}</div>
+    {% else %}
+      <div class="foot"><span class="chip info dot">{% translate "مسوّى" %}</span></div>
+    {% endif %}
   </div>
 </div>
 

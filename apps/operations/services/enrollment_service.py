@@ -31,6 +31,8 @@ from apps.operations.models import (
     Enrollment,
     EnrollmentStatus,
     EnrollmentStatusHistory,
+    MoheStatus,
+    MoheSubmission,
 )
 from apps.operations.services import mohe_service
 from apps.people.constants import Action, Screen
@@ -399,6 +401,109 @@ def _mark_uploaded(
     return enrollment
 
 
+def list_mohe_name_uploads(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """Approved cohorts and their ACTIVE enrolments, for the MOHE names register."""
+    policy.require(actor, Screen.MOHE, Action.VIEW, request=request)
+    can_record = policy.is_allowed(actor, Screen.ENROLLMENTS, Action.EDIT)
+    today = timezone.localdate()
+
+    sections: list[dict[str, Any]] = []
+    submissions = (
+        MoheSubmission.objects.filter(status=MoheStatus.APPROVED)
+        .select_related("cohort__program")
+        .order_by("-decided_on", "cohort__code")
+    )
+    for submission in submissions:
+        enrollments = list(
+            Enrollment.objects.filter(
+                cohort=submission.cohort,
+                status=EnrollmentStatus.ACTIVE,
+                approved_at__isnull=False,
+            )
+            .select_related("participant")
+            .order_by("code")
+        )
+        rows = []
+        for enrollment in enrollments:
+            upload_is_late = (
+                submission.registration_deadline is not None
+                and today > submission.registration_deadline
+                and enrollment.mohe_uploaded_on is None
+            )
+            rows.append(
+                {
+                    "participant_name": enrollment.participant.name_ar,
+                    "enrollment_code": enrollment.code,
+                    "status": enrollment.status,
+                    "status_display": enrollment.get_status_display(),
+                    "approved_at": enrollment.approved_at,
+                    "mohe_uploaded_on": enrollment.mohe_uploaded_on,
+                    "can_record_upload": can_record
+                    and enrollment.mohe_uploaded_on is None
+                    and not upload_is_late,
+                    "upload_requires_manager_reason": upload_is_late,
+                }
+            )
+
+        uploaded_count = sum(1 for row in rows if row["mohe_uploaded_on"] is not None)
+        sections.append(
+            {
+                "cohort_code": submission.cohort.code,
+                "cohort_name_ar": submission.cohort.name_ar,
+                "program_name_ar": submission.cohort.program.name_ar,
+                "registration_deadline": submission.registration_deadline,
+                "approved_count": len(rows),
+                "uploaded_count": uploaded_count,
+                "pending_count": len(rows) - uploaded_count,
+                "rows": rows,
+            }
+        )
+    return sections
+
+
+def list_mohe_uploaded_names(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """
+    Flat rows for the "Export Uploaded Names" download on the MOHE screen.
+
+    The same gate as :func:`list_mohe_name_uploads`, and a strict subset of
+    what it shows: only ACTIVE, approved enrolments on an APPROVED cohort
+    file whose name has already been recorded as uploaded to the ministry.
+    """
+    policy.require(actor, Screen.MOHE, Action.VIEW, request=request)
+
+    submissions = (
+        MoheSubmission.objects.filter(status=MoheStatus.APPROVED)
+        .select_related("cohort__program")
+        .order_by("cohort__code")
+    )
+    rows: list[dict[str, Any]] = []
+    for submission in submissions:
+        enrollments = (
+            Enrollment.objects.filter(
+                cohort=submission.cohort,
+                status=EnrollmentStatus.ACTIVE,
+                approved_at__isnull=False,
+                mohe_uploaded_on__isnull=False,
+            )
+            .select_related("participant")
+            .order_by("code")
+        )
+        for enrollment in enrollments:
+            rows.append(
+                {
+                    "participant_name": enrollment.participant.name_ar,
+                    "enrollment_code": enrollment.code,
+                    "program_name_ar": submission.cohort.program.name_ar,
+                    "cohort_code": submission.cohort.code,
+                    "mohe_course_number": submission.mohe_course_number,
+                    "approved_at": enrollment.approved_at,
+                    "mohe_uploaded_on": enrollment.mohe_uploaded_on,
+                    "registration_deadline": submission.registration_deadline,
+                }
+            )
+    return rows
+
+
 def record_attendance(
     *,
     actor: Any,
@@ -533,6 +638,111 @@ def _change_status(
         summary_ar=f"تغيير حالة التسجيل: {from_status} ← {to_status}",
         actor=actor,
         changes={"from": from_status, "to": to_status, "reason": reason_ar},
+        request=request,
+    )
+    return enrollment
+
+
+#: What the history row says when a trainee finishes normally. Fixed text,
+#: not a free field: graduation is the one exit that needs no explanation.
+COMPLETION_REASON_AR = "إكمال الدورة — تخرج"
+
+
+def complete_enrollment(*, actor: Any, enrollment: Enrollment, request: Any = None) -> Enrollment:
+    """
+    §6.4 — the trainee finished the course; move ACTIVE → COMPLETED.
+
+    This is the ordinary exit, the one a clearance of type «تخرج» is opened
+    for. It does NOT open that clearance: §6.4 makes opening it a separate
+    decision, and the financial step there is what stops an unpaid balance
+    from turning into a certificate (BR-075) — so nothing about money is
+    checked here, and nothing about it is hidden either: the balance stays on
+    the statement for the clearance to find.
+
+    Gated on APPROVE, the same authority that put the enrolment into ACTIVE.
+    """
+    policy.require(actor, Screen.ENROLLMENTS, Action.APPROVE, request=request)
+
+    _require_active(enrollment, "الإكمال")
+    return _change_status(
+        actor=actor,
+        enrollment=enrollment,
+        to_status=EnrollmentStatus.COMPLETED,
+        reason_ar=COMPLETION_REASON_AR,
+        reference="",
+        allow_from_final=False,
+        request=request,
+    )
+
+
+def _require_active(enrollment: Enrollment, verb_ar: str) -> None:
+    """The three ways out of the course all start from ACTIVE and nowhere else."""
+    if enrollment.status != EnrollmentStatus.ACTIVE:
+        raise InvalidStatusTransitionError(
+            f"لا يُسجَّل {verb_ar} إلا لتسجيل فعّال؛ التسجيل {enrollment.code} "
+            f"في الحالة {enrollment.get_status_display()}."
+        )
+
+
+def withdraw_enrollment(
+    *, actor: Any, enrollment: Enrollment, reason_ar: str, request: Any = None
+) -> Enrollment:
+    """
+    §6.4 — the trainee left; move ACTIVE → WITHDRAWN.
+
+    The reason is mandatory: a withdrawal decides what the partner earned
+    (BR-045) and whether a refund is even askable, and a status row with no
+    reason is what the file cannot answer a year later. As with graduation,
+    nothing here opens the clearance or touches the balance — both wait for
+    the clearance of type «انسحاب» that this makes possible.
+
+    Gated on APPROVE like completion: the authority that let the trainee in
+    is the one that records how they left.
+    """
+    policy.require(actor, Screen.ENROLLMENTS, Action.APPROVE, request=request)
+
+    if not reason_ar.strip():
+        raise ValidationError("تسجيل الانسحاب يتطلب سبباً مكتوباً.")
+    _require_active(enrollment, "الانسحاب")
+    return _change_status(
+        actor=actor,
+        enrollment=enrollment,
+        to_status=EnrollmentStatus.WITHDRAWN,
+        reason_ar=f"انسحاب — {reason_ar.strip()}",
+        reference="",
+        allow_from_final=False,
+        request=request,
+    )
+
+
+def dismiss_enrollment(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    decision_reference: str,
+    reason_ar: str,
+    request: Any = None,
+) -> Enrollment:
+    """
+    §6.4 — the trainee was dismissed; move ACTIVE → DISMISSED.
+
+    The enrolments screen's entry point to ``special_case_service.dismiss``,
+    which owns the rule (BR-067: no dismissal without the decision that
+    ordered it; BR-068: no refund) and files the special case, the status
+    row and the audit. This adds only what a row on that screen needs: the
+    enrolment must actually be running, and the reason must be written.
+    """
+    from apps.operations.services import special_case_service
+
+    if not reason_ar.strip():
+        raise ValidationError("تسجيل الفصل يتطلب سبباً مكتوباً.")
+    _require_active(enrollment, "الفصل")
+    special_case_service.dismiss(
+        actor=actor,
+        enrollment=enrollment,
+        decision_reference=decision_reference,
+        detail_ar=reason_ar.strip(),
+        occurred_on=timezone.localdate(),
         request=request,
     )
     return enrollment
@@ -722,12 +932,15 @@ __all__ = [
     "VoucherRequiredError",
     "approve_enrollment",
     "change_status",
+    "complete_enrollment",
     "create_enrollment",
+    "dismiss_enrollment",
     "enroll_with_charges",
     "enrollment_choices",
     "enrollment_partition",
     "get_enrollment",
     "list_enrollments",
+    "list_mohe_name_uploads",
     "mark_uploaded_to_mohe",
     "next_enrollment_code",
     "payable_enrollment",
@@ -735,4 +948,5 @@ __all__ = [
     "record_attendance",
     "record_status_change",
     "record_voucher",
+    "withdraw_enrollment",
 ]

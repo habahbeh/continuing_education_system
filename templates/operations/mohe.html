@@ -9,9 +9,19 @@
   صلاحيتها في `MOHE_ACTIONS`. فلا يُرسم هنا زرّ فعل واحد؛ الرابط الوحيد الذي
   يقود إلى كتابة هو «فتح ملف وزاري»، ومسارها قائم وحارسها CREATE على §3.3/15.
 
-  ولا حكم يُخترع: «مهلة التسجيل» تاريخ يُطبع كما هو، لا إنذار ولا «تجاوزت
-  المهلة» — حساب الإنذار يقع في مكان آخر ولا يمرّ في سياق هذه الصفحة. وكذلك
-  «معتمد» و«مرفوض»: قرار الوزارة كما ورد، لا استنتاج من تاريخٍ أو مرفق.
+  ولا حكم يُخترع هنا: «معتمد» و«مرفوض» قرار الوزارة كما ورد، لا استنتاج من
+  تاريخٍ أو مرفق. وحالة المهلة ليست استثناءً من ذلك — `deadline_state` في
+  الخدمة هي من يقرأ التاريخ ويقرّر أنه قارَب أو انقضى، بعدد الأيام الذي يحدده
+  إعداد «mohe_deadline_alert_days» (BR-015)، والقالب يطبع ما تعيده. أي حساب
+  للأيام هنا كان سيصير نسخة ثانية من القاعدة تختلف بصمت عن التقرير اليومي.
+
+  وقد كان التاريخ يُطبع وحده: الدليل الإرشادي يَعِد بأن النظام ينبّه قبل انتهاء
+  المهلة، وسبب الرفض المتكرر الموثّق هو «عدم تسجيل طلاب خلال المدة المسموحة» —
+  فكان الإنذار في مخرَج أمر يومي لا يقرأه من يفتح هذه الشاشة.
+
+  و«المسجّلون» بجانب المهلة لأنهما يُقرآن معاً: مهلة تقارب على دفعة صفرها صفر
+  هي الحالة التي يتكرر بها الرفض. العدد من `Cohort.enrolled_count` بلا استثناءات
+  جديدة تُكتب هنا.
 
   سبب الرفض يبقى بعرض الجدول لأنه نصّ يُقرأ لا خلية تُمسح: هو الدليل الوحيد
   على ما يجب أن يتغيّر في إعادة الإرسال (BR-014). خرج من `.note warn` — الأصفر
@@ -22,6 +32,17 @@
   يقابل الأربعة بالنموذج، فلا تنحرف الشاشة عنه بصمت.
 
   BR-013 وBR-016 كانا في `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً.
+
+  ── تحسين العرض ────────────────────────────────────────────────────────────
+  توزيع الحالات ترك ترويسة البطاقة إلى شريط بعرض الصفحة تحت المرشّحات: كان
+  يُقرأ بعد الجدول، ومكانه قبله. شكل الشارة لم يتغيّر، وتُعلَّم الحالة المصفّى
+  بها بحلقة ووزن أثقل — يسمّيها سطر «نتائج مصفّاة» بالنصّ فلا يقع التمييز على
+  اللون وحده.
+
+  سبب الرفض خرج من حاشية باهتة إلى كتلة لها حاشية بلون حالة الرفض نفسها. لا
+  أصفر ولا أزرق: القرار ورد من الوزارة ولم تستنتجه الشاشة.
+
+  وجملةُ «ما هذه الشاشة» حُذفت من الترويسة لأن `guided_help` يقولها فوقها.
 {% endcomment %}
 
 {% block content %}
@@ -29,7 +50,7 @@
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
     <h1>{{ title }}</h1>
-    <p class="sub">{% translate "الملفات الوزارية للدفعات: ما زال مسودةً، وما أُرسل، وما اعتمدته الوزارة أو ردّته. لا يُسجَّل مشارك على دفعة لم تُعتمد (BR-013)، والملف لا يُرسَل إلا بمرفقيه الإلزاميين (BR-016). القرار يُسجَّل كما ورد من الوزارة." %}</p>
+    <p class="sub">{% translate "لا يُسجَّل مشارك على دفعة لم تُعتمد (BR-013)، والملف لا يُرسَل إلا بمرفقيه الإلزاميين (BR-016). القرار يُسجَّل كما ورد من الوزارة." %}</p>
   </div>
   {% if can_open_file %}
     <div class="acts">
@@ -62,6 +83,19 @@
   <span class="count">{% blocktranslate count n=submissions|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
 </form>
 
+{% if status_counts %}
+  <div class="mohe-overview">
+    <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+    <div class="mohe-state-strip">
+      {% for s in status_counts %}
+        <div class="mohe-state {{ s.status|status_tone }}{% if status == s.status %} is-on{% endif %}">
+          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
 {% if active_filters %}
   <div class="note">
     <div>
@@ -73,20 +107,12 @@
   </div>
 {% endif %}
 
-<div class="card2">
+<div class="card2 mohe-register">
   <div class="card2-head">
     <h2>{% translate "الملفات الوزارية" %}</h2>
-    <div class="acts">
-      {% if status_counts %}
-        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
-        {% for s in status_counts %}
-          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
-        {% endfor %}
-      {% endif %}
-    </div>
   </div>
   <div class="tbl-wrap">
-    <table class="tbl">
+    <table class="tbl mohe-tbl">
       <thead>
         <tr>
           <th>{% translate "الدفعة" %}</th>
@@ -96,6 +122,7 @@
           <th>{% translate "أُرسل" %}</th>
           <th>{% translate "القرار" %}</th>
           <th>{% translate "مهلة التسجيل" %}</th>
+          <th class="num">{% translate "المسجّلون" %}</th>
           <th aria-label="{% translate 'إجراءات' %}"></th>
         </tr>
       </thead>
@@ -125,24 +152,36 @@
               {% else %}<span class="muted">{% translate "بلا قرار" %}</span>{% endif %}
             </td>
             <td class="num">
-              {% if s.registration_deadline %}<span dir="ltr">{{ s.registration_deadline|date:"Y/m/d" }}</span>
+              {% if s.registration_deadline %}
+                <span dir="ltr">{{ s.registration_deadline|date:"Y/m/d" }}</span>
+                {% if s.deadline_state.severity == "EXPIRED" %}
+                  <br><span class="chip danger dot">{% translate "انتهت المهلة" %}</span>
+                {% elif s.deadline_state.severity == "WARNING" %}
+                  <br><span class="chip warn dot">{% translate "قاربت المهلة" %}{% if s.deadline_state.days_left %} — <span class="num">{{ s.deadline_state.days_left }}</span> {% translate "يوماً" %}{% else %} — {% translate "آخر يوم" %}{% endif %}</span>
+                {% elif s.deadline_state %}
+                  <br><small class="muted"><span class="num">{{ s.deadline_state.days_left }}</span> {% translate "يوماً متبقياً" %}</small>
+                {% endif %}
               {% else %}<span class="muted">{% translate "غير محدَّدة" %}</span>{% endif %}
             </td>
+            <td class="num">
+              {% if s.enrolled_count %}{{ s.enrolled_count }}
+              {% else %}<span class="muted">0</span>{% endif %}
+            </td>
             <td class="acts">
-              <a class="btn2 ghost" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض الملف" %}</a>
+              <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض الملف" %}</a>
             </td>
           </tr>
           {% if s.rejection_reason_ar %}
-            <tr>
-              <td colspan="8">
-                <p class="hint boxed">
+            <tr class="mohe-reason-row">
+              <td colspan="9">
+                <p class="mohe-reason">
                   <strong>{% translate "سبب الرفض كما ورد" %}:</strong> {{ s.rejection_reason_ar }}
                 </p>
               </td>
             </tr>
           {% endif %}
         {% empty %}
-          <tr><td colspan="8" class="empty">
+          <tr><td colspan="9" class="empty">
             {% if active_filters %}
               <span class="empty-title">{% translate "لا ملف يطابق هذه التصفية" %}</span>
               <span class="empty-body">{% translate "التصفية أعلاه هي ما ضيّق النتيجة، لا أن السجل فارغ. أزل التصفية لترى الملفات كلها — والمرفوضة تبقى معروضة، فهي وحدها ما يدلّ على ما يجب تغييره في إعادة الإرسال (BR-014)." %}</span>
@@ -157,8 +196,97 @@
   </div>
   <div class="card2-body">
     <p class="hint">
-      {% translate "«مهلة التسجيل» تاريخٌ ورد في قرار الوزارة، يُعرض كما هو: هذه الشاشة لا تحكم بانقضائه ولا ترفع إنذاراً عنه. والإرفاق والإرسال وتسجيل القرار تتمّ من صفحة الملف، كلٌّ بصلاحيته." %}
+      {% translate "«مهلة التسجيل» تاريخٌ ورد في قرار الوزارة، يُعرض كما هو، وحالته محسوبة في الخدمة بعدد الأيام الذي يحدده إعداد «mohe_deadline_alert_days» — وهي القاعدة نفسها التي يتنبّه بها التقرير اليومي (BR-015). وتسجيل رفع اسم بعد انقضائها يتطلب سبب تجاوز من مدير المركز (BR-019). والإرفاق والإرسال وتسجيل القرار تتمّ من صفحة الملف، كلٌّ بصلاحيته." %}
     </p>
   </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "Trainee Names for MOHE" %}</h2>
+    {% if can_export_uploaded_names %}
+      <div class="acts">
+        <a class="btn2 sm" href="{% url 'operations:mohe-uploaded-export' %}" download>{% translate "Export Uploaded Names" %}</a>
+      </div>
+    {% endif %}
+  </div>
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "بعد اعتماد التسجيل، يُوثَّق هنا أن اسم المتدرب رُفع يدوياً إلى نظام الوزارة الخارجي. هذه الشاشة لا تتصل بموقع الوزارة ولا تنقل الأسماء تلقائياً." %}
+    </p>
+  </div>
+  {% for section in mohe_name_sections %}
+    <div class="card2-body">
+      <h3 dir="ltr" translate="no">{{ section.cohort_code }}</h3>
+      <p class="hint">
+        {{ section.cohort_name_ar }} — {{ section.program_name_ar }}
+        {% if section.registration_deadline %}
+          · {% translate "مهلة التسجيل" %}: <span dir="ltr">{{ section.registration_deadline|date:"Y/m/d" }}</span>
+        {% endif %}
+      </p>
+      <div class="mohe-state-strip">
+        <span class="chip">{% translate "المعتمدون" %}: <span class="num">{{ section.approved_count }}</span></span>
+        <span class="chip ok">{% translate "رُفعت أسماؤهم" %}: <span class="num">{{ section.uploaded_count }}</span></span>
+        <span class="chip warn">{% translate "بانتظار الرفع" %}: <span class="num">{{ section.pending_count }}</span></span>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>{% translate "المتدرب" %}</th>
+            <th>{% translate "التسجيل" %}</th>
+            <th>{% translate "الحالة" %}</th>
+            <th>{% translate "تاريخ الاعتماد" %}</th>
+            <th>{% translate "حالة الرفع" %}</th>
+            <th>{% translate "تاريخ الرفع" %}</th>
+            <th aria-label="{% translate 'إجراءات' %}"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in section.rows %}
+            <tr>
+              <td>{{ row.participant_name }}</td>
+              <td dir="ltr" translate="no"><strong class="num">{{ row.enrollment_code }}</strong></td>
+              <td><span class="chip {{ row.status|status_tone }}">{{ row.status_display }}</span></td>
+              <td class="num"><span dir="ltr">{{ row.approved_at|date:"Y/m/d" }}</span></td>
+              <td>
+                {% if row.mohe_uploaded_on %}
+                  <span class="chip ok dot">{% translate "مرفوع" %}</span>
+                {% else %}
+                  <span class="chip warn dot">{% translate "بانتظار الرفع" %}</span>
+                  {% if row.upload_requires_manager_reason %}
+                    <br><small class="muted">{% translate "انتهت المهلة؛ التسجيل بعدها يتطلب سبباً من مدير المركز." %}</small>
+                  {% endif %}
+                {% endif %}
+              </td>
+              <td class="num">
+                {% if row.mohe_uploaded_on %}<span dir="ltr">{{ row.mohe_uploaded_on|date:"Y/m/d" }}</span>
+                {% else %}<span class="muted">{% translate "لم يُسجّل" %}</span>{% endif %}
+              </td>
+              <td class="acts">
+                {% if row.can_record_upload %}
+                  <form class="inline-form" method="post" action="{% url 'operations:mohe-name-upload' row.enrollment_code %}">
+                    {% csrf_token %}
+                    <button class="btn2 sm" type="submit">{% translate "Record MOHE Upload" %}</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty">
+              <span class="empty-title">{% translate "لا تسجيلات معتمدة في هذه الدفعة" %}</span>
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% empty %}
+    <div class="card2-body">
+      <p class="empty">
+        <span class="empty-title">{% translate "لا دفعات معتمدة من الوزارة بعد" %}</span>
+      </p>
+    </div>
+  {% endfor %}
 </div>
 {% endblock %}

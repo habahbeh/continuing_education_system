@@ -187,6 +187,36 @@
   /* زرّ يُرسل POST يحتاج نموذجه وبطاقة CSRF الخاصة به، والنموذج عنصر كتلة —
      فيهبط الزرّ سطراً. كان يُعالَج بـ `style="display:inline"` سطرياً. */
   .inline-form  { @apply inline-block align-middle; }
+
+  /* حوار التأكيد: `<dialog>` أصلي. بلا سكربت يُرسم لوحةً في مكانه من الصفحة؛
+     ومع السكربت يصير مشروطاً بخلفية معتمة. لا أحمر فيه: الفتح إجراء رسمي لا هدم. */
+  .modal            { @apply rounded-xl border border-line bg-white text-ink p-0 shadow-lg
+                             w-[calc(100%-2rem)] max-w-lg mt-3; }
+  .modal:modal      { @apply mt-0 mx-auto; }
+  .modal::backdrop  { background: rgb(17 24 39 / .45); }
+  .modal-head       { @apply border-b border-line px-4 py-3; }
+  .modal-head h2    { @apply text-base font-black m-0; }
+  .modal-body       { @apply px-4 py-3 text-sm; text-wrap: pretty; }
+  .modal-body .dl   { @apply mt-3; }
+  .modal-acts       { @apply flex flex-wrap items-center gap-2 border-t border-line px-4 py-3; }
+
+  /* قائمة «إجراءات الحالة» في صفّ التسجيل: مُفصح أصلي يطوي المخارج الثلاثة،
+     وكلُّ بند يفتح حواره. الألوان بحسب الفعل: التخرج محايد، الانسحاب تنبيه،
+     والفصل أحمر لأنه إجراء إداري جزائي. */
+  .row-menu               { @apply inline-block align-middle; }
+  .row-menu > summary     { list-style: none; }
+  .row-menu > summary::-webkit-details-marker { display: none; }
+  .row-menu[open]         { @apply block; }
+  .row-menu[open] > summary { @apply bg-brand-100 text-brand-800 border-brand-200; }
+  /* داخل الخلية لا فوقها: غلاف الجدول يمرّر أفقياً فيقصّ أيّ قائمة عائمة. */
+  .row-menu-list          { @apply mt-1 inline-grid min-w-[11rem] rounded-lg border border-line bg-white p-1 text-start whitespace-normal; }
+  .row-menu-item          { @apply block w-full rounded-md px-3 py-1.5 text-start text-sm font-bold text-ink; }
+  .row-menu-item:hover    { @apply bg-surface-2; }
+  .row-menu-item.warn     { @apply text-warn; }
+  .row-menu-item.warn:hover   { @apply bg-warn-soft; }
+  .row-menu-item.danger   { @apply text-danger; }
+  .row-menu-item.danger:hover { @apply bg-danger-soft; }
+  .modal .fld             { @apply mt-3 mb-0; }
   /* خلية الإجراءات لا تلتفّ ولا تُمطّ. */
   .tbl td.acts  { @apply whitespace-nowrap text-end; }
 
@@ -229,6 +259,57 @@
   /* شرح داخل السياق — قاعدة عمل أو حدّ نظام، لا حدث. أهدأ من التنبيه. */
   .hint         { @apply text-xs text-ink-3 mb-3; text-wrap: pretty; }
   .hint.boxed   { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2; }
+
+  /* --- سجل الوزارة: لوحة تحكّم لا تقرير ------------------------------------
+   * الصفحة تُقرأ من أعلى: كم ملفاً في كل حالة، ثم ما الذي رُفض ولماذا، ثم
+   * السجل. الجدول طبقةٌ ثانية لا الشاشة كلها.
+   *
+   * ترتيب ما داخل الشارة لم يُمسّ — «الحالة: العدد» كما هي — وإنما كبر العدد
+   * وتغيّر وعاؤها. لهذا يبقى العدد بعد الحالة لا فوقها.
+   */
+  .mohe-overview      { @apply mb-4; }
+  .mohe-overview > .muted { @apply block text-2xs mb-1.5; }
+  .mohe-state-strip   { @apply grid gap-2;
+                        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+  /* بطاقة لكل حالة، حاشيتها البادئة بلون الحالة. */
+  .mohe-state         { @apply rounded-xl border border-line bg-white px-3 py-2.5;
+                        border-inline-start-width: 4px;
+                        border-inline-start-color: theme(colors.line.DEFAULT); }
+  .mohe-state.ok      { border-inline-start-color: theme(colors.ok.DEFAULT); }
+  .mohe-state.warn    { border-inline-start-color: theme(colors.warn.DEFAULT); }
+  .mohe-state.danger  { border-inline-start-color: theme(colors.danger.DEFAULT); }
+  .mohe-state.info    { border-inline-start-color: theme(colors.info.DEFAULT); }
+  /* الشارة تفقد حبّتها داخل البطاقة وتبقى بلون حالتها: العدد يكبر، والحالة
+     تقف على خطّ أساسه. لونُ النصّ يبقى من `.chip.ok` وأخواتها. */
+  .mohe-state .chip   { @apply flex flex-wrap items-baseline gap-x-1.5 w-full
+                               rounded-none border-0 bg-transparent px-0 py-0 text-xs font-bold;
+                        white-space: normal; }
+  .mohe-state .chip .num { @apply text-3xl font-black; line-height: 1; }
+  /* الحالة المصفّى بها الآن: أرضية وحلقة — ويسمّيها سطر «نتائج مصفّاة» تحتها
+     بالنصّ، فلا يقع التمييز على اللون وحده. */
+  .mohe-state.is-on   { @apply bg-brand-50 ring-2; }
+
+  /* السجل طبقةٌ ثانية بعد الشريط، فعنوانه أهدأ من أن يزاحمه. */
+  .mohe-register .card2-head    { @apply py-2; }
+  .mohe-register .card2-head h2 { @apply text-xs text-ink-2; }
+
+  /* السجل: صفوفٌ أضيق، وبياناتٌ ثانوية أهدأ، وحالةٌ أوضح. */
+  .mohe-tbl td        { @apply py-1.5; }
+  .mohe-tbl td small  { @apply text-2xs; }
+  .mohe-tbl td .chip.dot { @apply text-xs px-2.5 py-1; }
+  /* «عرض الملف» كان شبحاً بلا حدّ فلا يُرى حتى يُبحث عنه. */
+  .mohe-action        { @apply bg-white text-brand-700 border-brand-200; }
+  .mohe-action:hover  { @apply bg-brand-50 border-brand-300; }
+
+  /* سبب الرفض: النصّ الوحيد الذي يقول ما يجب تغييره في إعادة الإرسال
+     (BR-014). بطاقة تنبيه داخل الصفّ نفسه، بلون حالة الرفض لا بأصفر: القرار
+     ورد من الوزارة ولم تستنتجه الشاشة. */
+  .mohe-reason-row td { @apply px-3; padding-top: 0; padding-bottom: .625rem; }
+  .mohe-reason        { @apply rounded-lg bg-danger-soft px-3 py-2.5 text-xs text-ink-2;
+                        border: 1px solid theme(colors.danger.line);
+                        border-inline-start: 4px solid theme(colors.danger.DEFAULT);
+                        text-wrap: pretty; }
+  .mohe-reason strong { @apply text-danger; }
 
   /* --- الأزرار --------------------------------------------------------- */
   /* كانت المفردة كلها `.btn2` و`.btn2.primary`: في صف التسجيلات يتساوى
@@ -454,6 +535,77 @@
                          text-2xs font-black bg-line-2 text-ink-2; font-variant-numeric: tabular-nums; }
   .step.is-done .step-num { @apply bg-brand-700 text-white; }
   .step-body    { @apply p-4; }
+
+  /* --- رحلة العمل: الخطوات الثماني ---------------------------------------
+   * بطاقةٌ تُقرأ في ثوانٍ. `.step` و`.step-num` و`.step-body` مشتركة مع شاشات
+   * أخرى، فكل ما دونه محصور داخل `.journey-flow`.
+   * الهندسة: حشوة 2.5rem، وقطر النقطة 2rem عند ‎-2.5rem — فمركزها ‎-1.5rem
+   * أفقياً و0.75rem رأسياً، وعليهما يمرّ الواصل ويقف سطر العنوان.
+   */
+  .journey-flow { @apply relative; list-style: none; margin: 0; padding: 0;
+                  padding-inline-start: 2.5rem; }
+  .journey-flow > .step {
+    @apply relative bg-transparent rounded-none mb-4;
+    border: 0; border-inline-start-width: 0; overflow: visible;
+  }
+  .journey-flow > .step:last-child { @apply mb-0; }
+  /* الواصل من نقطةٍ إلى التي تليها، وينقطع عند الثامنة. */
+  .journey-flow > .step::before {
+    content: ""; position: absolute; width: 2px;
+    inset-inline-start: calc(-1.5rem - 1px); top: 1.25rem; bottom: -1rem;
+    @apply bg-brand-200;
+  }
+  .journey-flow > .step:last-child::before { content: none; }
+  .journey-flow > .step > .step-num {
+    position: absolute; inset-inline-start: -2.5rem; top: -.25rem;
+    @apply w-8 h-8 text-sm bg-brand-700 text-white border-0;
+    box-shadow: 0 0 0 3px theme(colors.surface.DEFAULT);
+  }
+  /* العنوان والدور سطرٌ واحد على أرضية الصفحة، لا شريط رأسٍ فوق البطاقة. */
+  .journey-flow > .step > h3 { @apply text-base font-extrabold text-ink; display: inline; }
+  .journey-flow > .step > .chip { @apply align-middle; margin-inline-start: .5rem; }
+
+  .journey-flow > .step > .step-body {
+    @apply bg-white border border-line rounded-xl mt-2; padding: .75rem .875rem;
+  }
+  .journey-summary { @apply text-sm text-ink; text-wrap: pretty; }
+
+  /* صفّ الفعل: الزرّ بلون الهوية ليُرى، والقواعد مطويّة بجانبه. */
+  .journey-actions { @apply flex flex-wrap items-center gap-2 mt-2.5; }
+  .journey-actions > .btn2 { @apply bg-brand-700 text-white border-brand-700; }
+  .journey-actions > .btn2:hover  { @apply bg-brand-600 border-brand-600; }
+  .journey-actions > .btn2:active { @apply bg-brand-800 border-brand-800; }
+
+  /* القواعد خلف مُفصح أصلي: البطاقة تبقى قصيرة والنصّ كاملٌ على بُعد نقرة. */
+  .journey-checks > summary {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface-2
+           px-2.5 py-1 text-2xs font-bold text-ink-2 cursor-pointer select-none;
+    list-style: none;
+  }
+  .journey-checks > summary::-webkit-details-marker { display: none; }
+  .journey-checks > summary::after { content: "▾"; @apply text-ink-3; }
+  .journey-checks[open] > summary { @apply bg-brand-100 text-brand-800 border-brand-200; }
+  .journey-checks[open] > summary::after { content: "▴"; }
+  .journey-checks > summary:focus-visible { @apply ring-2 ring-offset-2; outline: none; }
+  /* مفتوحةً تأخذ سطرها كاملاً فلا تزاحم الزرّ. */
+  .journey-checks[open] { flex-basis: 100%; }
+  .journey-checks > ul { @apply grid gap-1.5 mt-2; list-style: none; margin-inline: 0; padding: 0;
+                         grid-template-columns: 1fr; }
+  @media (min-width: 1024px) {
+    .journey-checks > ul { grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); }
+  }
+  .journey-check {
+    @apply relative rounded-lg border border-line-2 bg-surface-2 pe-2.5 py-1.5 text-2xs text-ink-2;
+    padding-inline-start: 1.5rem; text-wrap: pretty;
+  }
+  .journey-check::before {
+    content: "\2713"; position: absolute; inset-inline-start: .5rem; top: .375rem;
+    @apply text-brand-700 font-black;
+  }
+
+  /* الجوار: حاشيةٌ صغيرة لا محتوى رئيسي. */
+  .journey-meta { @apply flex flex-wrap gap-x-4 gap-y-0.5 mt-2.5 text-2xs text-ink-3; }
+  .journey-meta b { @apply font-bold text-ink-2; }
 
   /* --- الحالات الفارغة -------------------------------------------------- */
   /* كانت جملة واحدة داخل `<td colspan>`: «لا شركاء». لا سبب ولا خطوة تالية. */

@@ -116,15 +116,60 @@
   <div class="card2">
     <div class="card2-head"><h2>{% translate "فتح براءة ذمة" %}</h2></div>
     <div class="card2-body">
-      <p class="hint boxed">{% translate "تُعرض التسجيلات المنتهية (تخرج · انسحاب · فصل) التي لا براءة قائمة لها." %}</p>
+      <p class="hint boxed">{% translate "تُعرض التسجيلات المنتهية (تخرج · انسحاب · فصل) التي لا براءة قائمة لها. سبب البراءة يُحدَّد تلقائياً من حالة التسجيل، ورقمها يولّده النظام عند الفتح." %}</p>
       <form method="post" novalidate>
         {% csrf_token %}
         <input type="hidden" name="action" value="open">
         {% include "partials/_form.html" %}
         <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "فتح البراءة" %}</button>
+          <button class="btn2 primary" type="submit" id="clearance-open-btn">{% translate "فتح براءة ذمة" %}</button>
         </div>
       </form>
+
+      {% if confirm %}
+        {# خطوة التأكيد: ما طُلب في الإرسال الأول، مقروءاً من الخدمة، بانتظار إرسال ثانٍ يحمل confirmed.
+           حوارٌ أصلي: `open` يجعله لوحةً في الصفحة بلا سكربت، والسكربت يرفعه إلى حوارٍ مشروط
+           (Escape يغلقه، والتركيز يدخل إليه ويعود إلى الزرّ عند الإغلاق). #}
+        <dialog class="modal" id="clearance-confirm" open
+                aria-labelledby="clearance-confirm-title" aria-describedby="clearance-confirm-copy">
+          <div class="modal-head"><h2 id="clearance-confirm-title">{% translate "تأكيد فتح براءة الذمة" %}</h2></div>
+          <div class="modal-body">
+            <p id="clearance-confirm-copy">{% translate "سيتم فتح براءة ذمة لهذا التسجيل. سبب البراءة يُحدَّد تلقائياً من حالة التسجيل، ورمز البراءة سيولّده النظام." %}</p>
+            <dl class="dl">
+              <dt>{% translate "التسجيل" %}</dt><dd dir="ltr" translate="no">{{ confirm.enrollment_code }}</dd>
+              <dt>{% translate "المشارك" %}</dt><dd>{{ confirm.participant_name }}</dd>
+              <dt>{% translate "حالة التسجيل" %}</dt><dd>{{ confirm.status_display }}</dd>
+              <dt>{% translate "سبب البراءة" %}</dt><dd><span class="chip">{{ confirm.case_type_display }}</span></dd>
+              <dt>{% translate "تفتح في" %}</dt><dd dir="ltr">{{ confirm.opened_on|date:"Y/m/d" }}</dd>
+            </dl>
+          </div>
+          <div class="modal-acts">
+            <form method="post" novalidate>
+              {% csrf_token %}
+              <input type="hidden" name="action" value="open">
+              <input type="hidden" name="confirmed" value="1">
+              <input type="hidden" name="enrollment_code" value="{{ confirm.enrollment_code }}">
+              <input type="hidden" name="opened_on" value="{{ confirm.opened_on|date:'Y-m-d' }}">
+              <button class="btn2 primary" type="submit" autofocus>{% translate "تأكيد فتح البراءة" %}</button>
+            </form>
+            <form method="dialog">
+              <button class="btn2" type="submit">{% translate "إلغاء" %}</button>
+            </form>
+          </div>
+        </dialog>
+        <script>
+          (() => {
+            const dialog = document.getElementById("clearance-confirm");
+            if (!dialog || typeof dialog.showModal !== "function") return;
+            dialog.removeAttribute("open");
+            dialog.showModal();
+            dialog.addEventListener("close", () => {
+              const opener = document.getElementById("clearance-open-btn");
+              if (opener) opener.focus();
+            });
+          })();
+        </script>
+      {% endif %}
     </div>
   </div>
 {% endif %}

@@ -14,6 +14,8 @@ paraphrase would drop the reference the centre needs in order to act.
 
 from __future__ import annotations
 
+import csv
+import io
 from collections import Counter
 from datetime import date
 from typing import Any
@@ -463,6 +465,9 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             "can_create": can_create,
             "can_edit": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.EDIT),
             "can_approve": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.APPROVE),
+            # Dismissal is filed as a special case (BR-067), so it wears that
+            # screen's CREATE rather than this one's APPROVE.
+            "can_dismiss": policy.is_allowed(request.user, Screen.SPECIAL_CASES, Action.CREATE),
             "query": request.GET.get("q", ""),
         },
     )
@@ -542,7 +547,7 @@ def _create_enrollment(request: HttpRequest, form: EnrollmentForm) -> HttpRespon
 
 @require_http_methods(["POST"])
 def enrollment_action_view(request: HttpRequest, code: str) -> HttpResponse:
-    """The two state changes the enrolment list offers (BR-018)."""
+    """The state changes the list offers: voucher, approval (BR-018), the three exits (§6.4)."""
     action = request.POST.get("action", "")
     try:
         enrollment = enrollment_service.get_enrollment(
@@ -562,6 +567,28 @@ def enrollment_action_view(request: HttpRequest, code: str) -> HttpResponse:
                 actor=request.user, enrollment=enrollment, request=request
             )
             messages.success(request, _("اعتُمد التسجيل"))
+        elif action == "complete":
+            enrollment_service.complete_enrollment(
+                actor=request.user, enrollment=enrollment, request=request
+            )
+            messages.success(request, _("سُجّل إكمال التسجيل، ويمكن الآن فتح براءة الذمة."))
+        elif action == "withdraw":
+            enrollment_service.withdraw_enrollment(
+                actor=request.user,
+                enrollment=enrollment,
+                reason_ar=request.POST.get("reason_ar", ""),
+                request=request,
+            )
+            messages.success(request, _("سُجّل الانسحاب، ويمكن الآن فتح براءة الذمة."))
+        elif action == "dismiss":
+            enrollment_service.dismiss_enrollment(
+                actor=request.user,
+                enrollment=enrollment,
+                decision_reference=request.POST.get("decision_reference", ""),
+                reason_ar=request.POST.get("reason_ar", ""),
+                request=request,
+            )
+            messages.success(request, _("سُجّل الفصل، ويمكن الآن فتح براءة الذمة."))
         else:
             messages.error(request, _("إجراء غير معروف"))
     except DjangoValidationError as exc:
@@ -630,9 +657,12 @@ def clearances_view(request: HttpRequest) -> HttpResponse:
             ),
         )
 
+    confirm = None
     if request.method == "POST":
         response = _handle_clearance_open(request, form)
-        if response is not None:
+        if isinstance(response, dict):
+            confirm = response
+        elif response is not None:
             return response
 
     return render(
@@ -649,6 +679,9 @@ def clearances_view(request: HttpRequest) -> HttpResponse:
             ),
             "form": form,
             "can_create": can_create,
+            # The confirmation step: what the first submit asked for, read back
+            # from the service, awaiting a second submit that carries ``confirmed``.
+            "confirm": confirm,
             "query": request.GET.get("q", ""),
         },
     )
@@ -656,7 +689,12 @@ def clearances_view(request: HttpRequest) -> HttpResponse:
 
 def _handle_clearance_open(
     request: HttpRequest, form: ClearanceOpenForm | None
-) -> HttpResponse | None:
+) -> HttpResponse | dict[str, Any] | None:
+    """
+    Opening is a formal act, so it takes two submits: the first shows what
+    will happen (returned as a dict for the template), the second — carrying
+    ``confirmed`` — does it. Both run the same form and the same service gate.
+    """
     action = request.POST.get("action", "")
     if action in CLEARANCE_ACTIONS:
         screen, permission = CLEARANCE_ACTIONS[action]
@@ -669,12 +707,15 @@ def _handle_clearance_open(
         enrollment = enrollment_service.get_enrollment(
             actor=request.user, code=data["enrollment_code"], request=request
         )
+        if not request.POST.get("confirmed"):
+            preview = clearance_service.opening_preview(
+                actor=request.user, enrollment=enrollment, request=request
+            )
+            return {**preview, "opened_on": data["opened_on"]}
         clearance = clearance_service.open_clearance(
             actor=request.user,
             enrollment=enrollment,
-            case_type=data["case_type"],
             opened_on=data["opened_on"],
-            code=data["code"],
             request=request,
         )
     except DjangoValidationError as exc:
@@ -684,7 +725,7 @@ def _handle_clearance_open(
         messages.error(request, _("تسجيل غير معروف"))
         return None
 
-    messages.success(request, _("فُتحت براءة الذمة"))
+    messages.success(request, _("فُتحت براءة الذمة برقم %(code)s") % {"code": clearance.code})
     return redirect("operations:clearance-detail", code=clearance.code)
 
 
@@ -1056,8 +1097,92 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             "active_filters": _mohe_active_filters(rows, query, status),
             "status_counts": _mohe_status_counts(rows),
             "can_open_file": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
+            "can_export_uploaded_names": policy.is_allowed(request.user, Screen.MOHE, Action.VIEW),
+            "mohe_name_sections": enrollment_service.list_mohe_name_uploads(
+                actor=request.user, request=request
+            ),
         },
     )
+
+
+@require_http_methods(["POST"])
+def mohe_name_upload_view(request: HttpRequest, code: str) -> HttpResponse:
+    try:
+        enrollment = enrollment_service.get_enrollment(
+            actor=request.user, code=code, request=request
+        )
+    except ObjectDoesNotExist as exc:
+        raise Http404(_("لا يوجد تسجيل بهذا الرمز")) from exc
+
+    try:
+        enrollment_service.mark_uploaded_to_mohe(
+            actor=request.user,
+            enrollment=enrollment,
+            uploaded_on=timezone.localdate(),
+            request=request,
+        )
+    except DjangoValidationError as exc:
+        messages.error(request, _message_of(exc))
+    else:
+        messages.success(request, _("سُجّل رفع اسم المتدرب للوزارة."))
+    return redirect("operations:mohe")
+
+
+#: CSV export of the names register, encoded so Excel reads Arabic correctly.
+#: The BOM in ``utf-8-sig`` is what stops Excel from guessing a codepage.
+MOHE_EXPORT_ENCODING = "utf-8-sig"
+
+
+@require_http_methods(["GET"])
+def mohe_uploaded_export_view(request: HttpRequest) -> HttpResponse:
+    """
+    "Export Uploaded Names" — the trainees already recorded as uploaded.
+
+    The rows come from the service behind the SAME ``Screen.MOHE`` gate as
+    the page, so whoever cannot open the register cannot download it either.
+    """
+    rows = enrollment_service.list_mohe_uploaded_names(actor=request.user, request=request)
+
+    # Written to a buffer and encoded once: streaming rows into an
+    # ``HttpResponse`` with this charset would put a BOM in front of every row.
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            _("المتدرب"),
+            _("رمز التسجيل"),
+            _("البرنامج"),
+            _("الدفعة"),
+            _("الرقم الوزاري"),
+            _("تاريخ اعتماد التسجيل"),
+            _("تاريخ رفع الاسم للوزارة"),
+            _("مهلة التسجيل في الوزارة"),
+        ]
+    )
+    for row in rows:
+        approved_at = row["approved_at"]
+        deadline = row["registration_deadline"]
+        writer.writerow(
+            [
+                row["participant_name"],
+                row["enrollment_code"],
+                row["program_name_ar"],
+                row["cohort_code"],
+                row["mohe_course_number"],
+                timezone.localtime(approved_at).date().isoformat() if approved_at else "",
+                row["mohe_uploaded_on"].isoformat(),
+                deadline.isoformat() if deadline else "",
+            ]
+        )
+
+    response = HttpResponse(
+        buffer.getvalue().encode(MOHE_EXPORT_ENCODING),
+        content_type=f"text/csv; charset={MOHE_EXPORT_ENCODING}",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="mohe-uploaded-names-{timezone.localdate().isoformat()}.csv"'
+    )
+    return response
 
 
 def _mohe_active_filters(

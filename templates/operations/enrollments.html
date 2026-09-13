@@ -5,8 +5,10 @@
 
 {% comment %}
   ما تعرضه هذه الشاشة كلّه من `list_enrollments`، وما تسمح به كلّه من
-  `policy`: «استلام الوصل» بـ can_edit، و«اعتماد» بـ can_approve، و«تسجيل»
-  بـ can_create — والحماية في العرض لا هنا، فالإخفاء عرضٌ لا حراسة.
+  `policy`: «استلام الوصل» بـ can_edit، و«اعتماد» و«تسجيل التخرج» و«تسجيل
+  انسحاب» بـ can_approve، و«تسجيل فصل» بـ can_dismiss (حالة خاصة، BR-067)،
+  و«تسجيل» بـ can_create. والمخارج الثلاثة خلف قائمة «إجراءات الحالة» وكلٌّ
+  منها يفتح حواراً بملخّص التسجيل وحقوله الإلزامية — لا نقرة واحدة تُنهي تسجيلاً — والحماية في العرض لا هنا، فالإخفاء عرضٌ لا حراسة.
 
   شرائح العدّ تصف الصفوف المرسومة على الشاشة لا السجل كلّه: تُحسب فوق نتيجة
   هذا الطلب نفسها، فتتبع المرشّح ويمكن مقابلتها بالجدول تحتها.
@@ -129,6 +131,97 @@
                   <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
                 </form>
               {% endif %}
+              {% if e.status == "ACTIVE" and can_approve or e.status == "ACTIVE" and can_dismiss %}
+                {# المخارج الثلاثة خلف قائمة واحدة: الصفّ يبقى خفيفاً، وكلُّ مخرج يفتح حواراً بملخّصه. #}
+                <details class="row-menu">
+                  <summary class="btn2 sm">{% translate "إجراءات الحالة" %} <span aria-hidden="true">▾</span></summary>
+                  <div class="row-menu-list">
+                    {% if can_approve %}
+                      <button class="row-menu-item" type="button" data-opens="complete-{{ e.code }}">{% translate "تسجيل التخرج" %}</button>
+                      <button class="row-menu-item warn" type="button" data-opens="withdraw-{{ e.code }}">{% translate "تسجيل انسحاب" %}</button>
+                    {% endif %}
+                    {% if can_dismiss %}
+                      <button class="row-menu-item danger" type="button" data-opens="dismiss-{{ e.code }}">{% translate "تسجيل فصل" %}</button>
+                    {% endif %}
+                  </div>
+                </details>
+
+                {% if can_approve %}
+                  <dialog class="modal" id="complete-{{ e.code }}" aria-labelledby="complete-{{ e.code }}-t">
+                    <div class="modal-head"><h2 id="complete-{{ e.code }}-t">{% translate "تأكيد تسجيل التخرج" %}</h2></div>
+                    <form method="post" action="{% url 'operations:enrollment-action' e.code %}" novalidate>
+                      {% csrf_token %}<input type="hidden" name="action" value="complete">
+                      <div class="modal-body">
+                        <p>{% translate "سيتغيّر وضع التسجيل إلى «مكتمل»، ويصبح مؤهّلاً لفتح براءة ذمة بسبب «تخرج». لا تُفتح البراءة تلقائياً." %}</p>
+                        <dl class="dl">
+                          <dt>{% translate "التسجيل" %}</dt><dd dir="ltr" translate="no">{{ e.code }}</dd>
+                          <dt>{% translate "المشارك" %}</dt><dd>{{ e.participant_name }}</dd>
+                          <dt>{% translate "الحالة الحالية" %}</dt><dd>{{ e.status_display }}</dd>
+                          <dt>{% translate "الحالة الجديدة" %}</dt><dd><span class="chip ok">{% translate "مكتمل" %}</span></dd>
+                        </dl>
+                      </div>
+                      <div class="modal-acts">
+                        <button class="btn2 primary" type="submit" autofocus>{% translate "تأكيد تسجيل التخرج" %}</button>
+                        <button class="btn2" type="button" data-closes>{% translate "إلغاء" %}</button>
+                      </div>
+                    </form>
+                  </dialog>
+
+                  <dialog class="modal" id="withdraw-{{ e.code }}" aria-labelledby="withdraw-{{ e.code }}-t">
+                    <div class="modal-head"><h2 id="withdraw-{{ e.code }}-t">{% translate "تأكيد تسجيل الانسحاب" %}</h2></div>
+                    <form method="post" action="{% url 'operations:enrollment-action' e.code %}" novalidate>
+                      {% csrf_token %}<input type="hidden" name="action" value="withdraw">
+                      <div class="modal-body">
+                        <p>{% translate "سيتغيّر وضع التسجيل إلى «منسحب»، ويصبح مؤهّلاً لفتح براءة ذمة بسبب «انسحاب». لا تُفتح البراءة تلقائياً." %}</p>
+                        <dl class="dl">
+                          <dt>{% translate "التسجيل" %}</dt><dd dir="ltr" translate="no">{{ e.code }}</dd>
+                          <dt>{% translate "المشارك" %}</dt><dd>{{ e.participant_name }}</dd>
+                          <dt>{% translate "الحالة الحالية" %}</dt><dd>{{ e.status_display }}</dd>
+                          <dt>{% translate "الحالة الجديدة" %}</dt><dd><span class="chip warn">{% translate "منسحب" %}</span></dd>
+                        </dl>
+                        <div class="fld">
+                          <label for="withdraw-reason-{{ e.code }}">{% translate "سبب الانسحاب" %} <span class="req" aria-hidden="true">*</span></label>
+                          <input id="withdraw-reason-{{ e.code }}" name="reason_ar" type="text" maxlength="255" required autofocus>
+                        </div>
+                      </div>
+                      <div class="modal-acts">
+                        <button class="btn2 primary" type="submit">{% translate "تأكيد تسجيل الانسحاب" %}</button>
+                        <button class="btn2" type="button" data-closes>{% translate "إلغاء" %}</button>
+                      </div>
+                    </form>
+                  </dialog>
+                {% endif %}
+
+                {% if can_dismiss %}
+                  <dialog class="modal" id="dismiss-{{ e.code }}" aria-labelledby="dismiss-{{ e.code }}-t">
+                    <div class="modal-head"><h2 id="dismiss-{{ e.code }}-t">{% translate "تأكيد تسجيل الفصل" %}</h2></div>
+                    <form method="post" action="{% url 'operations:enrollment-action' e.code %}" novalidate>
+                      {% csrf_token %}<input type="hidden" name="action" value="dismiss">
+                      <div class="modal-body">
+                        <p>{% translate "إجراء إداري: سيتغيّر وضع التسجيل إلى «مفصول»، ويصبح مؤهّلاً لفتح براءة ذمة بسبب «فصل». لا فصل بلا قرار (BR-067)، ولا استرداد بعده (BR-068). لا تُفتح البراءة تلقائياً." %}</p>
+                        <dl class="dl">
+                          <dt>{% translate "التسجيل" %}</dt><dd dir="ltr" translate="no">{{ e.code }}</dd>
+                          <dt>{% translate "المشارك" %}</dt><dd>{{ e.participant_name }}</dd>
+                          <dt>{% translate "الحالة الحالية" %}</dt><dd>{{ e.status_display }}</dd>
+                          <dt>{% translate "الحالة الجديدة" %}</dt><dd><span class="chip danger">{% translate "مفصول" %}</span></dd>
+                        </dl>
+                        <div class="fld">
+                          <label for="dismiss-ref-{{ e.code }}">{% translate "مرجع القرار الإداري" %} <span class="req" aria-hidden="true">*</span></label>
+                          <input id="dismiss-ref-{{ e.code }}" name="decision_reference" type="text" maxlength="64" required autofocus>
+                        </div>
+                        <div class="fld">
+                          <label for="dismiss-reason-{{ e.code }}">{% translate "سبب الفصل" %} <span class="req" aria-hidden="true">*</span></label>
+                          <input id="dismiss-reason-{{ e.code }}" name="reason_ar" type="text" maxlength="255" required>
+                        </div>
+                      </div>
+                      <div class="modal-acts">
+                        <button class="btn2 danger" type="submit">{% translate "تأكيد تسجيل الفصل" %}</button>
+                        <button class="btn2" type="button" data-closes>{% translate "إلغاء" %}</button>
+                      </div>
+                    </form>
+                  </dialog>
+                {% endif %}
+              {% endif %}
             </td>
           </tr>
         {% empty %}
@@ -156,8 +249,14 @@
     <div class="card2-head"><h2>{% translate "تسجيل جديد" %}</h2></div>
     <div class="card2-body">
       <p class="hint boxed">
-        {% translate "تُعرض الدفعات المعتمدة وزارياً فقط، وتُحمَّل الرسوم من قائمة الأسعار السارية تلقائياً." %}
+        {% translate "تُعرض الدفعات المعتمدة وزارياً فقط، وتُحمَّل الرسوم من قائمة الأسعار السارية تلقائياً. والمشارك يُختار بالاسم من قائمة من أُدخلت طلبات التحاقهم." %}
       </p>
+      {% if not form.fields.participant_number.choices %}
+        <p class="hint">
+          {% translate "لا مشارك مسجَّل بعد، فلا اسم تختاره القائمة. يبدأ التسجيل من طلب الالتحاق." %}
+          <a href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
+        </p>
+      {% endif %}
       <form method="post">
         {% csrf_token %}
         {% include "partials/_form.html" %}
@@ -168,4 +267,22 @@
     </div>
   </div>
 {% endif %}
+{# فتح حوارات الحالة وإغلاقها: كلُّ زرّ `data-opens` يفتح الحوار المسمّى، وEscape أو «إلغاء» يغلقه ويعيد التركيز إلى الزرّ. #}
+<script>
+  (() => {
+    document.querySelectorAll("[data-opens]").forEach((opener) => {
+      opener.addEventListener("click", () => {
+        const dialog = document.getElementById(opener.dataset.opens);
+        if (!dialog || typeof dialog.showModal !== "function") return;
+        const menu = opener.closest("details");
+        if (menu) menu.removeAttribute("open");
+        dialog.showModal();
+        dialog.addEventListener("close", () => opener.focus(), { once: true });
+      });
+    });
+    document.querySelectorAll("[data-closes]").forEach((closer) => {
+      closer.addEventListener("click", () => closer.closest("dialog")?.close());
+    });
+  })();
+</script>
 {% endblock %}

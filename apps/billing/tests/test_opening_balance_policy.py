@@ -31,6 +31,7 @@ from apps.billing.models import (
 )
 from apps.billing.services import account_service
 from apps.billing.services import opening_balance_service as obs
+from apps.operations.models import Enrollment, EnrollmentStatus
 
 pytestmark = pytest.mark.django_db
 
@@ -87,10 +88,13 @@ def _open_and_clear_custody(clearance_service, finance, manager, enrollment, cod
     where the old-debt guard lives.
     """
     del finance
+    # Built raw above, ended raw here: §6.4 opens a clearance on a finished
+    # enrolment only, and the lifecycle is not what these tests are about.
+    Enrollment.objects.filter(pk=enrollment.pk).update(status=EnrollmentStatus.COMPLETED)
+    enrollment.refresh_from_db()
     clearance = clearance_service.open_clearance(
         actor=manager,
         enrollment=enrollment,
-        case_type="GRADUATION",
         opened_on=PERIOD_END,
         code=code,
     )

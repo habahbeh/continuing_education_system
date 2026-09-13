@@ -30,6 +30,7 @@ from apps.billing.models import (
     OpeningBalanceStatus,
 )
 from apps.billing.services import opening_balance_service as obs
+from apps.operations.models import Enrollment, EnrollmentStatus
 
 pytestmark = pytest.mark.django_db
 
@@ -475,10 +476,12 @@ def test_a_paid_refund_does_not_block_a_clearance(
 
     assert obs.unsettled_debt_for(live_enrollment.participant) == []
 
+    # §6.4 — a clearance opens on a finished enrolment only.
+    Enrollment.objects.filter(pk=live_enrollment.pk).update(status=EnrollmentStatus.COMPLETED)
+    live_enrollment.refresh_from_db()
     clearance = clearance_service.open_clearance(
         actor=approver,
         enrollment=live_enrollment,
-        case_type="GRADUATION",
         opened_on=PERIOD_END,
         code="CLR-8D4-1",
     )

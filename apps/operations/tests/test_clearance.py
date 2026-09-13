@@ -29,6 +29,8 @@ from apps.operations.models import (
     ClearanceCaseType,
     ClearanceStatus,
     ClearanceStep,
+    Enrollment,
+    EnrollmentStatus,
 )
 from apps.operations.services import clearance_service
 
@@ -47,20 +49,23 @@ def finance_manager(seeded_settings):
 
 
 @pytest.fixture
-def settled(make_cohort, approve_cohort, make_enrollment, charge_and_pay):
+def settled(make_cohort, approve_cohort, make_enrollment, charge_and_pay, finish_enrollment):
     """
-    An enrolment on SC-NET, paid to whatever the test wants.
+    A finished enrolment on SC-NET, paid to whatever the test wants.
 
     270 due: 20 registration + 250 tuition. Paying exactly that leaves a zero
-    balance, which is the only state step 2 will close on.
+    balance, which is the only state step 2 will close on. ``status`` is the
+    final status it ended in — COMPLETED unless the test says otherwise.
     """
 
-    def _make(paid: str = "270.000", index: int = 1, code: str = "CO-CLR"):
+    def _make(
+        paid: str = "270.000", index: int = 1, code: str = "CO-CLR", status: str = "COMPLETED"
+    ):
         cohort = make_cohort("SC-NET", code=code)
         approve_cohort(cohort, course_number=f"M-{code}")
         enrollment = make_enrollment(cohort, index=index)
         charge_and_pay(enrollment, amount=paid)
-        return enrollment
+        return finish_enrollment(enrollment, to_status=status)
 
     return _make
 
@@ -69,7 +74,6 @@ def _open(actor, enrollment, code="CLR-001"):
     return clearance_service.open_clearance(
         actor=actor,
         enrollment=enrollment,
-        case_type=ClearanceCaseType.GRADUATION,
         opened_on=TERM_START,
         code=code,
     )
@@ -114,7 +118,6 @@ def test_one_live_clearance_per_enrolment(settled, manager) -> None:
             code="CLR-RAW",
             participant=enrollment.participant,
             enrollment=enrollment,
-            case_type=ClearanceCaseType.WITHDRAWAL,
             opened_on=TERM_START,
             opened_by=manager,
             active_key=1,
@@ -425,3 +428,178 @@ def test_the_database_refuses_a_completed_clearance_with_no_timestamp(settled, m
     clearance = _open(manager, settled())
     with pytest.raises(IntegrityError), transaction.atomic():
         Clearance.objects.filter(pk=clearance.pk).update(status=ClearanceStatus.COMPLETED)
+
+
+# ---------------------------------------------------------------------------
+# The clearance number is the system's to mint — CLR-YYYY-NNNNNN
+# ---------------------------------------------------------------------------
+CODE_SHAPE = r"^CLR-\d{4}-\d{6}$"
+
+
+def test_a_clearance_opened_without_a_code_is_numbered_by_the_system(settled, manager) -> None:
+    import re
+
+    clearance = clearance_service.open_clearance(
+        actor=manager,
+        enrollment=settled(),
+        opened_on=TERM_START,
+    )
+    assert re.match(CODE_SHAPE, clearance.code), clearance.code
+    assert clearance.code.startswith(f"CLR-{TERM_START.year}-")
+
+
+def test_two_openings_in_one_year_take_consecutive_numbers(settled, manager) -> None:
+    first, second = (
+        clearance_service.open_clearance(
+            actor=manager,
+            enrollment=settled(code=f"CO-SEQ-{i}", index=70 + i),
+            opened_on=TERM_START,
+        )
+        for i in (1, 2)
+    )
+    assert first.code != second.code
+    assert int(second.code.rsplit("-", 1)[1]) == int(first.code.rsplit("-", 1)[1]) + 1
+
+
+def test_the_counter_skips_a_number_already_taken_by_hand(settled, manager) -> None:
+    """A hand-entered code from before this sprint must not collide with the counter."""
+    from apps.core.services.numbering_service import next_number
+
+    year = str(TERM_START.year)
+    # Peek at what the counter would hand out next, then take it by hand.
+    with transaction.atomic():
+        taken = next_number(
+            clearance_service.CLEARANCE_SCOPE,
+            year,
+            prefix=f"CLR-{year}-",
+            padding=clearance_service.CLEARANCE_PADDING,
+        )
+        transaction.set_rollback(True)
+    _open(manager, settled(code="CO-HAND", index=73), code=taken)
+
+    minted = clearance_service.open_clearance(
+        actor=manager,
+        enrollment=settled(code="CO-MINT", index=74),
+        opened_on=TERM_START,
+    )
+    assert minted.code != taken
+    assert Clearance.objects.filter(code__startswith=f"CLR-{year}-").count() == 2
+
+
+def test_the_year_partitions_the_sequence(settled, manager) -> None:
+    this_year = clearance_service.open_clearance(
+        actor=manager,
+        enrollment=settled(code="CO-Y1", index=75),
+        opened_on=TERM_START,
+    )
+    last_year = clearance_service.open_clearance(
+        actor=manager,
+        enrollment=settled(code="CO-Y0", index=76),
+        opened_on=date(TERM_START.year - 1, 12, 31),
+    )
+    assert this_year.code.endswith("-000001")
+    assert last_year.code.endswith("-000001")
+    assert this_year.code != last_year.code
+
+
+# ---------------------------------------------------------------------------
+# §6.4 — the case follows the enrolment's final status; clearance never picks it
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("status", "case_type"),
+    [
+        (EnrollmentStatus.COMPLETED, ClearanceCaseType.GRADUATION),
+        (EnrollmentStatus.WITHDRAWN, ClearanceCaseType.WITHDRAWAL),
+        (EnrollmentStatus.DISMISSED, ClearanceCaseType.DISMISSAL),
+    ],
+)
+def test_the_case_is_read_off_the_final_status(settled, manager, status, case_type) -> None:
+    enrollment = settled(status=status)
+    assert clearance_service.clearance_case_for_enrollment(enrollment) == case_type
+
+    clearance = _open(manager, enrollment)
+    assert clearance.case_type == case_type
+    audit = AuditEvent.objects.filter(entity_type="operations.Clearance", action="CREATE").latest(
+        "occurred_at"
+    )
+    assert audit.changes["case_type"] == case_type
+    assert audit.reference == clearance.code
+
+
+def test_a_dismissal_through_the_special_case_service_opens_a_dismissal_clearance(
+    make_cohort, approve_cohort, make_enrollment, charge_and_pay, finish_enrollment, manager
+) -> None:
+    """The real dismissal path (BR-067), not a bare status change."""
+    from apps.operations.services import special_case_service
+
+    cohort = make_cohort("SC-NET", code="CO-DSM")
+    approve_cohort(cohort, course_number="M-DSM")
+    enrollment = make_enrollment(cohort, index=80)
+    charge_and_pay(enrollment, amount="270.000")
+    finish_enrollment(enrollment, to_status=EnrollmentStatus.ACTIVE)
+    special_case_service.dismiss(
+        actor=manager,
+        enrollment=enrollment,
+        decision_reference="قرار 7/2026",
+        detail_ar="مخالفة سلوكية موثّقة",
+        occurred_on=TERM_START,
+        code="SC-DSM-1",
+    )
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.DISMISSED
+    assert not Clearance.objects.filter(enrollment=enrollment).exists(), "dismissal opens nothing"
+
+    assert _open(manager, enrollment).case_type == ClearanceCaseType.DISMISSAL
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        EnrollmentStatus.PENDING_FINANCE,
+        EnrollmentStatus.ACTIVE,
+        EnrollmentStatus.INCOMPLETE,
+        EnrollmentStatus.NOT_ATTENDED,
+        EnrollmentStatus.CANCELLED,
+        EnrollmentStatus.TRANSFERRED_OUT,
+        EnrollmentStatus.DEFERRED,
+    ],
+)
+def test_an_enrolment_that_has_not_ended_in_one_of_the_three_ways_is_refused(
+    make_cohort, approve_cohort, make_enrollment, manager, status
+) -> None:
+    """
+    ACTIVE and PENDING_FINANCE have nothing to clear. INCOMPLETE and
+    NOT_ATTENDED used to be offered; §6.4 names no case for them, so until
+    the business says which (if any) they are refused rather than guessed.
+    """
+    cohort = make_cohort("SC-NET", code=f"CO-NC-{status[:6]}")
+    approve_cohort(cohort, course_number=f"M-NC-{status[:6]}")
+    enrollment = make_enrollment(cohort, index=81)
+    Enrollment.objects.filter(pk=enrollment.pk).update(status=status)
+    enrollment.refresh_from_db()
+
+    with pytest.raises(clearance_service.EnrollmentNotClearableError):
+        _open(manager, enrollment)
+    assert not Clearance.objects.filter(enrollment=enrollment).exists()
+    assert enrollment.code not in dict(
+        clearance_service.clearable_enrollment_choices(actor=manager)
+    )
+
+
+def test_the_offered_enrolments_name_the_case_they_will_open(settled, manager) -> None:
+    graduate = settled(code="CO-LBL-G", index=82)
+    leaver = settled(code="CO-LBL-W", index=83, status=EnrollmentStatus.WITHDRAWN)
+    offered = dict(clearance_service.clearable_enrollment_choices(actor=manager))
+    assert "تخرج" in offered[graduate.code]
+    assert "انسحاب" in offered[leaver.code]
+
+
+def test_open_clearance_takes_no_case_type(settled, manager) -> None:
+    """The case is not an argument, so no caller can post one past the status."""
+    with pytest.raises(TypeError):
+        clearance_service.open_clearance(  # type: ignore[call-arg]
+            actor=manager,
+            enrollment=settled(),
+            case_type=ClearanceCaseType.WITHDRAWAL,
+            opened_on=TERM_START,
+        )

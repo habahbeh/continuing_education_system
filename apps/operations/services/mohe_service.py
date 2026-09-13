@@ -23,6 +23,7 @@ from typing import Any
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.core.models.attachment import AttachmentPurpose
 from apps.core.services.audit_service import write_audit
@@ -276,8 +277,14 @@ CONTENT_FIELDS: tuple[str, ...] = (
 )
 
 
-def _row(submission: MoheSubmission) -> dict[str, Any]:
+def _row(
+    submission: MoheSubmission,
+    *,
+    as_of: date | None = None,
+    alert_days: int | None = None,
+) -> dict[str, Any]:
     cohort = submission.cohort
+    as_of = as_of or timezone.localdate()
     return {
         "id": submission.pk,
         "cohort_code": cohort.code,
@@ -291,6 +298,19 @@ def _row(submission: MoheSubmission) -> dict[str, Any]:
         "submitted_on": submission.submitted_on,
         "decided_on": submission.decided_on,
         "registration_deadline": submission.registration_deadline,
+        # Days left and whether that is near or past, from the rule the daily
+        # job counts by — never recomputed on the page.
+        "deadline_state": deadline_state(
+            status=submission.status,
+            deadline=submission.registration_deadline,
+            as_of=as_of,
+            alert_days=alert_days,
+        ),
+        # BR-019 reads with the deadline: a window closing on a cohort nobody
+        # was registered onto is the one that gets the file refused next time.
+        # Counted by the cohort's own property so the exclusions are not
+        # written twice; it costs a query a row, which this register can pay.
+        "enrolled_count": cohort.enrolled_count,
         "rejection_reason_ar": submission.rejection_reason_ar,
         "resubmission_of": submission.resubmission_of_id,
         "created_at": submission.created_at,
@@ -318,7 +338,11 @@ def list_submissions(
             cohort__name_ar__icontains=query
         )
 
-    return [_row(s) for s in queryset.order_by("-created_at")]
+    as_of = timezone.localdate()
+    alert_days = deadline_alert_days(as_of=as_of)
+    return [
+        _row(s, as_of=as_of, alert_days=alert_days) for s in queryset.order_by("-created_at")
+    ]
 
 
 def get_submission(*, actor: Any, submission_id: int, request: Any = None) -> dict[str, Any]:
@@ -428,6 +452,40 @@ def attach_document(
     )
 
 
+def deadline_alert_days(*, as_of: date) -> int:
+    """BR-015 — how many days before the deadline counts as «near», per settings."""
+    return int(get_setting(DEADLINE_ALERT_KEY, as_of=as_of, default=15))
+
+
+def deadline_state(
+    *,
+    status: str,
+    deadline: date | None,
+    as_of: date,
+    alert_days: int | None = None,
+) -> dict[str, Any] | None:
+    """
+    Where one approved file stands against its registration window (BR-015).
+
+    ``None`` where the question does not arise: a file the ministry has not
+    approved has no window, and an approved one with no deadline recorded has
+    none that can run out. The caller renders; what «near» means is decided
+    here alone, so the register and the daily job cannot disagree about it.
+
+    ``alert_days`` is an argument so a list can read the setting once instead
+    of once per row.
+    """
+    if status != MoheStatus.APPROVED or deadline is None:
+        return None
+    if alert_days is None:
+        alert_days = deadline_alert_days(as_of=as_of)
+    days_left = (deadline - as_of).days
+    # Past the deadline is not a louder warning of the same thing: BR-019 stops
+    # accepting new names entirely.
+    severity = "EXPIRED" if days_left < 0 else "WARNING" if days_left <= alert_days else "OK"
+    return {"days_left": days_left, "severity": severity, "alert_days": alert_days}
+
+
 def deadline_alerts(*, as_of: date) -> list[dict[str, Any]]:
     """
     BR-015 — approved cohorts whose registration window is closing or closed.
@@ -435,7 +493,7 @@ def deadline_alerts(*, as_of: date) -> list[dict[str, Any]]:
     Returns data rather than sending anything: the daily command prints it,
     a dashboard will render it, and neither needs its own copy of the rule.
     """
-    alert_days = int(get_setting(DEADLINE_ALERT_KEY, as_of=as_of, default=15))
+    alert_days = deadline_alert_days(as_of=as_of)
     horizon = as_of + timedelta(days=alert_days)
 
     submissions = (
@@ -450,19 +508,21 @@ def deadline_alerts(*, as_of: date) -> list[dict[str, Any]]:
 
     alerts: list[dict[str, Any]] = []
     for submission in submissions:
-        deadline = submission.registration_deadline
-        if deadline is None:  # pragma: no cover - excluded by the filter
+        state = deadline_state(
+            status=submission.status,
+            deadline=submission.registration_deadline,
+            as_of=as_of,
+            alert_days=alert_days,
+        )
+        if state is None:  # pragma: no cover - excluded by the filter
             continue
-        days_left = (deadline - as_of).days
         alerts.append(
             {
                 "cohort_code": submission.cohort.code,
                 "cohort_name_ar": submission.cohort.name_ar,
-                "deadline": deadline,
-                "days_left": days_left,
-                # Past the deadline is not a louder warning of the same thing:
-                # BR-019 stops accepting new names entirely.
-                "severity": "EXPIRED" if days_left < 0 else "WARNING",
+                "deadline": submission.registration_deadline,
+                "days_left": state["days_left"],
+                "severity": state["severity"],
             }
         )
     return alerts
@@ -478,7 +538,9 @@ __all__ = [
     "attach_document",
     "cohort_is_approved",
     "create_submission",
+    "deadline_alert_days",
     "deadline_alerts",
+    "deadline_state",
     "get_submission",
     "list_submissions",
     "missing_attachments",
