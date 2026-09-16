@@ -405,11 +405,11 @@ GUIDES: dict[str, Guide] = {
         ),
     ),
     "clearance": Guide(
-        what=_("إخلاء طرف المشارك، على ثلاث خطوات لا يُعاد ترتيبها."),
+        what=_("إخلاء طرف المشارك، على خطوات لا يُعاد ترتيبها."),
         who=_(
-            "المركز في الخطوتين الأولى والثالثة، والمالية في الثانية بتوقيعين؛ وحساب التدقيق يقرأ."
+            "المركز في خطوة العُهد وفي تسليم الشهادة إن وُجدت، والمالية في الخطوة المالية بتوقيعين؛ وحساب التدقيق يقرأ."
         ),
-        after=_("باكتمالها تُصدَر الشهادة."),
+        after=_("باكتمالها تُغلق البراءة، وللخرّيج تُصدَر الشهادة."),
         links=((Screen.CERTIFICATES, "operations:certificates", _("الشهادات")),),
         # Two rules refuse on this screen, and the second one surprises people:
         # step 2 is not one signature by "finance" but two by two PEOPLE, and
