@@ -263,9 +263,24 @@ def _create_enrollment(
     return enrollment
 
 
+def _require_not_final(enrollment: Enrollment, verb_ar: str) -> None:
+    """
+    The registration flow (voucher, approval) is over once the enrolment has
+    ended — a cancelled application must not be approved into ACTIVE, and a
+    voucher against it would be logged for nothing. Refused here, before any
+    write, in the same shape as the exits' ``_require_active``.
+    """
+    if enrollment.is_final:
+        raise InvalidStatusTransitionError(
+            f"لا يُسجَّل {verb_ar} لتسجيل انتهى؛ التسجيل {enrollment.code} "
+            f"في الحالة {enrollment.get_status_display()}."
+        )
+
+
 def record_voucher(*, actor: Any, enrollment: Enrollment, request: Any = None) -> Enrollment:
     """BR-018's precondition — the voucher is logged before anyone can approve."""
     policy.require(actor, Screen.ENROLLMENTS, Action.EDIT, request=request)
+    _require_not_final(enrollment, "استلام الوصل")
     return _record_voucher(actor=actor, enrollment=enrollment, request=request)
 
 
@@ -293,6 +308,7 @@ def approve_enrollment(*, actor: Any, enrollment: Enrollment, request: Any = Non
     """WORKFLOWS §1.2 T3 — BR-018: no approval without a recorded voucher."""
     policy.require(actor, Screen.ENROLLMENTS, Action.APPROVE, request=request)
 
+    _require_not_final(enrollment, "اعتماد التسجيل")
     if not enrollment.voucher_received:
         raise VoucherRequiredError("لا يمكن اعتماد التسجيل قبل تسجيل استلام الوصل (BR-018).")
     return _approve_enrollment(actor=actor, enrollment=enrollment, request=request)
@@ -796,6 +812,7 @@ def list_enrollments(
                 "status_note_ar": enrollment.status_note_ar,
                 "voucher_received": enrollment.voucher_received,
                 "is_approved": enrollment.approved_by_id is not None,
+                "is_final": enrollment.is_final,
                 "balance": state.balance,
                 "total_due": state.total_due,
                 "total_paid": state.total_paid,

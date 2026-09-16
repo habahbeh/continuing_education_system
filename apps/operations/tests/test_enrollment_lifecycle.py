@@ -81,6 +81,36 @@ def test_recording_the_voucher_stamps_who_and_when(
     assert enrollment.voucher_received_by_id == registrar.pk
 
 
+def test_a_cancelled_application_takes_neither_a_voucher_nor_an_approval(
+    approved_cohort, make_enrollment, registrar, manager
+) -> None:
+    """
+    §6.5 — cancellation ends the registration flow. The voucher and the
+    approval are refused up front, in the exits' own shape, and nothing is
+    written: no voucher stamp, no approver, and the status stays CANCELLED.
+    """
+    from apps.operations.services import special_case_service
+
+    enrollment = make_enrollment(approved_cohort)
+    special_case_service.cancel_registration(
+        actor=manager,
+        enrollment=enrollment,
+        reason_ar="اعتذر قبل البدء",
+        occurred_on=date(2026, 9, 20),
+        code="SC-CXL-V",
+    )
+
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.CANCELLED
+    assert enrollment.voucher_received is False
+    assert enrollment.approved_by_id is None
+
+
 def test_a_voucher_flag_without_a_timestamp_is_refused(approved_cohort, make_enrollment) -> None:
     enrollment = make_enrollment(approved_cohort)
     with pytest.raises(IntegrityError), transaction.atomic():

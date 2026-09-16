@@ -115,7 +115,7 @@
             </td>
             <td class="acts">
               <a class="btn2 ghost" href="{% url 'operations:account' e.code %}">{% translate "كشف الحساب" %}</a>
-              {% if can_edit and not e.voucher_received %}
+              {% if can_edit and not e.voucher_received and not e.is_final %}
                 {% if e.participant_owes %}
                   <button class="btn2" type="button" disabled>{% translate "الدفع من الصندوق أولًا" %}</button>
                 {% else %}
@@ -125,7 +125,7 @@
                   </form>
                 {% endif %}
               {% endif %}
-              {% if can_approve and not e.is_approved %}
+              {% if can_approve and not e.is_approved and not e.is_final %}
                 <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
                   {% csrf_token %}<input type="hidden" name="action" value="approve">
                   <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
