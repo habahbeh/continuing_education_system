@@ -711,6 +711,19 @@ class ParticipantAcknowledgementRequiredError(ValidationError):
     """§6.4 step 3 — a handover recorded without the receiver's name."""
 
 
+class CertificateNotIssuedError(ValidationError):
+    """§6.4 step 3 — nothing to hand over: the certificate has not been issued."""
+
+
+def _issued_certificate_for(clearance: Clearance) -> Any:
+    """The original certificate this clearance authorised, still awaiting handover."""
+    from apps.operations.models import Certificate, CertificateStatus
+
+    return Certificate.objects.filter(
+        clearance=clearance, is_replacement=False, status=CertificateStatus.ISSUED
+    ).first()
+
+
 def complete_handover_step(
     *,
     actor: Any,
@@ -744,9 +757,21 @@ def complete_handover_step(
         request=request,
     )
     _require_previous_done(clearance, 3)
+
+    # The certificate is issued between step 2 and step 3 (BR-075 reads
+    # "custody and money signed", not "clearance closed"), so by now it must
+    # exist: a handover of nothing is the paper trail this step exists to
+    # prevent. Refused before any write, like the other gates.
+    certificate = _issued_certificate_for(clearance)
+    if certificate is None:
+        raise CertificateNotIssuedError(
+            f"لا تسليم قبل الإصدار: لا شهادة صادرة لبراءة الذمة {clearance.code} بعد — "
+            "تُصدر الشهادة من شاشة الشهادات ثم تُسلَّم هنا (§6.4 · BR-075)."
+        )
     return _complete_handover(
         actor=actor,
         clearance=clearance,
+        certificate=certificate,
         participant_ack_name=participant_ack_name.strip(),
         request=request,
     )
@@ -754,8 +779,15 @@ def complete_handover_step(
 
 @transaction.atomic
 def _complete_handover(
-    *, actor: Any, clearance: Clearance, participant_ack_name: str, request: Any
+    *,
+    actor: Any,
+    clearance: Clearance,
+    certificate: Any,
+    participant_ack_name: str,
+    request: Any,
 ) -> ClearanceStep:
+    from apps.operations.services import certificate_service
+
     step = _step(clearance, 3)
     step.certified_by = actor
     step.certified_at = timezone.now()
@@ -764,17 +796,30 @@ def _complete_handover(
     step.is_done = True
     step.save()
 
+    # One act, two records: the step says who signed, the certificate says
+    # it is DELIVERED and when. Written together so neither can say it alone.
+    certificate_service.deliver(
+        actor=actor,
+        certificate=certificate,
+        delivered_on=timezone.now().date(),
+        request=request,
+    )
+
     write_audit(
         action="APPROVE",
         entity_type=STEP_ENTITY,
         entity_id=str(step.pk),
         reference=clearance.code,
-        summary_ar=f"مصادقة الخطوة 3 — تسليم الشهادة إلى {participant_ack_name}",
+        summary_ar=(
+            f"مصادقة الخطوة 3 — تسليم الشهادة {certificate.certificate_number} "
+            f"إلى {participant_ack_name}"
+        ),
         actor=actor,
         changes={
             "event": "CERTIFY_STEP",
             "step": 3,
             "participant_ack_name": participant_ack_name,
+            "certificate_number": certificate.certificate_number,
         },
         request=request,
     )
@@ -1079,6 +1124,7 @@ __all__ = [
     "ClearanceBlockedError",
     "DepositNotSettledError",
     "EnrollmentNotClearableError",
+    "CertificateNotIssuedError",
     "ParticipantAcknowledgementRequiredError",
     "SecondCertifierRoleError",
     "StepOutOfOrderError",

@@ -80,10 +80,8 @@ def cleared(
 
         clearance_service.certify_finance_step(actor=finance, clearance=clearance)
         clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
-        clearance_service.complete_handover_step(
-            actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
-        )
-        clearance_service.close_clearance(actor=manager, clearance=clearance)
+        # §6.4 — steps 1 and 2 signed is what authorises the certificate; the
+        # handover (step 3) needs the certificate, so the clearance stays open.
         return enrollment, clearance
 
     return _make

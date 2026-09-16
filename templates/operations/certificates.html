@@ -110,14 +110,9 @@
               {% if can_print %}
                 <a class="btn2" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "طباعة" %}</a>
               {% endif %}
-              {% if can_create and c.status == "ISSUED" %}
-                <form method="post" class="inline-form" novalidate>
-                  {% csrf_token %}
-                  <input type="hidden" name="action" value="deliver">
-                  <input type="hidden" name="number" value="{{ c.certificate_number }}">
-                  <input type="date" name="on_date" required aria-label="{% translate 'تاريخ التسليم' %}">
-                  <button class="btn2" type="submit">{% translate "تسليم" %}</button>
-                </form>
+              {% if c.status == "ISSUED" and c.clearance_code %}
+                {# §6.4 — handing over IS clearance step 3; it is recorded there, not here. #}
+                <a class="btn2 ghost" href="{% url 'operations:clearance-detail' c.clearance_code %}">{% translate "التسليم من براءة الذمة" %}</a>
               {% endif %}
               {% if can_create and c.status != "REPLACED" %}
                 <form method="post" class="inline-form" novalidate>

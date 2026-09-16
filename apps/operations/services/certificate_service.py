@@ -84,6 +84,26 @@ def available_grades(*, as_of: date) -> list[tuple[str, str]]:
     return [(str(code), str(label)) for code, label in pairs]
 
 
+#: §6.4 — the steps that must be signed before a certificate may be printed:
+#: the custody recovered (1) and the money certified twice (2). Step 3 is the
+#: certificate changing hands, which needs the certificate to exist first.
+PRE_CERTIFICATE_STEPS = (1, 2)
+
+
+def clearance_is_certificate_ready(clearance: Clearance) -> bool:
+    """
+    BR-075 as it actually has to read: the clearance is a GRADUATION, it is
+    not blocked or cancelled, and steps 1 and 2 are done. Closed clearances
+    pass by construction; an open one passes once only the handover remains.
+    """
+    if clearance.case_type != ClearanceCaseType.GRADUATION:
+        return False
+    if clearance.status in {ClearanceStatus.BLOCKED, ClearanceStatus.CANCELLED}:
+        return False
+    done = set(clearance.steps.filter(is_done=True).values_list("step_number", flat=True))
+    return all(number in done for number in PRE_CERTIFICATE_STEPS)
+
+
 def completed_clearance_for(enrollment: Any) -> Clearance | None:
     """
     BR-075 — the one thing that authorises a certificate to exist.
@@ -91,18 +111,22 @@ def completed_clearance_for(enrollment: Any) -> Clearance | None:
     ``operations_clearance_one_live_per_enrollment`` guarantees at most one
     live clearance per enrolment, so this cannot silently choose between two.
 
-    A COMPLETED clearance is necessary and not sufficient: it must also be a
-    GRADUATION. A withdrawal and a dismissal each close a clearance properly,
+    A GRADUATION clearance whose custody and finance steps are both signed.
+    Not "COMPLETED": §6.4's third step is «تسليم الشهادة», and a clearance
+    cannot close on a handover of a certificate that does not exist yet — so
+    the certificate is issued between step 2 and step 3, and step 3 is what
+    delivers it. A withdrawal and a dismissal each close a clearance properly,
     and neither means the programme was completed — so neither authorises a
     certificate. The case is read rather than the enrolment's status because
     it is the clearance that authorises the certificate, and its case was
     derived from that status when it was opened.
     """
-    return Clearance.objects.filter(
-        enrollment=enrollment,
-        status=ClearanceStatus.COMPLETED,
-        case_type=ClearanceCaseType.GRADUATION,
-    ).first()
+    for clearance in Clearance.objects.filter(
+        enrollment=enrollment, case_type=ClearanceCaseType.GRADUATION
+    ).exclude(status=ClearanceStatus.CANCELLED):
+        if clearance_is_certificate_ready(clearance):
+            return clearance
+    return None
 
 
 def _partition(issued_on: date) -> str:
@@ -141,6 +165,26 @@ def issue_certificate(
         )
         raise ClearanceRequiredError(
             f"لا شهادة بلا براءة ذمة مكتملة للتسجيل {enrollment.code} (BR-075 · D-22)."
+        )
+
+    # The money is read AGAIN here, as it is at close (§6.7): step 2 was
+    # certified at zero, but a charge posted since must not ride out on a
+    # certificate.
+    from apps.billing.services.account_service import ZERO, get_account_state
+
+    balance = get_account_state(enrollment).balance
+    if balance != ZERO:
+        write_audit(
+            action="DENIED_ATTEMPT",
+            entity_type=ENTITY,
+            reference=enrollment.code,
+            summary_ar=f"محاولة إصدار شهادة والرصيد {balance} — {enrollment.code}",
+            actor=actor,
+            denial_rule="BR-073",
+            request=request,
+        )
+        raise ClearanceRequiredError(
+            f"لا شهادة والرصيد {balance} ليس صفراً للتسجيل {enrollment.code} (BR-073 · BR-075)."
         )
 
     grade = (grade or "").strip()
@@ -332,7 +376,12 @@ def _issue_replacement(
 def deliver(
     *, actor: Any, certificate: Certificate, delivered_on: date, request: Any = None
 ) -> Certificate:
-    """WORKFLOWS §7.2 K2 — handed over, which is clearance step 3."""
+    """
+    WORKFLOWS §7.2 K2 — handed over. Called by clearance step 3
+    (``clearance_service.complete_handover_step``), which is the one place a
+    certificate changes hands; the certificates screen offers no separate
+    "deliver" of its own, so the two records cannot disagree.
+    """
     policy.require(actor, Screen.CERTIFICATES, Action.CREATE, request=request)
 
     if certificate.status != CertificateStatus.ISSUED:
@@ -443,11 +492,13 @@ def issuable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tupl
 
     policy.require(actor, Screen.CERTIFICATES, Action.CREATE, request=request)
 
-    cleared = set(
-        Clearance.objects.filter(
-            status=ClearanceStatus.COMPLETED, case_type=ClearanceCaseType.GRADUATION
-        ).values_list("enrollment_id", flat=True)
-    )
+    cleared = {
+        clearance.enrollment_id
+        for clearance in Clearance.objects.filter(case_type=ClearanceCaseType.GRADUATION).exclude(
+            status=ClearanceStatus.CANCELLED
+        )
+        if clearance_is_certificate_ready(clearance)
+    }
     already = set(
         Certificate.objects.filter(is_replacement=False).values_list("enrollment_id", flat=True)
     )
@@ -507,6 +558,7 @@ __all__ = [
     "available_grades",
     "certificate_document",
     "certificate_instance",
+    "clearance_is_certificate_ready",
     "completed_clearance_for",
     "deliver",
     "issuable_enrollment_choices",

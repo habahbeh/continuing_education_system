@@ -82,6 +82,13 @@ def _through_finance(signed_in, manager, finance, finance_manager, enrollment, c
     _custody(signed_in(manager), code)
     signed_in(finance).post(_url(code), {"action": "certify"}, follow=True)
     signed_in(finance_manager).post(_url(code), {"action": "second-certify"}, follow=True)
+    # §6.4 — the certificate is issued once custody and money are signed, so
+    # that step 3 has something to hand over.
+    from apps.operations.services import certificate_service
+
+    certificate_service.issue_certificate(
+        actor=manager, enrollment=enrollment, grade="EXCELLENT", issued_on=TERM_START
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -276,14 +283,12 @@ def test_the_cashier_cannot_print_a_clearance(signed_in, cashier, manager, settl
 # The certificate
 # ---------------------------------------------------------------------------
 def _issue(signed_in, manager, finance, finance_manager, settled, grade="EXCELLENT"):
+    """Issue through the screen: open, custody, both signatures, then the form."""
     enrollment = settled()
-    _through_finance(signed_in, manager, finance, finance_manager, enrollment)
-    signed_in(manager).post(
-        _url("CLR-DOC-1"),
-        {"action": "handover", "participant_ack_name": "سالم العمري"},
-        follow=True,
-    )
-    signed_in(manager).post(_url("CLR-DOC-1"), {"action": "close"}, follow=True)
+    _open(signed_in(manager), enrollment)
+    _custody(signed_in(manager), "CLR-DOC-1")
+    signed_in(finance).post(_url("CLR-DOC-1"), {"action": "certify"}, follow=True)
+    signed_in(finance_manager).post(_url("CLR-DOC-1"), {"action": "second-certify"}, follow=True)
     issued = signed_in(manager).post(
         reverse("operations:certificates"),
         {

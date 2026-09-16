@@ -87,6 +87,15 @@ def _through_step_1(manager, clearance):
     )
 
 
+def _issue(manager, enrollment):
+    """§6.4 — the certificate is issued between step 2 and step 3."""
+    from apps.operations.services import certificate_service
+
+    return certificate_service.issue_certificate(
+        actor=manager, enrollment=enrollment, grade="EXCELLENT", issued_on=TERM_START
+    )
+
+
 # ---------------------------------------------------------------------------
 # Opening
 # ---------------------------------------------------------------------------
@@ -375,6 +384,7 @@ def test_a_balance_that_moves_after_certification_stops_the_close(
     _through_step_1(manager, clearance)
     clearance_service.certify_finance_step(actor=finance, clearance=clearance)
     clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+    _issue(manager, enrollment)
     clearance_service.complete_handover_step(
         actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
     )
@@ -401,6 +411,7 @@ def test_a_clean_clearance_closes(settled, manager, finance, finance_manager) ->
     _through_step_1(manager, clearance)
     clearance_service.certify_finance_step(actor=finance, clearance=clearance)
     clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+    _issue(manager, enrollment)
     clearance_service.complete_handover_step(
         actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
     )
@@ -422,6 +433,101 @@ def test_a_completed_clearance_needs_all_three_steps(
 
     with pytest.raises(clearance_service.StepOutOfOrderError, match=r"\[3\]"):
         clearance_service.close_clearance(actor=manager, clearance=clearance)
+
+
+# ---------------------------------------------------------------------------
+# §6.4 · BR-075 — the certificate is issued between step 2 and step 3
+# ---------------------------------------------------------------------------
+def test_a_graduation_clearance_can_issue_once_custody_and_money_are_signed(
+    settled, manager, finance, finance_manager
+) -> None:
+    """Steps 1 and 2 done, step 3 pending, balance zero — the certificate may exist."""
+    from apps.operations.models import Certificate, CertificateStatus
+    from apps.operations.services import certificate_service
+
+    enrollment = settled()
+    clearance = _open(manager, enrollment)
+    _through_step_1(manager, clearance)
+    clearance_service.certify_finance_step(actor=finance, clearance=clearance)
+    clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+    clearance.refresh_from_db()
+    assert clearance.status == ClearanceStatus.IN_PROGRESS
+    assert enrollment.code in dict(certificate_service.issuable_enrollment_choices(actor=manager))
+
+    certificate = _issue(manager, enrollment)
+    assert certificate.clearance_id == clearance.pk
+    assert certificate.status == CertificateStatus.ISSUED
+    assert Certificate.objects.filter(enrollment=enrollment).count() == 1
+    # Issued once: the list offers it no more.
+    assert enrollment.code not in dict(certificate_service.issuable_enrollment_choices(actor=manager))
+
+
+def test_the_handover_is_refused_before_the_certificate_is_issued(
+    settled, manager, finance, finance_manager
+) -> None:
+    clearance = _open(manager, settled())
+    _through_step_1(manager, clearance)
+    clearance_service.certify_finance_step(actor=finance, clearance=clearance)
+    clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+
+    with pytest.raises(clearance_service.CertificateNotIssuedError):
+        clearance_service.complete_handover_step(
+            actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+        )
+    assert clearance.steps.get(step_number=3).is_done is False
+
+
+def test_the_handover_delivers_the_certificate_it_hands_over(
+    settled, manager, finance, finance_manager
+) -> None:
+    """One act, two records: the step is signed and the certificate reads DELIVERED."""
+    from apps.operations.models import CertificateStatus
+
+    enrollment = settled()
+    clearance = _open(manager, enrollment)
+    _through_step_1(manager, clearance)
+    clearance_service.certify_finance_step(actor=finance, clearance=clearance)
+    clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+    certificate = _issue(manager, enrollment)
+
+    step = clearance_service.complete_handover_step(
+        actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+    )
+    certificate.refresh_from_db()
+    assert step.is_done is True
+    assert certificate.status == CertificateStatus.DELIVERED
+    assert certificate.delivered_on == timezone.now().date()
+
+    event = (
+        AuditEvent.objects.filter(entity_type="operations.ClearanceStep", reference=clearance.code)
+        .order_by("-id")
+        .first()
+    )
+    assert event is not None and event.changes["certificate_number"] == certificate.certificate_number
+
+    clearance_service.close_clearance(actor=manager, clearance=clearance)
+    clearance.refresh_from_db()
+    assert clearance.status == ClearanceStatus.COMPLETED
+
+
+@pytest.mark.parametrize("status", [EnrollmentStatus.WITHDRAWN, EnrollmentStatus.DISMISSED])
+def test_a_two_step_clearance_never_issues_a_certificate(
+    settled, manager, finance, finance_manager, status
+) -> None:
+    from apps.operations.services import certificate_service
+
+    enrollment = settled(status=status)
+    clearance = _open(manager, enrollment)
+    _through_step_1(manager, clearance)
+    clearance_service.certify_finance_step(actor=finance, clearance=clearance)
+    clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+
+    with pytest.raises(certificate_service.ClearanceRequiredError):
+        _issue(manager, enrollment)
+    clearance_service.close_clearance(actor=manager, clearance=clearance)
+    with pytest.raises(certificate_service.ClearanceRequiredError):
+        _issue(manager, enrollment)
+    assert enrollment.code not in dict(certificate_service.issuable_enrollment_choices(actor=manager))
 
 
 @pytest.mark.parametrize(

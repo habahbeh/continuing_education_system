@@ -956,7 +956,6 @@ def _handle_certificate(
     action = request.POST.get("action", "")
     permission = {
         "issue": Action.CREATE,
-        "deliver": Action.CREATE,
         "replace": Action.CREATE,
         "reprint": Action.PRINT,
     }.get(action)
@@ -1012,16 +1011,13 @@ def _certificate_transition(request: HttpRequest, action: str) -> None:
         return
     on_date = date_form.cleaned_data["on_date"]
 
-    if action == "deliver":
-        certificate_service.deliver(
-            actor=request.user, certificate=certificate, delivered_on=on_date, request=request
-        )
-        messages.success(request, _("سُلِّمت الشهادة"))
-    else:
-        replacement = certificate_service.issue_replacement(
-            actor=request.user, original=certificate, issued_on=on_date, request=request
-        )
-        messages.success(request, _("صدر بدل الفاقد %(n)s") % {"n": replacement.certificate_number})
+    # Delivery is not an action here: §6.4 makes it clearance step 3, and
+    # ``clearance_service.complete_handover_step`` is what marks a certificate
+    # DELIVERED — so the two records cannot disagree.
+    replacement = certificate_service.issue_replacement(
+        actor=request.user, original=certificate, issued_on=on_date, request=request
+    )
+    messages.success(request, _("صدر بدل الفاقد %(n)s") % {"n": replacement.certificate_number})
 
 
 # ---------------------------------------------------------------------------
