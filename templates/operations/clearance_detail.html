@@ -78,7 +78,14 @@
 </div></div>
 
 {% if clearance.participant_owes %}
-  <div class="note danger">{% translate "الرصيد" %}: {{ clearance.balance }} — {% translate "عليه ذمة. لا تُغلق الخطوة المالية حتى تُسدَّد." %}</div>
+  <div class="note danger">
+    <div>{% translate "الرصيد" %}: {{ clearance.balance }} — {% translate "عليه ذمة. لا تُغلق الخطوة المالية حتى تُسدَّد." %}
+      {% if clearance.status == "BLOCKED" %}{% translate "البراءة موقوفة: يُسدَّد الرصيد في الصندوق أولاً، ثم تُعاد المصادقة المالية فتُستأنف البراءة (BR-073)." %}{% endif %}</div>
+    <div class="form-acts">
+      <a class="btn2" href="{% url 'operations:account' clearance.enrollment_code %}">{% translate "فتح كشف الحساب" %}</a>
+      <a class="btn2 ghost" href="{% url 'cashbox:payment-new' %}">{% translate "تسديد الرصيد من الصندوق" %}</a>
+    </div>
+  </div>
 {% elif clearance.centre_owes %}
   <div class="note warn">{% translate "رصيد دائن" %}: {{ clearance.credit_outstanding }} — {% translate "يجب ردّه قبل إغلاق الخطوة المالية." %}</div>
 {% else %}
@@ -159,7 +166,10 @@
             <span class="val num">{{ step.balance_at_check }}</span></div>
         {% endif %}
 
-        {% if not step.certified_by and can_certify %}
+        {% if not step.is_done and clearance.pending_step and step.step_number > clearance.pending_step %}
+          {# UI guard only — the service refuses out-of-order steps on its own (BR-072). #}
+          <p class="hint">{% translate "أكمل الخطوة السابقة أولاً؛ لا يمكن تنفيذ هذه الخطوة قبل ترتيبها." %}</p>
+        {% elif not step.certified_by and can_certify %}
           <form method="post" novalidate data-approval-confirm="{% translate "سيُسجَّل هذا الإجراء مصادقةً مالية أولى رسمية باسمك على براءة الذمة." %}">{% csrf_token %}
             <input type="hidden" name="action" value="certify">
             <div class="form-acts">
@@ -184,6 +194,8 @@
       {% else %}
         {% if step.certified_by %}
           <div class="muted">{% translate "صادَق" %}: {{ step.certified_by }} · <span dir="ltr">{{ step.certified_at|date:"Y/m/d H:i" }}</span></div>
+        {% elif clearance.pending_step and step.step_number > clearance.pending_step %}
+          <p class="hint">{% translate "أكمل الخطوة السابقة أولاً؛ لا يمكن تنفيذ هذه الخطوة قبل ترتيبها." %}</p>
         {% elif can_handover %}
           <form method="post" novalidate>{% csrf_token %}
             <input type="hidden" name="action" value="handover">
