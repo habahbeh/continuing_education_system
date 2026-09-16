@@ -87,7 +87,13 @@
     </div>
   </div>
 {% elif clearance.centre_owes %}
-  <div class="note warn">{% translate "رصيد دائن" %}: {{ clearance.credit_outstanding }} — {% translate "يجب ردّه قبل إغلاق الخطوة المالية." %}</div>
+  <div class="note warn">
+    <div>{% translate "رصيد دائن" %}: {{ clearance.credit_outstanding }} — {% translate "يجب ردّه قبل إغلاق الخطوة المالية." %}
+      {% if clearance.status == "BLOCKED" %}{% translate "البراءة موقوفة: يُردّ الرصيد الدائن من نموذج «ردّ الرصيد الدائن» في الخطوة المالية، ثم تُعاد المصادقة المالية (BR-071 · BR-073)." %}{% endif %}</div>
+    <div class="form-acts">
+      <a class="btn2" href="{% url 'operations:account' clearance.enrollment_code %}">{% translate "فتح كشف الحساب" %}</a>
+    </div>
+  </div>
 {% else %}
   <div class="note ok">{% translate "الرصيد صفر — الحساب مسوّى." %}</div>
 {% endif %}
@@ -126,6 +132,18 @@
         {% endif %}
 
       {% elif step.step_number == 2 %}
+        {% if clearance.status == "BLOCKED" and not step.is_done %}
+          <div class="note {% if clearance.participant_owes %}danger{% else %}warn{% endif %}"><div>
+            {% translate "الخطوة المالية موقوفة — الرصيد" %} <span class="num" dir="ltr">{{ clearance.balance }}</span> {% translate "ليس صفراً (BR-073)." %}
+            {% if clearance.participant_owes %}
+              {% translate "الخطوة التالية: تسديد الرصيد من الصندوق، ثم إعادة المحاولة هنا." %}
+            {% elif clearance.centre_owes %}
+              {% translate "الخطوة التالية: ردّ الرصيد الدائن من النموذج أدناه، ثم إعادة المحاولة هنا." %}
+            {% else %}
+              {% translate "الرصيد صار صفراً — أعد المصادقة المالية لاستئناف البراءة." %}
+            {% endif %}
+          </div></div>
+        {% endif %}
         {% if clearance.deposit.applies %}
           <div class="note {% if clearance.deposit.is_settled %}ok{% else %}warn{% endif %}">
             {% translate "التأمين المقبوض" %}: {{ clearance.deposit.collected }} ·
@@ -169,6 +187,13 @@
         {% if not step.is_done and clearance.pending_step and step.step_number > clearance.pending_step %}
           {# UI guard only — the service refuses out-of-order steps on its own (BR-072). #}
           <p class="hint">{% translate "أكمل الخطوة السابقة أولاً؛ لا يمكن تنفيذ هذه الخطوة قبل ترتيبها." %}</p>
+        {% elif not step.certified_by and can_certify and clearance.status == "BLOCKED" and clearance.participant_owes %}
+          {# Clicking would only re-block and write another denied attempt; the way out is the cashbox. #}
+          <div class="form-acts">
+            <button class="btn2 primary" type="button" disabled>{% translate "المصادقة المالية الأولى" %}</button>
+            <a class="btn2" href="{% url 'cashbox:payment-new' %}">{% translate "تسديد الرصيد من الصندوق" %}</a>
+          </div>
+          <p class="hint">{% translate "سدّد الرصيد أولاً ثم أعد المحاولة." %}</p>
         {% elif not step.certified_by and can_certify %}
           <form method="post" novalidate data-approval-confirm="{% translate "سيُسجَّل هذا الإجراء مصادقةً مالية أولى رسمية باسمك على براءة الذمة." %}">{% csrf_token %}
             <input type="hidden" name="action" value="certify">
@@ -177,7 +202,13 @@
             </div>
           </form>
         {% elif step.certified_by and not step.is_done %}
-          {% if can_second_certify %}
+          {% if can_second_certify and clearance.status == "BLOCKED" and clearance.participant_owes %}
+            <div class="form-acts">
+              <button class="btn2 primary" type="button" disabled>{% translate "المصادقة الثانية" %}</button>
+              <a class="btn2" href="{% url 'cashbox:payment-new' %}">{% translate "تسديد الرصيد من الصندوق" %}</a>
+            </div>
+            <p class="hint">{% translate "سدّد الرصيد أولاً ثم أعد المحاولة." %}</p>
+          {% elif can_second_certify %}
             <form method="post" novalidate data-approval-confirm="{% translate "سيُسجَّل هذا الإجراء مصادقةً مالية ثانية رسمية باسمك، وبها تكتمل الخطوة المالية." %}">{% csrf_token %}
               <input type="hidden" name="action" value="second-certify">
               <div class="form-acts">
