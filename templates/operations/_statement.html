@@ -95,6 +95,11 @@ Takes one variable: ``statement``.
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الدفعات والتخصيصات" %}</h2></div>
+  {% if statement.status == "CANCELLED" and statement.payments %}
+    <div class="card2-body">
+      <div class="note"><div>{% translate "هذه تخصيصات تاريخية لسند قبض صحيح. بعد إلغاء التسجيل، لا تُعد الرسوم ذمة قائمة ويُعامل المقبوض كرصد دائن أو وفق الاسترداد الرسمي." %}</div></div>
+    </div>
+  {% endif %}
   <div class="tbl-wrap">
     <table class="tbl">
       <thead><tr>
@@ -106,7 +111,7 @@ Takes one variable: ``statement``.
           <tr>
             <td class="num">{{ p.received_on }}</td>
             <td dir="ltr">{{ p.receipt_number }}{% if p.voided %} <span class="chip danger">{% translate "ملغى" %}</span>{% endif %}</td>
-            <td>{{ p.against }}{% if p.is_reversal %} <span class="chip warn">{% translate "عكس" %}</span>{% endif %}</td>
+            <td>{{ p.against }}{% if p.is_reversal %} <span class="chip warn">{% translate "عكس" %}</span>{% endif %}{% if statement.status == "CANCELLED" %} <span class="chip danger">{% translate "مرتبط بتسجيل ملغى" %}</span>{% endif %}</td>
             <td class="num">{{ p.amount }}</td>
           </tr>
         {% empty %}<tr><td colspan="4" class="empty"><span class="empty-title">{% translate "لا دفعات" %}</span></td></tr>{% endfor %}
