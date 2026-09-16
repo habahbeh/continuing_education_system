@@ -201,7 +201,10 @@
 {% endfor %}
 
 {% if can_close and not clearance.pending_step %}
-  <form method="post" novalidate>{% csrf_token %}
+  <form method="post" novalidate
+        data-approval-title="{% translate "تأكيد إغلاق براءة الذمة" %}"
+        data-approval-ok="{% translate "تأكيد الإغلاق" %}"
+        data-approval-confirm="{% translate "سيُغلق هذا الإجراء براءة الذمة رسمياً اعتماداً على الخطوات والتواقيع المكتملة أعلاه، ولن يبقى الإلغاء العادي متاحاً بعده." %}{% if clearance.case_type != "GRADUATION" %} {% translate "الإغلاق هنا لا يُصدر شهادة: الحالة ليست تخرّجاً." %}{% endif %}">{% csrf_token %}
     <input type="hidden" name="action" value="close">
     <div class="form-acts">
       <button class="btn2 primary" type="submit">{% translate "إغلاق براءة الذمة" %}</button>
@@ -229,9 +232,9 @@
   </details>
 {% endif %}
 
-{% if can_certify or can_second_certify %}
+{% if can_certify or can_second_certify or can_close %}
   {% comment %}
-    تأكيد المصادقة المالية: حوارٌ أصلي بنمط `clearances.html` نفسه. نموذجا
+    تأكيد المصادقة المالية والإغلاق: حوارٌ أصلي بنمط `clearances.html` نفسه. نموذجا
     المصادقة يحملان `data-approval-confirm` بنصّهما، والسكربت يوقف الإرسال
     الأول، ويُظهر الحوار، ثم يرسل النموذج نفسه عند التأكيد. Escape يغلقه،
     والتركيز يدخل إلى زرّ التأكيد ويعود إلى الزرّ الأصلي عند الإغلاق. بلا
@@ -259,6 +262,9 @@
       const dialog = document.getElementById("approval-confirm");
       if (!dialog || typeof dialog.showModal !== "function") return;
       const copy = document.getElementById("approval-confirm-copy");
+      const title = document.getElementById("approval-confirm-title");
+      const ok = document.getElementById("approval-confirm-ok");
+      const defaults = { title: title.textContent, ok: ok.textContent };
       let pending = null, opener = null;
       document.querySelectorAll("form[data-approval-confirm]").forEach((form) => {
         form.addEventListener("submit", (event) => {
@@ -267,10 +273,12 @@
           pending = form;
           opener = form.querySelector("button[type=submit]");
           copy.textContent = form.dataset.approvalConfirm;
+          title.textContent = form.dataset.approvalTitle || defaults.title;
+          ok.textContent = form.dataset.approvalOk || defaults.ok;
           dialog.showModal();
         });
       });
-      document.getElementById("approval-confirm-ok").addEventListener("click", () => {
+      ok.addEventListener("click", () => {
         if (!pending) return;
         pending.dataset.approvalConfirmed = "1";
         dialog.close();
