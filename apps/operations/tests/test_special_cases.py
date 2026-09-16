@@ -337,3 +337,103 @@ def test_the_clearance_half_of_these_rules_now_exists() -> None:
     names = {model.__name__ for model in django_apps.get_models()}
     for arrived in ("Clearance", "ClearanceStep", "Certificate"):
         assert arrived in names, f"{arrived} is Sprint 7 scope and should exist"
+
+
+# ---------------------------------------------------------------------------
+# §6.5 «إلغاء التسجيل — قبل البدء» · §5.3 — cancellation before approval
+# ---------------------------------------------------------------------------
+def test_a_pending_application_cancels_and_keeps_what_was_paid_as_credit(
+    enrolled, manager
+) -> None:
+    """
+    An applicant who paid part and never got approved is cancelled, not
+    withdrawn: the charges stop counting, the money stays as a credit on the
+    statement (no refund by default, §5.3), and the file says so.
+    """
+    from apps.core.models import AuditEvent
+
+    enrollment = enrolled(paid="100.000")  # 270 charged, 100 taken, never approved
+    assert enrollment.status == EnrollmentStatus.PENDING_FINANCE
+
+    case = special_case_service.cancel_registration(
+        actor=manager,
+        enrollment=enrollment,
+        reason_ar="اعتذر المتقدّم قبل بدء الدورة",
+        occurred_on=TERM_START,
+        code="SC-CXL",
+    )
+
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.CANCELLED
+    assert case.case_type == SpecialCaseType.CANCELLATION
+    assert not ChargeLine.objects.filter(enrollment=enrollment, voided=False).exists()
+    assert all(
+        "SC-CXL" in line.void_reason_ar
+        for line in ChargeLine.objects.filter(enrollment=enrollment)
+    )
+
+    state = get_account_state(enrollment)
+    assert state.balance == Decimal("-100.000"), "the payment is untouched and now a credit"
+    assert state.total_paid == Decimal("100.000")
+    assert "100.000" in case.financial_effect_ar
+    assert "BR-034" in case.financial_effect_ar
+
+    history = enrollment.status_history.latest("changed_at")
+    assert history.to_status == EnrollmentStatus.CANCELLED
+    assert history.reference == "SC-CXL"
+
+    audit = AuditEvent.objects.filter(entity_type="operations.SpecialCase", reference="SC-CXL").get()
+    assert audit.changes["paid_at_cancellation"] == "100.000"
+    assert audit.changes["balance_at_cancellation"] == "170.000"
+
+
+def test_an_approved_enrolment_cannot_be_cancelled_only_withdrawn(
+    enrolled, finish_enrollment, manager
+) -> None:
+    enrollment = finish_enrollment(enrolled(), to_status="ACTIVE")
+
+    with pytest.raises(enrollment_service.InvalidStatusTransitionError):
+        special_case_service.cancel_registration(
+            actor=manager,
+            enrollment=enrollment,
+            reason_ar="غيّر رأيه",
+            occurred_on=TERM_START,
+            code="SC-NO",
+        )
+
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.ACTIVE
+    assert ChargeLine.objects.filter(enrollment=enrollment, voided=False).exists()
+    assert not SpecialCase.objects.filter(code="SC-NO").exists()
+
+
+def test_a_cancelled_application_leaves_the_overdue_list_and_the_cashier_dropdown(
+    enrolled, manager, cashier
+) -> None:
+    from datetime import timedelta
+
+    from apps.reporting.services import report_service
+
+    enrollment = enrolled(paid=None)  # 270 charged, nothing paid
+    long_after = TERM_START + timedelta(days=400)
+    assert enrollment.code in {
+        r["code"] for r in report_service.overdue_report(actor=manager, as_of=long_after)["rows"]
+    }
+    assert enrollment.code in {
+        code for code, _ in enrollment_service.payable_enrollment_choices(actor=cashier)
+    }
+
+    special_case_service.cancel_registration(
+        actor=manager,
+        enrollment=enrollment,
+        reason_ar="لم يحضر ولم يدفع",
+        occurred_on=TERM_START,
+        code="SC-CXL-2",
+    )
+
+    assert enrollment.code not in {
+        r["code"] for r in report_service.overdue_report(actor=manager, as_of=long_after)["rows"]
+    }
+    assert enrollment.code not in {
+        code for code, _ in enrollment_service.payable_enrollment_choices(actor=cashier)
+    }

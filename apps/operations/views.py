@@ -589,6 +589,19 @@ def enrollment_action_view(request: HttpRequest, code: str) -> HttpResponse:
                 request=request,
             )
             messages.success(request, _("سُجّل الفصل، ويمكن الآن فتح براءة الذمة."))
+        elif action == "cancel-registration":
+            from apps.operations.services import special_case_service
+
+            special_case_service.cancel_registration(
+                actor=request.user,
+                enrollment=enrollment,
+                reason_ar=request.POST.get("reason_ar", ""),
+                occurred_on=timezone.localdate(),
+                request=request,
+            )
+            messages.success(
+                request, _("أُلغي التسجيل قبل الاعتماد؛ المقبوض (إن وُجد) بقي رصيداً دائناً.")
+            )
         else:
             messages.error(request, _("إجراء غير معروف"))
     except DjangoValidationError as exc:

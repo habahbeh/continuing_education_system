@@ -222,6 +222,41 @@
                   </dialog>
                 {% endif %}
               {% endif %}
+              {% if can_dismiss and e.status == "PENDING_FINANCE" or can_dismiss and e.status == "PENDING_APPROVAL" %}
+                {# §6.5 إلغاء التسجيل قبل الاعتماد: ليس انسحاباً ولا براءة بعده، ولا استرداد افتراضياً (§5.3). #}
+                <details class="row-menu">
+                  <summary class="btn2 sm">{% translate "إجراءات الحالة" %} <span aria-hidden="true">▾</span></summary>
+                  <div class="row-menu-list">
+                    <button class="row-menu-item danger" type="button" data-opens="cancel-{{ e.code }}">{% translate "إلغاء التسجيل" %}</button>
+                  </div>
+                </details>
+
+                <dialog class="modal" id="cancel-{{ e.code }}" dir="rtl" aria-labelledby="cancel-{{ e.code }}-t">
+                  <div class="modal-head"><h2 id="cancel-{{ e.code }}-t">{% translate "تأكيد إلغاء التسجيل" %}</h2></div>
+                  <form method="post" action="{% url 'operations:enrollment-action' e.code %}" novalidate>
+                    {% csrf_token %}<input type="hidden" name="action" value="cancel-registration">
+                    <div class="modal-body">
+                      <div class="note strong"><div>{% translate "إلغاء طلب لم يُعتمد بعد: سيتغيّر وضع التسجيل إلى «ملغى» وتُلغى بنود الرسوم. لا استرداد افتراضياً (§5.3)؛ أي مبلغ مقبوض يبقى رصيداً دائناً ولا يُعاد إلا باسترداد رسمي بكتاب وموافقة الرئيس. لا تُفتح براءة ذمة." %}</div></div>
+                      <dl class="dl">
+                        <dt>{% translate "التسجيل" %}</dt><dd dir="ltr" translate="no">{{ e.code }}</dd>
+                        <dt>{% translate "المشارك" %}</dt><dd>{{ e.participant_name }}</dd>
+                        <dt>{% translate "الحالة الحالية" %}</dt><dd>{{ e.status_display }}</dd>
+                        <dt>{% translate "الحالة الجديدة" %}</dt><dd><span class="chip danger">{% translate "ملغى" %}</span></dd>
+                      </dl>
+                      <div class="modal-fields">
+                        <div class="fld">
+                          <label for="cancel-reason-{{ e.code }}">{% translate "سبب الإلغاء" %} <span class="req" aria-hidden="true">*</span></label>
+                          <input id="cancel-reason-{{ e.code }}" name="reason_ar" type="text" maxlength="255" required autofocus dir="rtl">
+                        </div>
+                      </div>
+                    </div>
+                    <div class="modal-acts">
+                      <button class="btn2 danger" type="submit">{% translate "تأكيد إلغاء التسجيل" %}</button>
+                      <button class="btn2" type="button" data-closes>{% translate "إلغاء" %}</button>
+                    </div>
+                  </form>
+                </dialog>
+              {% endif %}
             </td>
           </tr>
         {% empty %}

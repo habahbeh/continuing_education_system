@@ -35,7 +35,10 @@ from apps.operations.models import (
     SpecialCaseStatus,
     SpecialCaseType,
 )
-from apps.operations.services.enrollment_service import record_status_change
+from apps.operations.services.enrollment_service import (
+    InvalidStatusTransitionError,
+    record_status_change,
+)
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
 
@@ -402,6 +405,121 @@ def _substitute(
     return case, new
 
 
+#: §6.5 «إلغاء التسجيل — قبل البدء»: the two statuses an application can be
+#: cancelled from. Anything approved is running (ACTIVE) and leaves by
+#: withdrawal or dismissal — those are §6.4's exits, with a clearance behind
+#: them; this one has none, because nothing was ever delivered.
+CANCELLABLE_STATUSES = {EnrollmentStatus.PENDING_FINANCE, EnrollmentStatus.PENDING_APPROVAL}
+
+
+def cancel_registration(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    reason_ar: str,
+    occurred_on: date,
+    code: str = "",
+    request: Any = None,
+) -> SpecialCase:
+    """
+    §6.5 · §5.3 — cancel an application before the centre approved it.
+
+    Not a withdrawal: the trainee never became ACTIVE, so no partner earned
+    anything and no clearance follows. The charges are voided so the account
+    stops reading as a debt (and stops appearing overdue); any money already
+    taken is NOT touched — it stays an unallocated credit on the statement,
+    and leaves only through the refund workflow with its official letter and
+    the president's approval (BR-034), or a credit transfer. «لا استرداد» is
+    the default here exactly as it is everywhere else (§5.3).
+
+    ``code`` is normally omitted and minted (:func:`next_special_case_code`).
+    """
+    policy.require(actor, Screen.SPECIAL_CASES, Action.CREATE, request=request)
+
+    if not reason_ar.strip():
+        raise ValidationError("إلغاء التسجيل يتطلب سبباً مكتوباً.")
+    if enrollment.status not in CANCELLABLE_STATUSES:
+        raise InvalidStatusTransitionError(
+            f"لا يُلغى إلا تسجيل لم يُعتمد بعد؛ التسجيل {enrollment.code} في الحالة "
+            f"«{enrollment.get_status_display()}» — المعتمَد يخرج بانسحاب أو فصل (§6.4)."
+        )
+    if not code:
+        ensure_sequence(
+            SPECIAL_CASE_SCOPE, special_case_partition(occurred_on), padding=SPECIAL_CASE_PADDING
+        )
+    return _cancel_registration(
+        actor=actor,
+        enrollment=enrollment,
+        reason_ar=reason_ar.strip(),
+        occurred_on=occurred_on,
+        code=code,
+        request=request,
+    )
+
+
+@transaction.atomic
+def _cancel_registration(
+    *,
+    actor: Any,
+    enrollment: Enrollment,
+    reason_ar: str,
+    occurred_on: date,
+    code: str,
+    request: Any,
+) -> SpecialCase:
+    from apps.billing.models import ChargeLine
+
+    state = get_account_state(enrollment)
+    code = code or next_special_case_code(occurred_on)
+
+    # Voided, never deleted — the same device a transfer uses (BR-063): the
+    # line stays on the statement with the reason it stopped counting.
+    now = timezone.now()
+    for line in ChargeLine.objects.filter(enrollment=enrollment, voided=False):
+        line.voided = True
+        line.voided_by = actor
+        line.voided_at = now
+        line.void_reason_ar = f"إلغاء التسجيل قبل الاعتماد ({code})"
+        line.save(update_fields=["voided", "voided_by", "voided_at", "void_reason_ar"])
+
+    paid = state.total_paid
+    case = SpecialCase.objects.create(
+        code=code,
+        case_type=SpecialCaseType.CANCELLATION,
+        enrollment=enrollment,
+        occurred_on=occurred_on,
+        detail_ar=reason_ar,
+        financial_effect_ar=(
+            f"لا استرداد افتراضياً (§5.3) · المقبوض {paid} يبقى رصيداً دائناً على التسجيل، "
+            "ولا يُعاد إلا باسترداد رسمي بكتاب وموافقة الرئيس (BR-034) أو بتحويل رصيد · "
+            "أُلغيت بنود الرسوم فلا ذمة · ولا استحقاق للشريك."
+        ),
+        created_by=actor,
+    )
+    record_status_change(
+        actor=actor,
+        enrollment=enrollment,
+        to_status=EnrollmentStatus.CANCELLED,
+        reason_ar=f"إلغاء قبل الاعتماد — {reason_ar}",
+        reference=code,
+    )
+    write_audit(
+        action="CREATE",
+        entity_type=ENTITY,
+        entity_id=str(case.pk),
+        reference=code,
+        summary_ar=f"إلغاء التسجيل {enrollment.code} قبل الاعتماد — {reason_ar}",
+        actor=actor,
+        changes={
+            "enrollment": enrollment.code,
+            "balance_at_cancellation": str(state.balance),
+            "paid_at_cancellation": str(paid),
+        },
+        request=request,
+    )
+    return case
+
+
 def record_credit_balance(
     *, actor: Any, enrollment: Enrollment, occurred_on: date, code: str, request: Any = None
 ) -> SpecialCase | None:
@@ -465,7 +583,9 @@ def _record_credit(
 
 
 __all__ = [
+    "CANCELLABLE_STATUSES",
     "DecisionReferenceRequiredError",
+    "cancel_registration",
     "defer_to_cohort",
     "dismiss",
     "next_special_case_code",
