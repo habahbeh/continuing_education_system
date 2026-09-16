@@ -85,6 +85,11 @@
       <span class="count">{% blocktranslate count n=receipt.allocations|length %}تخصيص واحد{% plural %}{{ n }} تخصيصات{% endblocktranslate %}</span>
     </div>
   </div>
+  {% if receipt.has_cancelled_enrollment %}
+    <div class="card2-body">
+      <div class="note"><div>{% translate "السند صحيح لأنه قبض فعلي. بعد إلغاء التسجيل، لا تُعد هذه الرسوم ذمة قائمة؛ ويُعامل المقبوض حسب سياسة الإلغاء/الرصيد الدائن أو الاسترداد الرسمي." %}</div></div>
+    </div>
+  {% endif %}
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -97,7 +102,7 @@
       <tbody>
         {% for a in receipt.allocations %}
           <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ a.enrollment_code }}</strong></td>
+            <td dir="ltr" translate="no"><strong class="num">{{ a.enrollment_code }}</strong>{% if a.enrollment_cancelled %} <span class="chip danger" dir="rtl">{% translate "التسجيل ملغى" %}</span>{% endif %}</td>
             <td>{{ a.against }}</td>
             <td class="num">{{ a.amount }}</td>
           </tr>

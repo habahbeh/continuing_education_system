@@ -424,6 +424,10 @@ def get_receipt(*, actor: Any, number: str, request: Any = None) -> dict[str, An
     allocations = [
         {
             "enrollment_code": text_of(a.enrollment, "code"),
+            # Read-only, for the screen: a receipt against a registration that
+            # was since cancelled stays a valid receipt (it is real money), but
+            # the reader must not take the line it paid for as a live debt.
+            "enrollment_cancelled": text_of(a.enrollment, "status") == "CANCELLED",
             "against": text_of(a.charge_line, "description_ar", default="رصيد غير مخصَّص"),
             "amount": a.amount,
             "allocation_type": a.allocation_type,
@@ -448,6 +452,7 @@ def get_receipt(*, actor: Any, number: str, request: Any = None) -> dict[str, An
         "status_display": receipt.get_status_display(),
         "breakdown_text_ar": receipt.breakdown_text_ar,
         "allocations": allocations,
+        "has_cancelled_enrollment": any(a["enrollment_cancelled"] for a in allocations),
         "void_id": void.pk if void else None,
         "void_reason_ar": void.reason_ar if void else "",
         "void_is_approved": bool(void and void.approved_by_id),
