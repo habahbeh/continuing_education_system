@@ -210,9 +210,14 @@
 {% endif %}
 
 {% if can_close and clearance.status != "COMPLETED" and clearance.status != "CANCELLED" %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "إلغاء البراءة" %}</h2></div>
+  {% comment %}
+    منطقة خطرة: الإلغاء ليس خطوةً من المسار، فيُطوى افتراضياً ولا يظهر
+    نموذجه إلا بفتح `details`. الشرط والنموذج والفعل كما كانت.
+  {% endcomment %}
+  <details class="card2" dir="rtl">
+    <summary class="card2-head"><h2>{% translate "منطقة خطرة — إلغاء البراءة" %}</h2></summary>
     <div class="card2-body">
+      <div class="note danger">{% translate "الإلغاء إجراء نهائي يُخرج البراءة من المسار ولا يُتراجع عنه." %}</div>
       <form method="post" novalidate>{% csrf_token %}
         <input type="hidden" name="action" value="cancel">
         {% include "partials/_form.html" with form=cancel_form %}
@@ -221,7 +226,7 @@
         </div>
       </form>
     </div>
-  </div>
+  </details>
 {% endif %}
 
 {% if can_certify or can_second_certify %}
