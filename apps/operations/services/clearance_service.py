@@ -74,6 +74,29 @@ STEP_NAMES = {
 }
 
 FINANCE_STEP = 2
+HANDOVER_STEP = 3
+
+
+def steps_for_case(case_type: str) -> dict[int, str]:
+    """
+    §6.4 lists three steps; the third is the certificate changing hands.
+
+    A withdrawal and a dismissal have no certificate to hand over — BR-075
+    ties one to a completed programme, and someone who left or was dismissed
+    did not complete it. Their clearance is still a clearance: the custody is
+    recovered and the money is certified, and it closes on those two.
+
+    The step is dropped rather than created-and-skipped so that nothing has to
+    remember to skip it: ``close_clearance`` already requires every step that
+    EXISTS to be done, ``_require_previous_done`` only walks backwards from a
+    step being completed, and ``get_clearance`` projects the rows it finds —
+    so the screen, the print-out and the close all follow without a special
+    case. A handover posted against one of these fails on the missing row.
+    """
+    if case_type == ClearanceCaseType.GRADUATION:
+        return dict(STEP_NAMES)
+    return {n: name for n, name in STEP_NAMES.items() if n != HANDOVER_STEP}
+
 
 #: BR-074 · §6.4 — which role signs second. A SETTING rather than a literal:
 #: §8 lists five roles and §6.4 names a sixth actor ("المحاسب ثم المدير
@@ -260,9 +283,9 @@ def open_clearance(
     request: Any = None,
 ) -> Clearance:
     """
-    WORKFLOWS §6.3 C1 — open a clearance and lay out its three steps.
+    WORKFLOWS §6.3 C1 — open a clearance and lay out its steps.
 
-    All three rows are created up front rather than as each is reached: the
+    The rows are created up front rather than as each is reached: the
     form is a printed checklist, and a participant standing at the counter is
     entitled to see what is still outstanding.
 
@@ -317,7 +340,7 @@ def _open_clearance(
         opened_by=actor,
         status=ClearanceStatus.OPEN,
     )
-    for number, name in STEP_NAMES.items():
+    for number, name in steps_for_case(case_type).items():
         ClearanceStep.objects.create(clearance=clearance, step_number=number, name_ar=name)
 
     write_audit(
@@ -794,7 +817,7 @@ def _close(*, actor: Any, clearance: Clearance, request: Any) -> Clearance:
         entity_type=ENTITY,
         entity_id=str(clearance.pk),
         reference=clearance.code,
-        summary_ar="إغلاق براءة الذمة — الخطوات الثلاث مكتملة",
+        summary_ar=f"إغلاق براءة الذمة — خطواتها ({clearance.steps.count()}) مكتملة",
         actor=actor,
         changes={"balance_rechecked": "0.000"},
         request=request,

@@ -424,6 +424,51 @@ def test_a_completed_clearance_needs_all_three_steps(
         clearance_service.close_clearance(actor=manager, clearance=clearance)
 
 
+@pytest.mark.parametrize(
+    ("status", "case_type"),
+    [
+        (EnrollmentStatus.WITHDRAWN, ClearanceCaseType.WITHDRAWAL),
+        (EnrollmentStatus.DISMISSED, ClearanceCaseType.DISMISSAL),
+    ],
+)
+def test_a_withdrawal_or_dismissal_clearance_has_two_steps_and_no_certificate(
+    settled, manager, finance, finance_manager, status, case_type
+) -> None:
+    """
+    §6.4 · BR-075 — someone who left or was dismissed did not complete the
+    programme, so there is no certificate to hand over: step 3 is not laid
+    out, the clearance closes on the two that are, and the certificate
+    service still refuses because the completed clearance is not a GRADUATION.
+    """
+    from apps.operations.services import certificate_service
+
+    enrollment = settled(status=status)
+    clearance = _open(manager, enrollment)
+    assert clearance.case_type == case_type
+    assert list(clearance.steps.order_by("step_number").values_list("step_number", flat=True)) == [
+        1,
+        2,
+    ]
+
+    _through_step_1(manager, clearance)
+    clearance_service.certify_finance_step(actor=finance, clearance=clearance)
+    clearance_service.second_certify_finance_step(actor=finance_manager, clearance=clearance)
+
+    with pytest.raises(ValidationError):
+        clearance_service.complete_handover_step(
+            actor=manager, clearance=clearance, participant_ack_name="سالم أحمد العمري"
+        )
+
+    clearance_service.close_clearance(actor=manager, clearance=clearance)
+    clearance.refresh_from_db()
+    assert clearance.status == ClearanceStatus.COMPLETED
+
+    with pytest.raises(certificate_service.ClearanceRequiredError):
+        certificate_service.issue_certificate(
+            actor=manager, enrollment=enrollment, grade="EXCELLENT", issued_on=TERM_START
+        )
+
+
 def test_the_database_refuses_a_completed_clearance_with_no_timestamp(settled, manager) -> None:
     clearance = _open(manager, settled())
     with pytest.raises(IntegrityError), transaction.atomic():

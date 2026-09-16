@@ -36,6 +36,7 @@ from apps.operations.models import (
     Certificate,
     CertificateStatus,
     Clearance,
+    ClearanceCaseType,
     ClearanceStatus,
     GradeSource,
 )
@@ -89,8 +90,19 @@ def completed_clearance_for(enrollment: Any) -> Clearance | None:
 
     ``operations_clearance_one_live_per_enrollment`` guarantees at most one
     live clearance per enrolment, so this cannot silently choose between two.
+
+    A COMPLETED clearance is necessary and not sufficient: it must also be a
+    GRADUATION. A withdrawal and a dismissal each close a clearance properly,
+    and neither means the programme was completed — so neither authorises a
+    certificate. The case is read rather than the enrolment's status because
+    it is the clearance that authorises the certificate, and its case was
+    derived from that status when it was opened.
     """
-    return Clearance.objects.filter(enrollment=enrollment, status=ClearanceStatus.COMPLETED).first()
+    return Clearance.objects.filter(
+        enrollment=enrollment,
+        status=ClearanceStatus.COMPLETED,
+        case_type=ClearanceCaseType.GRADUATION,
+    ).first()
 
 
 def _partition(issued_on: date) -> str:
@@ -432,9 +444,9 @@ def issuable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tupl
     policy.require(actor, Screen.CERTIFICATES, Action.CREATE, request=request)
 
     cleared = set(
-        Clearance.objects.filter(status=ClearanceStatus.COMPLETED).values_list(
-            "enrollment_id", flat=True
-        )
+        Clearance.objects.filter(
+            status=ClearanceStatus.COMPLETED, case_type=ClearanceCaseType.GRADUATION
+        ).values_list("enrollment_id", flat=True)
     )
     already = set(
         Certificate.objects.filter(is_replacement=False).values_list("enrollment_id", flat=True)
