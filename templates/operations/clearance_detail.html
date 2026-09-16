@@ -4,7 +4,7 @@
 {% block title %}{{ clearance.code }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  بطاقة براءة الذمة: الأطراف، والمال كما هو الآن، والخطوات الثلاث بأفعالها.
+  بطاقة براءة الذمة: الأطراف، والمال كما هو الآن، وخطواتها بأفعالها.
 
   التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حارس ولا فعل. الأفعال الثمانية —
   العُهد · المصادقة الأولى · الثانية · التأمين · مصادرته · ردّ الرصيد ·
@@ -47,7 +47,13 @@
   <div>
     <span class="eyebrow">{% translate "الإنهاء والشهادات" %}</span>
     <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ clearance.code }}</span></h1>
-    <p class="sub">{{ clearance.participant_name }} — {% translate "ثلاث خطوات لا يُعاد ترتيبها، ولا شهادة قبل اكتمالها (BR-075)." %}</p>
+    {% comment %}
+      السطر يصف ما تحته، والعدّ من الخطوات المرسومة نفسها لا من نوع الحالة،
+      فلا يفترق النصّ عن الجدول.
+    {% endcomment %}
+    <p class="sub">{{ clearance.participant_name }} —
+      {% blocktranslate count n=clearance.steps|length %}خطوة واحدة، ولا تكتمل البراءة قبل إتمامها.{% plural %}{{ n }} خطوات لا يُعاد ترتيبها، ولا تكتمل البراءة قبل إتمامها كلّها.{% endblocktranslate %}
+    </p>
   </div>
   <div class="acts">
     <span class="chip {{ clearance.status|status_tone }} dot">{{ clearance.status_display }}</span>
@@ -154,7 +160,7 @@
         {% endif %}
 
         {% if not step.certified_by and can_certify %}
-          <form method="post" novalidate>{% csrf_token %}
+          <form method="post" novalidate data-approval-confirm="{% translate "سيُسجَّل هذا الإجراء مصادقةً مالية أولى رسمية باسمك على براءة الذمة." %}">{% csrf_token %}
             <input type="hidden" name="action" value="certify">
             <div class="form-acts">
               <button class="btn2 primary" type="submit">{% translate "المصادقة المالية الأولى" %}</button>
@@ -162,7 +168,7 @@
           </form>
         {% elif step.certified_by and not step.is_done %}
           {% if can_second_certify %}
-            <form method="post" novalidate>{% csrf_token %}
+            <form method="post" novalidate data-approval-confirm="{% translate "سيُسجَّل هذا الإجراء مصادقةً مالية ثانية رسمية باسمك، وبها تكتمل الخطوة المالية." %}">{% csrf_token %}
               <input type="hidden" name="action" value="second-certify">
               <div class="form-acts">
                 <button class="btn2 primary" type="submit">{% translate "المصادقة الثانية" %}</button>
@@ -216,5 +222,60 @@
       </form>
     </div>
   </div>
+{% endif %}
+
+{% if can_certify or can_second_certify %}
+  {% comment %}
+    تأكيد المصادقة المالية: حوارٌ أصلي بنمط `clearances.html` نفسه. نموذجا
+    المصادقة يحملان `data-approval-confirm` بنصّهما، والسكربت يوقف الإرسال
+    الأول، ويُظهر الحوار، ثم يرسل النموذج نفسه عند التأكيد. Escape يغلقه،
+    والتركيز يدخل إلى زرّ التأكيد ويعود إلى الزرّ الأصلي عند الإغلاق. بلا
+    دعم `showModal` يمضي الإرسال كما كان.
+  {% endcomment %}
+  <dialog class="modal" id="approval-confirm" dir="rtl"
+          aria-labelledby="approval-confirm-title" aria-describedby="approval-confirm-copy">
+    <div class="modal-head"><h2 id="approval-confirm-title">{% translate "تأكيد المصادقة المالية" %}</h2></div>
+    <div class="modal-body">
+      <p id="approval-confirm-copy"></p>
+      <dl class="dl">
+        <dt>{% translate "براءة الذمة" %}</dt><dd dir="ltr" translate="no">{{ clearance.code }}</dd>
+        <dt>{% translate "المشارك" %}</dt><dd>{{ clearance.participant_name }}</dd>
+        <dt>{% translate "الرصيد عند الفحص" %}</dt><dd class="num"><span dir="ltr">{{ clearance.balance }}</span></dd>
+        <dt>{% translate "المصادِق" %}</dt><dd>{{ request.user }}</dd>
+      </dl>
+    </div>
+    <div class="modal-acts">
+      <button class="btn2 primary" type="button" id="approval-confirm-ok" autofocus>{% translate "تأكيد المصادقة" %}</button>
+      <form method="dialog"><button class="btn2" type="submit">{% translate "إلغاء" %}</button></form>
+    </div>
+  </dialog>
+  <script>
+    (() => {
+      const dialog = document.getElementById("approval-confirm");
+      if (!dialog || typeof dialog.showModal !== "function") return;
+      const copy = document.getElementById("approval-confirm-copy");
+      let pending = null, opener = null;
+      document.querySelectorAll("form[data-approval-confirm]").forEach((form) => {
+        form.addEventListener("submit", (event) => {
+          if (form.dataset.approvalConfirmed) return;
+          event.preventDefault();
+          pending = form;
+          opener = form.querySelector("button[type=submit]");
+          copy.textContent = form.dataset.approvalConfirm;
+          dialog.showModal();
+        });
+      });
+      document.getElementById("approval-confirm-ok").addEventListener("click", () => {
+        if (!pending) return;
+        pending.dataset.approvalConfirmed = "1";
+        dialog.close();
+        pending.requestSubmit();
+      });
+      dialog.addEventListener("close", () => {
+        pending = null;
+        if (opener) opener.focus();
+      });
+    })();
+  </script>
 {% endif %}
 {% endblock %}
