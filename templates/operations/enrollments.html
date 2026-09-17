@@ -109,6 +109,10 @@
               {# BR-018: الاعتماد بعد الوصل. الواقعة تُقال للقارئ، لا لمن يملك الزرّ وحده. #}
               {% if e.is_approved %}
                 <br><span class="chip ok">{% translate "معتمد" %}</span>
+                {# أقساط: الاعتماد صحيح والرصيد باقٍ. الدَّين يوقف البراءة (BR-073) لا التخرج (§6.4). #}
+                {% if e.participant_owes %}
+                  <br><span class="chip warn">{% translate "معتمد مع رصيد متبقٍ — قد تُمنع الشهادة أو براءة التخرج حتى التسديد" %}</span>
+                {% endif %}
               {% elif e.voucher_received %}
                 <br><span class="chip">{% translate "الوصل مستلم" %}</span>
               {% endif %}
@@ -158,6 +162,9 @@
                       {% csrf_token %}<input type="hidden" name="action" value="complete">
                       <div class="modal-body">
                         <p>{% translate "سيتغيّر وضع التسجيل إلى «مكتمل»، ويصبح مؤهّلاً لفتح براءة ذمة بسبب «تخرج». لا تُفتح البراءة تلقائياً." %}</p>
+                        {% if e.participant_owes %}
+                          <div class="note"><div>{% translate "تنبيه: على المشارك رصيد متبقٍ" %} <span class="num">{{ e.balance }}</span>{% translate "؛ يُسجَّل التخرج، لكن خطوة المالية في براءة الذمة ستبقى موقوفة حتى التسديد (BR-073)." %}</div></div>
+                        {% endif %}
                         <dl class="dl">
                           <dt>{% translate "التسجيل" %}</dt><dd dir="ltr" translate="no">{{ e.code }}</dd>
                           <dt>{% translate "المشارك" %}</dt><dd>{{ e.participant_name }}</dd>
