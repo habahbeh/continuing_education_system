@@ -126,10 +126,15 @@
                 {% endif %}
               {% endif %}
               {% if can_approve and not e.is_approved and not e.is_final %}
-                <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
-                  {% csrf_token %}<input type="hidden" name="action" value="approve">
-                  <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
-                </form>
+                {# ما تفرضه الخدمة نفسها: لا اعتماد على رصيد مستحقّ لم يُدفع منه شيء. #}
+                {% if e.participant_owes and e.total_paid == 0 %}
+                  <button class="btn2 primary" type="button" disabled>{% translate "الدفع من الصندوق أولًا" %}</button>
+                {% else %}
+                  <form class="inline-form" method="post" action="{% url 'operations:enrollment-action' e.code %}">
+                    {% csrf_token %}<input type="hidden" name="action" value="approve">
+                    <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
+                  </form>
+                {% endif %}
               {% endif %}
               {% if e.status == "ACTIVE" and can_approve or e.status == "ACTIVE" and can_dismiss %}
                 {# المخارج الثلاثة خلف قائمة واحدة: الصفّ يبقى خفيفاً، وكلُّ مخرج يفتح حواراً بملخّصه. #}

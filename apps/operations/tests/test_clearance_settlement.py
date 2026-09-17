@@ -311,7 +311,6 @@ def test_an_unsettled_deposit_holds_the_financial_step(
     enrollment = make_enrollment(cohort, index=4)
     quote = charge_and_pay(enrollment, amount=None)
     assert quote.has_deposit is True
-    finish_enrollment(enrollment)
 
     from apps.billing.services.account_service import get_account_state as state_of
     from apps.cashbox.models import PaymentMethod
@@ -327,6 +326,7 @@ def test_an_unsettled_deposit_holds_the_financial_step(
         payment_method=method,
         received_on=TERM_START,
     )
+    finish_enrollment(enrollment)
 
     clearance = clearance_service.open_clearance(
         actor=manager,
@@ -365,7 +365,6 @@ def test_returning_the_deposit_releases_the_step(
     approve_cohort(cohort, course_number="M-DEP2")
     enrollment = make_enrollment(cohort, index=5)
     charge_and_pay(enrollment, amount=None)
-    finish_enrollment(enrollment)
 
     method = PaymentMethod.objects.first() or PaymentMethod.objects.create(
         code="CASH3", name_ar="نقداً"
@@ -377,6 +376,7 @@ def test_returning_the_deposit_releases_the_step(
         payment_method=method,
         received_on=TERM_START,
     )
+    finish_enrollment(enrollment)
 
     clearance = clearance_service.open_clearance(
         actor=manager,

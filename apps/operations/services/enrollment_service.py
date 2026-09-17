@@ -92,6 +92,10 @@ class VoucherRequiredError(ValidationError):
     """BR-018 — approval attempted with no voucher recorded."""
 
 
+class PaymentRequiredError(ValidationError):
+    """Approval attempted on a charged enrolment against which nothing was paid."""
+
+
 class DuplicateEnrollmentError(ValidationError):
     """Q-19 — the participant already holds an enrolment on this cohort."""
 
@@ -311,7 +315,30 @@ def approve_enrollment(*, actor: Any, enrollment: Enrollment, request: Any = Non
     _require_not_final(enrollment, "اعتماد التسجيل")
     if not enrollment.voucher_received:
         raise VoucherRequiredError("لا يمكن اعتماد التسجيل قبل تسجيل استلام الوصل (BR-018).")
+    _require_first_payment(enrollment)
     return _approve_enrollment(actor=actor, enrollment=enrollment, request=request)
+
+
+def _require_first_payment(enrollment: Enrollment) -> None:
+    """
+    A voucher is evidence money was paid; a voucher over a ledger that shows
+    nothing received is a contradiction, and approving on it is the QA case
+    EN-QA-1 — approved while the whole charge was still owed.
+
+    Deliberately NOT "balance must be zero": an instalment plan (the diploma
+    minimum first payment) leaves a balance by design, and T4/T5 exist to
+    chase it (ACTIVE → PAYMENT_OVERDUE). What is refused is the case with no
+    payment at all against a live charge. A fully discounted, exempt or
+    credit-covered enrolment has nothing owed and passes untouched.
+    """
+    from apps.billing.services.account_service import ZERO, get_account_state
+
+    state = get_account_state(enrollment)
+    if state.participant_owes and state.total_paid == ZERO:
+        raise PaymentRequiredError(
+            f"لا يمكن اعتماد التسجيل قبل تسديد الرصيد المتبقي ({state.balance}) "
+            "أو دفعة أولى منه من الصندوق."
+        )
 
 
 @transaction.atomic
@@ -946,6 +973,7 @@ __all__ = [
     "CohortNotApprovedError",
     "DuplicateEnrollmentError",
     "InvalidStatusTransitionError",
+    "PaymentRequiredError",
     "VoucherRequiredError",
     "approve_enrollment",
     "change_status",

@@ -11,7 +11,12 @@
       <span dir="ltr" translate="no">{{ number }}</span>
     </p>
   </div>
-  <div class="acts">
+  {% comment %}
+    The actions area. Same two links as before, same targets, same
+    permission gate — only labelled as a group so the staff eye lands on
+    the one thing they can DO here before the details below.
+  {% endcomment %}
+  <div class="acts" role="group" aria-label="{% translate 'إجراءات المشارك' %}">
     {% if can_edit %}
       <a class="btn2 primary" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a>
     {% endif %}
@@ -19,7 +24,51 @@
   </div>
 </div>
 
+{% comment %}
+  Summary strip — presentation over the SAME projected rows the table below
+  prints, nothing fetched for it. Only the status-like fields are lifted
+  here (category, registration date, exemption, no-refund pledge); the
+  financial, academic and certificate states are not in this page's context
+  and are deliberately not invented. A restricted role (BR-101) gets only
+  number and name, so for them the strip has nothing to say and is skipped.
+{% endcomment %}
+{% if rows|length > 2 %}
+  {% translate "نعم" as yes %}
+  <div class="kpi-grid">
+    {% for key, label, value in rows %}
+      {% if key == "category" %}
+        <div class="kpi">
+          <div class="label">{{ label }}</div>
+          <div class="foot"><span class="chip brand">{{ value|default:"—" }}</span></div>
+        </div>
+      {% elif key == "registered_on" %}
+        <div class="kpi">
+          <div class="label">{{ label }}</div>
+          <div class="foot"><span class="chip num">{{ value|default:"—" }}</span></div>
+        </div>
+      {% elif key == "is_exempt" %}
+        <div class="kpi">
+          <div class="label">{{ label }}</div>
+          <div class="foot">
+            <span class="chip {% if value == yes %}info{% endif %}">{{ value|default:"—" }}</span>
+          </div>
+        </div>
+      {% elif key == "no_refund_pledge_accepted" %}
+        <div class="kpi">
+          <div class="label">{{ label }}</div>
+          <div class="foot">
+            <span class="chip {% if value == yes %}ok{% else %}warn{% endif %}">{{ value|default:"—" }}</span>
+          </div>
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% endif %}
+
 <div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "بيانات المشارك" %}</h2>
+  </div>
 
   {% comment %}
     Only the fields the service projected reach this template. A field the

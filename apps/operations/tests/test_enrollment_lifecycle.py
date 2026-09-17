@@ -130,6 +130,58 @@ def test_approval_succeeds_once_the_voucher_is_recorded(
 
 
 # ---------------------------------------------------------------------------
+# QA EN-QA-1 — the payment gate beside the voucher gate
+#
+# A voucher over a ledger with nothing received is a contradiction. The rule
+# is "something paid", not "balance zero": instalments (the diploma minimum
+# first payment) leave a balance by design and T4/T5 chase it.
+# ---------------------------------------------------------------------------
+def test_approval_is_refused_while_a_charge_has_no_payment_at_all(
+    approved_cohort, make_enrollment, charge_and_pay, registrar, manager
+) -> None:
+    enrollment = make_enrollment(approved_cohort)
+    charge_and_pay(enrollment, amount=None)  # 270 charged, nothing paid
+    enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+    before = (enrollment.status, enrollment.approved_by_id, enrollment.approved_at)
+
+    with pytest.raises(enrollment_service.PaymentRequiredError, match="تسديد الرصيد المتبقي"):
+        enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+
+    enrollment.refresh_from_db()
+    assert (enrollment.status, enrollment.approved_by_id, enrollment.approved_at) == before
+    assert enrollment.status == EnrollmentStatus.PENDING_FINANCE
+    assert not EnrollmentStatusHistory.objects.filter(
+        enrollment=enrollment, to_status=EnrollmentStatus.ACTIVE
+    ).exists()
+
+
+def test_approval_still_succeeds_once_the_charge_is_settled(
+    approved_cohort, make_enrollment, charge_and_pay, registrar, manager
+) -> None:
+    enrollment = make_enrollment(approved_cohort)
+    charge_and_pay(enrollment)  # 270 charged, 270 paid
+    enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.ACTIVE
+    assert enrollment.approved_by_id == manager.pk
+
+
+def test_a_first_instalment_is_enough_to_approve(
+    approved_cohort, make_enrollment, charge_and_pay, registrar, manager
+) -> None:
+    """The lifecycle's PAYMENT_OVERDUE leg depends on this staying true."""
+    enrollment = make_enrollment(approved_cohort)
+    charge_and_pay(enrollment, amount="100.000")  # 270 charged, 170 still owed
+    enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+
+    enrollment.refresh_from_db()
+    assert enrollment.status == EnrollmentStatus.ACTIVE
+
+
+# ---------------------------------------------------------------------------
 # T-116 — Q-19
 # ---------------------------------------------------------------------------
 def test_the_same_participant_cannot_enrol_twice_on_one_cohort(
