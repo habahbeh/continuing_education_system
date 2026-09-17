@@ -664,7 +664,12 @@
     /* غلاف التمرير الأفقي يقصّ الجدول على الورق. الورق لا يُمرَّر. */
     .tbl-wrap { overflow: visible !important; }
     body { background: #fff !important; }
-    .doc { max-width: none; }
+    /* غلاف الصفحة `min-h-screen`: على الورق تصير 100vh ارتفاعَ صفحة، فتفيض
+       ورقةً بيضاء ثانية في Firefox. الورق لا يحتاج ارتفاعاً أدنى. */
+    .min-h-screen { min-height: 0 !important; }
+    /* المستند يُطبَع كما صُمّم — حلقات الأختام والحدود والتنبيه — ولو كان
+       خيار «خلفيات الرسوم» في حوار الطباعة معطَّلاً. */
+    .doc { max-width: none; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     .doc-section, .sign-row, tr { break-inside: avoid; }
     /* `position: running(header)` كان هنا ولا ينفّذه أي متصفح حالي
        (CSS GCPM) — كان لا عملاً. أُزيل بدل أن يُترك يوهم بأنه يعمل. */
