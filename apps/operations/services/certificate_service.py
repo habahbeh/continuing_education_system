@@ -545,6 +545,12 @@ def certificate_document(*, actor: Any, number: str, request: Any = None) -> dic
     as_of = timezone.now().date()
     detail["chrome"] = document_settings.chrome(as_of=as_of)
     detail["labels"] = document_settings.certificate_labels(as_of=as_of)
+    # The row stores the code (EXCELLENT); the paper shows the centre's own
+    # word for it (ممتاز), read from the same setting the code was validated
+    # against at issue — as of that date, so a later relabelling does not
+    # rewrite an older certificate. An unknown code falls back to itself.
+    grade_labels = dict(available_grades(as_of=detail["issued_on"]))
+    detail["grade_display"] = grade_labels.get(detail["grade"], detail["grade"])
     return detail
 
 

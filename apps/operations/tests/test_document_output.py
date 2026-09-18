@@ -327,6 +327,21 @@ def test_the_certificate_carries_all_seven_fields_7_names(
     assert "stamp-ring" in body  # the placeholder, not a drawn stamp
 
 
+def test_the_grade_prints_as_its_arabic_label_not_its_code(
+    signed_in, manager, finance, finance_manager, settled
+) -> None:
+    """QA: the paper said EXCELLENT. The code stays in the row; the word prints."""
+    number = _issue(signed_in, manager, finance, finance_manager, settled, grade="GOOD")
+
+    response = signed_in(manager).get(reverse("operations:certificate-print", args=[number]))
+    body = response.content.decode()
+
+    assert response.context["certificate"]["grade"] == "GOOD"  # storage untouched
+    assert response.context["certificate"]["grade_display"] == "جيد"
+    assert "جيد" in body
+    assert ">GOOD<" not in body
+
+
 def test_a_replacement_prints_as_a_replacement(
     signed_in, manager, finance, finance_manager, settled, cashier, cash_method
 ) -> None:

@@ -20,8 +20,9 @@
 <div class="doc">
   {% include "print/_doc_head.html" with chrome=certificate.chrome reference=certificate.certificate_number %}
 
+  {# ملاحظة التحقّق تُرى على الشاشة لا على الورقة الرسمية؛ إزالتها نهائياً بتحويل document_mode إلى OFFICIAL. #}
   {% if not certificate.chrome.is_verified and certificate.chrome.unverified_note_ar %}
-    <div class="doc-warn">{{ certificate.chrome.unverified_note_ar }}</div>
+    <div class="doc-warn no-print">{{ certificate.chrome.unverified_note_ar }}</div>
   {% endif %}
 
   <h1>{{ certificate.labels.title_ar }}</h1>
@@ -49,7 +50,7 @@
       <dt>{% translate "اسم الدورة" %}</dt><dd>{{ certificate.program_name }}</dd>
       <dt>{% translate "مدة الدورة" %}</dt><dd>{{ certificate.duration_text|default:"—" }}</dd>
       <dt>{% translate "عدد الساعات" %}</dt><dd>{{ certificate.training_hours|default:"—" }}</dd>
-      <dt>{% translate "التقدير" %}</dt><dd>{{ certificate.grade }}</dd>
+      <dt>{% translate "التقدير" %}</dt><dd>{{ certificate.grade_display }}</dd>
       <dt>{% translate "رقم الشهادة" %}</dt><dd dir="ltr">{{ certificate.certificate_number }}</dd>
       <dt>{% translate "تاريخ الإصدار" %}</dt><dd>{{ certificate.issued_on }}</dd>
     </dl>
