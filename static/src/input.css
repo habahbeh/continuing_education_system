@@ -653,6 +653,62 @@
                   width: 5rem; height: 5rem; }
   .doc-note     { @apply text-xs text-ink-3 border-t border-line pt-3 mt-6; }
   .doc-warn     { @apply text-xs border border-warn-line bg-warn-soft text-warn rounded-lg px-3 py-2 mb-4; }
+  /* --- الشهادة (Sprint 8I) -------------------------------------------
+   * شهادة لا تقرير: كلّ شيء في المنتصف على ورقة A4 واحدة — الهوية أعلى،
+   * فالعنوان، فاسم المشارك كبيراً، فجملة المركز، فالبرنامج، فشريط الحقائق،
+   * فالتواقيع والأختام صفّاً واحداً عند القدم. الإطار عنّابي على ذهبي هادئ،
+   * وعلامة مائية باهتة باسم الجامعة بدل شعار لا ملفَّ له.
+   * الألوان الورقية صريحة: سلّم الشاشة مضبوط على الجداول لا على الورق. */
+  .cert-canvas  { @apply py-6; background: #ece7df; margin-inline: -1rem; padding-inline: 1rem; }
+  .cert         { --burgundy: #7b202b; --burgundy-deep: #4b161d; --gold: #b08d57; --gold-soft: #d9c8a3;
+                  @apply relative flex flex-col mx-auto bg-white text-ink;
+                  width: 29.7cm; max-width: 100%; min-height: 21cm; box-sizing: border-box;
+                  padding: 9mm 18mm 8mm; border: 1px solid var(--burgundy-deep);
+                  box-shadow: 0 0 0 5px #fff, 0 0 0 6px var(--gold), 0 18px 40px -18px rgba(75,22,29,.45);
+                  margin-block: 10px; overflow: hidden; }
+  /* الإطار الداخلي المزدوج الذهبي، وخيط عنّابي داخله. */
+  .cert::before { content: ""; position: absolute; inset: 5.5mm; pointer-events: none;
+                  border: 3px double var(--gold); }
+  .cert::after  { content: ""; position: absolute; inset: 8mm; pointer-events: none;
+                  border: 1px solid var(--burgundy); opacity: .35; }
+  .cert-watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                    font-weight: 900; font-size: 7.5rem; line-height: 1; color: var(--burgundy);
+                    opacity: .045; transform: rotate(-12deg); pointer-events: none; user-select: none;
+                    white-space: nowrap; }
+  .cert > :not(.cert-watermark) { position: relative; }
+  .cert-logo    { display: none; height: 20mm; width: auto; margin: 0 auto 4mm; }
+  .cert-meta    { @apply flex justify-between text-2xs text-ink-3; letter-spacing: .04em; }
+  .cert-identity{ @apply text-center mt-2; }
+  .cert-university { @apply font-black; font-size: 1.375rem; color: var(--burgundy-deep); line-height: 1.3; }
+  .cert-centre  { @apply text-sm font-bold text-ink-2 mt-1; }
+  .cert-identity::after { content: ""; display: block; width: 48mm; height: 1px; margin: 3mm auto 0;
+                          background: linear-gradient(to right, transparent, var(--gold), transparent); }
+  .cert-main    { @apply text-center flex-1 flex flex-col justify-center; padding-block: 1mm; }
+  .cert-title   { @apply font-black m-0; font-size: 2.5rem; color: var(--burgundy); line-height: 1.25;
+                  letter-spacing: .01em; }
+  .cert-title::after { content: "❖"; display: block; font-size: .8rem; color: var(--gold); margin-top: 1.5mm; }
+  .cert-replacement { @apply text-xs mx-auto mt-3 px-3 py-1.5 rounded; max-width: 30rem;
+                      color: var(--burgundy); border: 1px solid var(--gold-soft); background: #faf6ee; }
+  .cert-caption { @apply text-xs font-bold text-ink-3 mt-2; letter-spacing: .06em; }
+  .cert-name    { @apply font-black mt-0.5 mb-0; font-size: 2.875rem; color: var(--burgundy-deep); line-height: 1.3; }
+  .cert-sentence{ @apply mx-auto mt-2 mb-0 text-ink-2 leading-relaxed; font-size: 1.125rem; max-width: 52rem; }
+  .cert-program { @apply font-extrabold mt-1; font-size: 1.75rem; color: var(--burgundy); line-height: 1.4; }
+  .cert-facts   { @apply flex flex-wrap justify-center m-0 py-2 text-sm; gap: .5rem 0;
+                  border-block: 1px solid var(--gold-soft); }
+  .cert-facts > div { @apply px-8 text-center; }
+  .cert-facts > div + div { border-inline-start: 1px solid var(--gold-soft); }
+  .cert-facts dt{ @apply text-2xs text-ink-3 font-bold mb-0.5; letter-spacing: .04em; }
+  .cert-facts dd{ @apply m-0 font-extrabold text-ink; }
+  .cert-foot    { @apply mt-5; }
+  /* أربعة مواضع — توقيعان وختمان — صفّاً واحداً؛ الشبكة العامة تُسقط الرابع سطراً. */
+  .cert .sign-row { @apply mt-0 items-end gap-10 mx-auto; max-width: 62rem;
+                    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
+  .cert .sign-box, .cert .stamp-box { @apply text-xs font-bold text-ink-2; }
+  .cert .sign-line  { height: 2.25rem; border-block-end: 1px solid var(--burgundy-deep); }
+  .cert .stamp-ring { width: 4.75rem; height: 4.75rem; border: 2px dashed var(--gold);
+                      box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 5px var(--gold-soft); }
+  .cert-note    { @apply text-center text-ink-3 mt-3; font-size: .625rem; }
+
   .no-print     { @apply mb-4; }
   /* `.no-print` يحمل هامشه، فلا يزدوج مع هامش شريط الإجراءات داخله. */
   .no-print > .action-bar:last-child { @apply mb-0; }
@@ -670,6 +726,13 @@
     /* المستند يُطبَع كما صُمّم — حلقات الأختام والحدود والتنبيه — ولو كان
        خيار «خلفيات الرسوم» في حوار الطباعة معطَّلاً. */
     .doc { max-width: none; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    /* الشهادة تملأ الورقة: عمود مرن بارتفاع الصفحة بعد هوامشها، والتواقيع
+       تنزل إلى أسفله. 297mm − 28mm هامشين − قليلٌ للأمان، فلا تفيض صفحةً ثانية. */
+    /* الشهادة تملأ الورقة العرضية: 210mm − 16mm هامشين − قليلٌ للأمان، فلا تفيض صفحةً ثانية.
+       (اتجاه الصفحة نفسه تُعلنه الشهادة في قالبها بقاعدة @page خاصّة.)
+       والقماشة الرمادية والظلّ للشاشة وحدها. */
+    .cert-canvas { background: none !important; margin: 0 !important; padding: 0 !important; }
+    .cert { min-height: 193mm; width: 100%; margin: 0 auto !important; padding-block-end: 12mm; box-shadow: 0 0 0 4px #fff, 0 0 0 5px var(--gold); }
     .doc-section, .sign-row, tr { break-inside: avoid; }
     /* `position: running(header)` كان هنا ولا ينفّذه أي متصفح حالي
        (CSS GCPM) — كان لا عملاً. أُزيل بدل أن يُترك يوهم بأنه يعمل. */

@@ -6,8 +6,23 @@
   §7's seven fields are all here: participant name · course name · duration ·
   hours · GRADE · number · date. The signature and both stamps print as
   labelled empty space, because §7 says they are applied by hand.
+
+  Composition (Sprint 8I): a certificate, not a report. Everything is
+  centred on one A4 LANDSCAPE sheet — identity at the top, title, the participant's
+  name as the hero, the centre's sentence, the programme, a single facts
+  strip, and the four hand-applied positions in one row at the foot. The
+  shared letterhead partial is NOT used here: its side-by-side meta block is
+  the report look. The certificate number and print date sit in a discreet
+  hairline header instead.
+
+  The sentence in ``certificate_body_ar`` says «المذكور أعلاه» and «المبيَّن
+  أدناه», so the name MUST stay above it and the programme below it.
 {% endcomment %}
 {% block content %}
+{# الشهادة وحدها عرضية: قاعدة @page هنا تلي قاعدة القالب العامّة فتغلبها، وتبقى مع الشهادة لا مع الهيكل. #}
+<style media="print">
+  @page { size: A4 landscape; margin: 8mm; }
+</style>
 <div class="no-print">
   <div class="action-bar">
     <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
@@ -17,54 +32,73 @@
   </div>
 </div>
 
-<div class="doc">
-  {% include "print/_doc_head.html" with chrome=certificate.chrome reference=certificate.certificate_number %}
+{# ملاحظة التحقّق تُرى على الشاشة لا على الورقة الرسمية؛ إزالتها نهائياً بتحويل document_mode إلى OFFICIAL. #}
+{% if not certificate.chrome.is_verified and certificate.chrome.unverified_note_ar %}
+  <div class="doc-warn no-print">{{ certificate.chrome.unverified_note_ar }}</div>
+{% endif %}
 
-  {# ملاحظة التحقّق تُرى على الشاشة لا على الورقة الرسمية؛ إزالتها نهائياً بتحويل document_mode إلى OFFICIAL. #}
-  {% if not certificate.chrome.is_verified and certificate.chrome.unverified_note_ar %}
-    <div class="doc-warn no-print">{{ certificate.chrome.unverified_note_ar }}</div>
-  {% endif %}
+<div class="cert-canvas">
+<article class="cert" aria-label="{{ certificate.labels.title_ar }}">
+  {# العلامة المائية: اسم الجامعة باهتاً خلف المحتوى، بلا ملفّ ولا شعار مُختلَق. #}
+  <div class="cert-watermark" aria-hidden="true">{{ certificate.chrome.university_ar }}</div>
 
-  <h1>{{ certificate.labels.title_ar }}</h1>
+  <div class="cert-meta">
+    <span class="num" dir="ltr">{{ certificate.certificate_number }}</span>
+    <span>{% translate "تاريخ الطباعة" %}: <span class="num">{% now "Y-m-d" %}</span></span>
+  </div>
 
-  {% if certificate.is_replacement %}
-    <div class="doc-warn">
-      {{ certificate.labels.replacement_note_ar }}
-      <strong dir="ltr">{{ certificate.replaces }}</strong>
+  <header class="cert-identity">
+    {% comment %}
+      LOGO PLACEHOLDER — no University of Petra logo asset exists under
+      static/ (the topbar's «UOP» is a text badge, not an image). When the
+      approved file is added, place it here:
+        <img class="cert-logo" src="{% static 'img/uop-logo.svg' %}" alt="">
+      and drop the `.cert-logo` rule's `display:none`. Until then nothing is
+      drawn — a stand-in mark on an official document is worse than none.
+    {% endcomment %}
+    <div class="cert-university">{{ certificate.chrome.university_ar }}</div>
+    <div class="cert-centre">{{ certificate.chrome.center_ar }}</div>
+  </header>
+
+  <div class="cert-main">
+    <h1 class="cert-title">{{ certificate.labels.title_ar }}</h1>
+
+    {% if certificate.is_replacement %}
+      <div class="cert-replacement">
+        {{ certificate.labels.replacement_note_ar }}
+        <strong dir="ltr">{{ certificate.replaces }}</strong>
+      </div>
+    {% endif %}
+
+    <div class="cert-caption">{% translate "تُمنح هذه الشهادة إلى" %}</div>
+    <div class="cert-name">{{ certificate.participant_name }}</div>
+    <div class="cert-caption"><span class="num" dir="ltr">{{ certificate.participant_number }}</span></div>
+
+    <p class="cert-sentence">{{ certificate.labels.body_ar }}</p>
+
+    <div class="cert-caption">{% translate "البرنامج التدريبي" %}</div>
+    <div class="cert-program">{{ certificate.program_name }}</div>
+  </div>
+
+  <dl class="cert-facts">
+    <div><dt>{% translate "مدة الدورة" %}</dt><dd>{{ certificate.duration_text|default:"—" }}</dd></div>
+    <div><dt>{% translate "عدد الساعات" %}</dt><dd>{{ certificate.training_hours|default:"—" }}</dd></div>
+    <div><dt>{% translate "التقدير" %}</dt><dd>{{ certificate.grade_display }}</dd></div>
+    <div><dt>{% translate "تاريخ الإصدار" %}</dt><dd>{{ certificate.issued_on }}</dd></div>
+    <div><dt>{% translate "رقم الشهادة" %}</dt><dd class="num" dir="ltr">{{ certificate.certificate_number }}</dd></div>
+  </dl>
+
+  <footer class="cert-foot">
+    <div class="sign-row">
+      {% for label in certificate.labels.signature_labels %}
+        <div class="sign-box"><div class="sign-line"></div>{{ label }}</div>
+      {% endfor %}
+      {% for label in certificate.labels.stamp_labels %}
+        <div class="stamp-box"><div class="stamp-ring"></div>{{ label }}</div>
+      {% endfor %}
     </div>
-  {% endif %}
-
-  <div class="doc-section">
-    <h2>{% translate "المشارك" %}</h2>
-    <dl class="doc-grid">
-      <dt>{% translate "الاسم" %}</dt><dd>{{ certificate.participant_name }}</dd>
-      <dt>{% translate "الرقم الجامعي" %}</dt><dd dir="ltr">{{ certificate.participant_number }}</dd>
-    </dl>
-  </div>
-
-  <p>{{ certificate.labels.body_ar }}</p>
-
-  <div class="doc-section">
-    <h2>{% translate "البرنامج" %}</h2>
-    <dl class="doc-grid">
-      <dt>{% translate "اسم الدورة" %}</dt><dd>{{ certificate.program_name }}</dd>
-      <dt>{% translate "مدة الدورة" %}</dt><dd>{{ certificate.duration_text|default:"—" }}</dd>
-      <dt>{% translate "عدد الساعات" %}</dt><dd>{{ certificate.training_hours|default:"—" }}</dd>
-      <dt>{% translate "التقدير" %}</dt><dd>{{ certificate.grade_display }}</dd>
-      <dt>{% translate "رقم الشهادة" %}</dt><dd dir="ltr">{{ certificate.certificate_number }}</dd>
-      <dt>{% translate "تاريخ الإصدار" %}</dt><dd>{{ certificate.issued_on }}</dd>
-    </dl>
-  </div>
-
-  <div class="sign-row">
-    {% for label in certificate.labels.signature_labels %}
-      <div class="sign-box"><div class="sign-line"></div>{{ label }}</div>
-    {% endfor %}
-    {% for label in certificate.labels.stamp_labels %}
-      <div class="stamp-box"><div class="stamp-ring"></div>{{ label }}</div>
-    {% endfor %}
-  </div>
-
-  <div class="doc-note">{{ certificate.chrome.footer_ar }}</div>
+    <div class="cert-note">{{ certificate.chrome.footer_ar }}</div>
+  </footer>
+</article>
 </div>
 {% endblock %}
