@@ -322,16 +322,32 @@ def test_the_csv_carries_a_bom_so_excel_reads_arabic(signed_in, finance, approve
     assert "إعلان في الصحف" in body.decode("utf-8-sig")
 
 
-def test_a_report_with_no_row_list_is_not_exportable(signed_in, finance) -> None:
+def test_the_export_carries_rows_never_a_summary(signed_in, finance) -> None:
     """
-    Report 2 is a calculation, not a table.
+    Sprint 8L — القرار السابق كان: التقرير الثاني حسابٌ لا جدول، فلا يُصدَّر.
 
-    Exporting a summary as though it were data would invite someone to pivot
-    on it, so the route refuses rather than inventing rows.
+    وما تغيّر ليس المبدأ بل ما صار في التقرير: الثاني اليوم يحمل صفّاً لكل
+    شريك (A-2)، وهذه بيانات بحقّ. فيُصدَّر **صفوف الشركاء** ولا يُصدَّر سلّم
+    الاحتساب — والمبدأ باقٍ: ملفٌّ يحمل ملخّصاً يبدو بياناتٍ وليس بياناتٍ هو
+    دعوةٌ لأن يُبنى عليه جدولٌ محوري خاطئ.
+
+    كل تقرير من السبعة يصدّر قائمة صفوفه هو، ولا واحد منها يصدّر بطاقاته.
     """
-    assert 2 not in report_service.EXPORTABLE
+    key, columns = report_service.EXPORTABLE[2]
+    assert key == "by_partner", "الصفوف لا السلّم"
+
+    exported_fields = {field for field, _label in columns}
+    for ladder_only in ("collected", "net_income", "expenses_total", "after_partners"):
+        assert ladder_only not in exported_fields, f"{ladder_only} رقمُ سلّمٍ لا عمودَ بيانات"
+
     response = signed_in(finance).get(reverse("reporting:report-export", args=[2]))
-    assert response.status_code == 404
+    assert response.status_code == 200
+
+
+def test_all_seven_reports_export(signed_in, finance) -> None:
+    """«كل التقارير تُصدَّر» شرط قبول في 8L — وكانت أربعة من سبعة."""
+    for number in range(1, 8):
+        assert number in report_service.EXPORTABLE, f"التقرير {number} بلا تصدير"
 
 
 def test_an_unknown_report_number_is_a_404(signed_in, finance) -> None:

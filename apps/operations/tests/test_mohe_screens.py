@@ -656,7 +656,7 @@ def test_the_export_button_is_on_the_register_for_its_readers(
     client.force_login(registrar)
     response = client.get(reverse("operations:mohe"))
     assert reverse("operations:mohe-uploaded-export") in response.content.decode()
-    assert "Export Uploaded Names" in response.content.decode()
+    assert "تصدير الأسماء المرفوعة" in response.content.decode()
 
 
 def test_the_export_holds_the_uploaded_trainees_only(
@@ -836,3 +836,219 @@ def test_an_unknown_purpose_is_refused(manager: User, draft: MoheSubmission) -> 
         attachment_service.attach(
             actor=manager, target=draft, purpose="NOT_A_PURPOSE", upload=_pdf("x.pdf")
         )
+
+
+# ---------------------------------------------------------------------------
+# The register after its polish pass: the next step belongs to the reader who
+# may take it, the deadline counts in Arabic, and the names register stops
+# drawing empty tables.
+# ---------------------------------------------------------------------------
+def test_the_row_offers_an_act_only_to_the_role_that_holds_it(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    """
+    The auditor reads this register and holds nothing on MOHE_SUBMIT, so
+    «أكمل الملف» promised an act that refuses — a promise then a refusal, and a
+    DENIED_ATTEMPT the screen itself invited (BR-085).
+    """
+    register = reverse("operations:mohe")
+
+    client.force_login(manager)
+    manager_page = client.get(register).content.decode("utf-8")
+    assert "أكمل الملف" in manager_page
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "mohe.aud.act"))
+    auditor_page = client.get(register).content.decode("utf-8")
+
+    assert "أكمل الملف" not in auditor_page
+    assert "أعد الإرسال" not in auditor_page
+    assert "سجّل القرار" not in auditor_page
+    assert "عرض الملف" in auditor_page, "the reader is still invited to read"
+
+
+def test_the_registrar_is_offered_the_draft_but_not_the_decision(
+    client: Client, manager: User, sent: MoheSubmission
+) -> None:
+    """§3.3/14 gives APPROVE to the manager alone; recording a decision is his."""
+    register = reverse("operations:mohe")
+
+    client.force_login(manager)
+    assert "سجّل القرار" in client.get(register).content.decode("utf-8")
+
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "mohe.reg.act"))
+    assert "سجّل القرار" not in client.get(register).content.decode("utf-8")
+
+
+def test_the_deadline_counts_days_in_arabic(
+    client: Client, manager: User, sent: MoheSubmission
+) -> None:
+    """«1 يوماً» and «10 يوماً» are not Arabic; the project has a plural filter."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    mohe_service.record_decision(
+        actor=manager,
+        submission=sent,
+        approved=True,
+        decided_on=DECIDED_ON,
+        mohe_course_number="MOHE/2026/9",
+        registration_deadline=timezone.localdate() + timedelta(days=1),
+    )
+    client.force_login(manager)
+
+    page = client.get(reverse("operations:mohe")).content.decode("utf-8")
+
+    assert "يوم واحد" in page
+    assert "1 يوماً" not in page and "يوماً متبقياً" not in page
+
+
+def test_the_register_draws_the_distribution_it_already_counted(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    """``status_counts`` was computed by the view and drawn nowhere."""
+    client.force_login(manager)
+
+    response = client.get(reverse("operations:mohe"))
+
+    assert response.context["status_counts"], "nothing to draw proves nothing"
+    page = response.content.decode("utf-8")
+    assert "توزيع النتائج المعروضة" in page
+    for entry in response.context["status_counts"]:
+        assert f'{entry["label"]}: <span class="num">{entry["count"]}' in page
+
+
+def test_the_register_searches_without_a_button_and_swaps_its_own_rows(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    client.force_login(manager)
+
+    page = client.get(reverse("operations:mohe")).content.decode("utf-8")
+
+    assert 'id="mohe-results"' in page and 'hx-target="#mohe-results"' in page
+    narrowed = client.get(reverse("operations:mohe"), {"q": draft.cohort.code})
+    assert [r["cohort_code"] for r in narrowed.context["submissions"]] == [draft.cohort.code]
+
+
+def test_the_cohort_code_reaches_its_row_in_the_cohorts_register(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    client.force_login(manager)
+
+    page = client.get(reverse("operations:mohe")).content.decode("utf-8")
+    link = f'{reverse("operations:cohorts")}?q={draft.cohort.code}'
+
+    assert f'href="{link}"' in page
+    found = client.get(reverse("operations:cohorts"), {"q": draft.cohort.code})
+    assert [c["code"] for c in found.context["cohorts"]] == [draft.cohort.code]
+
+
+def test_a_cohort_with_no_approved_enrolment_gets_a_sentence_not_an_empty_table(
+    client: Client, manager: User, sent: MoheSubmission
+) -> None:
+    """
+    Three seven-column tables saying nothing filled half the page — and the
+    sentence has to explain why «المسجّلون» above is not zero while this is.
+    """
+    mohe_service.record_decision(
+        actor=manager,
+        submission=sent,
+        approved=True,
+        decided_on=DECIDED_ON,
+        mohe_course_number="MOHE/2026/10",
+        registration_deadline=DEADLINE,
+    )
+    client.force_login(manager)
+
+    response = client.get(reverse("operations:mohe"))
+    page = response.content.decode("utf-8")
+
+    assert response.context["mohe_name_sections"], "no section means this proves nothing"
+    assert all(not s["rows"] for s in response.context["mohe_name_sections"])
+    assert "لا تسجيل معتمد على هذه الدفعة بعد" in page
+    assert "لا تسجيلات معتمدة في هذه الدفعة" not in page
+
+
+def test_the_register_is_searchable_by_the_programme_on_every_row(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    """
+    The programme is printed on every row and was not searchable: a reader
+    looking for «هندسة الشبكات» had to know which cohort codes carry it.
+    """
+    client.force_login(manager)
+    url = reverse("operations:mohe")
+
+    by_code = client.get(url, {"q": draft.cohort.code}).context["submissions"]
+    by_programme_code = client.get(url, {"q": draft.cohort.program.code}).context["submissions"]
+    by_programme_name = client.get(
+        url, {"q": draft.cohort.program.name_ar[:6]}
+    ).context["submissions"]
+
+    assert [r["cohort_code"] for r in by_code] == [draft.cohort.code]
+    assert [r["cohort_code"] for r in by_programme_code] == [draft.cohort.code]
+    assert [r["cohort_code"] for r in by_programme_name] == [draft.cohort.code]
+
+
+# ---------------------------------------------------------------------------
+# The open-file screen after its polish pass: a refusal that can be read, and
+# an empty state that points somewhere.
+# ---------------------------------------------------------------------------
+def test_a_refused_save_says_so_and_keeps_what_was_typed(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    """
+    The choices are recomputed on every request, so a cohort that gained a file
+    while this page was open left the list, the field turned invalid, and the
+    page came back with no message — and seven typed fields gone with it.
+    """
+    client.force_login(manager)
+
+    response = client.post(
+        reverse("operations:mohe-submit"),
+        {
+            "cohort_code": draft.cohort.code,  # already holds `draft`
+            "training_axes_ar": "محاور كُتبت بعناية",
+            "trainer_name": "د. تجربة",
+        },
+    )
+    body = response.content.decode("utf-8")
+    said = [str(m) for m in response.context["messages"]]
+
+    assert response.status_code == 200
+    assert said and draft.cohort.code in said[0], "the refusal was silent"
+    assert "محاور كُتبت بعناية" in body and "د. تجربة" in body, "the typed content was thrown away"
+    assert MoheSubmission.objects.filter(cohort=draft.cohort).count() == 1
+
+
+def test_a_cohort_code_that_accepts_no_file_is_named_not_ignored(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    client.force_login(manager)
+    url = reverse("operations:mohe-submit")
+
+    unknown = client.get(url, {"cohort": "NO-SUCH-COHORT"})
+    assert unknown.context["unknown_cohort"] is True
+    assert "لا دفعة بالرمز" in unknown.content.decode("utf-8")
+
+    taken = client.get(url, {"cohort": draft.cohort.code})
+    assert taken.context["unknown_cohort"] is False
+    assert taken.context["existing_file"]["id"] == draft.pk
+
+
+def test_the_empty_state_points_where_this_reader_may_go(
+    client: Client, manager: User, draft: MoheSubmission
+) -> None:
+    """«لا دفعة تقبل فتح ملف» was a dead end; both ways out are permission-gated."""
+    client.force_login(manager)
+
+    response = client.get(reverse("operations:mohe-submit"))
+    body = response.content.decode("utf-8")
+
+    assert not response.context["cohorts"], "a cohort is free, so this proves nothing"
+    assert f'href="{reverse("operations:mohe")}"' in body
+    assert f'href="{reverse("operations:cohorts")}"' in body
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "mohe.sub.aud"))
+    auditor = client.get(reverse("operations:mohe-submit")).content.decode("utf-8")
+    assert f'href="{reverse("operations:mohe")}"' in auditor, "the auditor reads both registers"

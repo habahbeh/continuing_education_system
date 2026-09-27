@@ -393,6 +393,9 @@ def test_a_fresh_database_reaches_a_paid_enrolment_without_the_demo_seed(
         amount=Decimal("265.000"),
         payment_method=PaymentMethod.objects.create(code="CASH", name_ar="نقداً"),
         received_on=TERM_START,
+        # A fresh install ships §5.2 on: the money is taken at the university's
+        # finance department and no receipt issues without its voucher number.
+        external_receipt_ref="FIN-0001",
     )
 
     state = account_service.get_account_state(enrollment)
@@ -531,6 +534,9 @@ def test_a_fresh_database_reaches_a_partner_claim_without_any_fixture(
         amount=Decimal("265.000"),
         payment_method=PaymentMethod.objects.create(code="CASH", name_ar="نقداً"),
         received_on=TERM_START,
+        # A fresh install ships §5.2 on: the money is taken at the university's
+        # finance department and no receipt issues without its voucher number.
+        external_receipt_ref="FIN-0001",
     )
 
     # -- entitlement reads the terms the manager typed ----------------------

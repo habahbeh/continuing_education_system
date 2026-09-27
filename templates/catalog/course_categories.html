@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "مجالات الدورات — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  الشاشة التي لم تكن موجودة.
+
+  مجال الدورة هو ما تُقاس عليه قاعدة النقل (BR-061): دفعتان في مجالين
+  مختلفين لا يُنقل بينهما إلا بإلغاء المركز للدورة وباستثناءٍ من المدير.
+  والصفوف كانت تُدخَل من لوحة إدارة Django وحدها — أي بالكتابة في الجدول
+  مباشرةً بلا مرورٍ على خدمة وبلا صفٍّ في سجل التدقيق، فلا أحد يعرف بعد
+  عامٍ من أضاف المجال الذي يقف عليه رفضُ نقلٍ اليوم.
+
+  وعمود «البرامج» هو سبب كون هذا شاشةً لا قائمة: مجالٌ لا يستعمله أحد
+  يُعطَّل بلا أثر، ومجالٌ عليه أربعون برنامجاً لا يُعطَّل بلا حساب — والقارئ
+  لا يعرف أيّهما إلا إن قيل له.
+{% endcomment %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "الكتالوج والأسعار" %}</span>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "تصنيف المركز الداخلي للدورات، وهو ما يُقاس عليه النقل بين الدورات (BR-061). يُعطَّل ولا يُحذف، لأن قراراً قديماً قد يقف عليه." %}</p>
+  </div>
+  <div class="acts">
+    <a class="btn2 ghost" href="{% url 'catalog:short-courses' %}">{% translate "الدورات القصيرة" %}</a>
+  </div>
+</div>
+
+{% if error_fields %}
+  <div class="note danger err-summary" role="alert" tabindex="-1" id="err-summary" data-autofocus>
+    <div>
+      <strong>{% blocktranslate count total=error_fields|length %}حقلٌ واحد يحتاج تصحيحاً:{% plural %}{{ total }} حقول تحتاج تصحيحاً:{% endblocktranslate %}</strong>
+      <div class="err-links">
+        {% for field in error_fields %}<a href="#{{ field.id }}">{{ field.label }}</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if not can_create %}
+  <div class="note">
+    <div>{% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — تعريف المجالات لمدير المركز." %}</div>
+  </div>
+{% endif %}
+
+<div class="card2">
+  <div class="card2-head">
+    <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-tag"/></svg></span>
+    <h2>{% translate "المجالات المعرَّفة" %}</h2>
+    <span class="chip">{{ rows|length }}</span>
+  </div>
+  <div class="card2-body">
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>{% translate "الرمز" %}</th>
+            <th>{% translate "المجال" %}</th>
+            <th>{% translate "البرامج" %}</th>
+            <th>{% translate "الحالة" %}</th>
+            <th aria-label="{% translate 'إجراءات' %}"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td dir="ltr" translate="no"><strong class="num">{{ row.code }}</strong></td>
+              <td>{{ row.name_ar }}</td>
+              <td class="num">{{ row.programs }}</td>
+              <td>
+                {% if row.is_active %}<span class="chip ok">{% translate "نشط" %}</span>
+                {% else %}<span class="chip">{% translate "مُعطَّل" %}</span>{% endif %}
+              </td>
+              <td class="acts">
+                {% if can_edit %}
+                  <form class="inline-form" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="toggle">
+                    <input type="hidden" name="code" value="{{ row.code }}">
+                    <button class="btn2 sm" type="submit">
+                      {% if row.is_active %}{% translate "تعطيل" %}{% else %}{% translate "تنشيط" %}{% endif %}
+                    </button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="empty">
+              <strong>{% translate "لا مجال معرَّف بعد." %}</strong>
+              {% translate "ولا دورة قصيرة تُحفَظ بلا مجال (BR-061) — فابدأ بواحد من النموذج أدناه." %}
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if can_create %}
+  <div class="card2">
+    <div class="card2-head">
+      <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+      <h2>{% translate "إضافة مجال" %}</h2>
+    </div>
+    <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "اجعل المجال دقيقاً: كل دورتين تحت مجال واحد يصير النقل بينهما مسموحاً تلقائياً." %}
+      </p>
+      <form method="post" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create">
+        {% include "partials/_form.html" %}
+        <div class="form-acts">
+          <button class="btn2 primary" type="submit">
+            <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+            {% translate "إضافة" %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

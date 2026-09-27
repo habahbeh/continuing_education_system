@@ -45,6 +45,43 @@ REPORTS: tuple[tuple[int, str], ...] = (
 
 REPORT_TITLES = dict(REPORTS)
 
+#: السؤال الذي يجيب عنه كل تقرير، بعبارة مَن سيقرؤه لا بعبارة §9.
+#: يُعرض على بطاقة الفهرس قبل أن يُفتح التقرير: سبعة عناوين متشابهة الطول
+#: تُقرأ قائمةً واحدة، والسؤال هو ما يفرّق بينها.
+REPORT_QUESTIONS: dict[int, str] = {
+    1: "كم قُبض في المدى، وعلى أيّ بند؟",
+    2: "ماذا بقي للمركز بعد حصص الشركاء ومصروفاته؟",
+    3: "كم لكل شريك، وكم صُرف له، وكم بقي؟",
+    4: "مَن عليه رصيد، وما أثر تأخّره على استحقاق شريكه؟",
+    5: "ماذا على هذا المشارك وله — بالخصم والنقل والاسترداد؟",
+    6: "هل طابق المعدود ما سجّله النظام في الصندوق؟",
+    7: "على أيّ بند أنفق المركز، وكم منه معتمَد؟",
+}
+
+#: أيقونة كل تقرير — من لوحة الرموز في `partials/_nav_icons.html`، لا من
+#: مكتبة خارجية (ADR-003). سبعة عناوين متشابهة الطول في شريط واحد تُقرأ كتلةً
+#: رمادية؛ الأيقونة هي ما يجعل «المتأخرون» يُلتقط بالعين قبل قراءته.
+REPORT_ICONS: dict[int, str] = {
+    1: "coins",
+    2: "scale",
+    3: "building",
+    4: "alert",
+    5: "receipt",
+    6: "vault",
+    7: "wallet",
+}
+
+#: لون البطاقة — من `.tone-*` التي تعرفها ورقة الأنماط.
+REPORT_TONES: dict[int, str] = {
+    1: "ok",
+    2: "info",
+    3: "violet",
+    4: "danger",
+    5: "brand",
+    6: "teal",
+    7: "warn",
+}
+
 
 def available_reports(*, actor: Any) -> list[dict[str, Any]]:
     """
@@ -57,7 +94,14 @@ def available_reports(*, actor: Any) -> list[dict[str, Any]]:
 
     permitted = allowed_reports(getattr(actor, "role", "") or "")
     return [
-        {"number": number, "title": title, "allowed": number in permitted}
+        {
+            "number": number,
+            "title": title,
+            "allowed": number in permitted,
+            "question": REPORT_QUESTIONS[number],
+            "icon": REPORT_ICONS[number],
+            "tone": REPORT_TONES[number],
+        }
         for number, title in REPORTS
     ]
 
@@ -95,11 +139,18 @@ def revenue_report(
 
     by_type: dict[str, Decimal] = {}
     by_program_type: dict[str, Decimal] = {}
+    # Sprint 8L · A-1 — الإيراد مفصَّلاً حسب الدفعة، وهو نصف ما يقرؤه المدير:
+    # «كم قُبض؟» سؤالٌ يليه دائماً «من أيّ دفعة؟». يُجمَّع في الحلقة القائمة
+    # نفسها ومن الصفوف التي جُلبت أصلاً — لا استعلام إضافي، ولا رقم يُحتسب هنا
+    # لم تحتسبه الخدمة التي تملكه.
+    by_cohort: dict[str, dict[str, Any]] = {}
+    receipts: set[int] = set()
     total = ZERO
     unallocated = ZERO
 
     for allocation in allocations:
         total += allocation.amount
+        receipts.add(allocation.receipt_id)
         line = allocation.charge_line
         if line is None:
             unallocated += allocation.amount
@@ -109,6 +160,21 @@ def revenue_report(
         if enrollment is not None:
             kind = enrollment.cohort.program.program_type
             by_program_type[kind] = by_program_type.get(kind, ZERO) + allocation.amount
+
+            cohort = enrollment.cohort
+            row = by_cohort.setdefault(
+                cohort.code,
+                {
+                    "code": cohort.code,
+                    "name_ar": getattr(cohort, "name_ar", "") or cohort.code,
+                    "program_type": cohort.program.program_type,
+                    "program_type_display": cohort.program.get_program_type_display(),
+                    "collected": ZERO,
+                    "participants": set(),
+                },
+            )
+            row["collected"] += allocation.amount
+            row["participants"].add(enrollment.id)
 
     # Sprint 8D-3 · client decision 3 — «يُدرج تحصيل ذمم السنوات السابقة
     # بنداً مستقلاً لا ضمن إيراد السنة الجارية». Split by CHARGE TYPE, which
@@ -132,7 +198,57 @@ def revenue_report(
         "unallocated_credit": unallocated,
         "by_type": sorted(by_type.items()),
         "by_program_type": sorted(by_program_type.items()),
+        "receipt_count": len(receipts),
+        "by_cohort": _cohort_rows_with_due(by_cohort),
     }
+
+
+def _cohort_rows_with_due(by_cohort: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Sprint 8L-2 · B-2 — «نسبة التحصيل» لا «حصّة الدفعة من الإيراد».
+
+    الشاشة كانت تعرض `المقبوض من هذه الدفعة ÷ إيراد المدى` — رقمٌ إداري يقول
+    أيّ دفعة أكبر. وسؤال مدير المركز اليومي غيره: `المحصَّل ÷ المستحق` — أي
+    **أيّ دفعة متأخّرة عن تحصيل أقساطها**، وهي التي يُتابَع أهلها. الديمو كان
+    يعرض الثاني، والفرق ليس تجميلياً: الأولى تكافئ الدفعة الكبيرة، والثانية
+    تكشف الدفعة المتعثّرة ولو كانت صغيرة.
+
+    المستحق لا يُحتسب هنا: ``get_account_states`` هي صاحبة معادلة الرصيد
+    (DATA_MODEL §8.2)، وتُنادى مرّة واحدة لكل تسجيلات الدفعات الظاهرة — لا
+    استعلام لكل دفعة ولا لكل مشارك.
+    """
+    from apps.billing.services.account_service import get_account_states
+    from apps.operations.models import Enrollment
+
+    codes = list(by_cohort)
+    if not codes:
+        return []
+
+    enrollments = list(Enrollment.objects.filter(cohort__code__in=codes).select_related("cohort"))
+    states = get_account_states(enrollments)
+
+    due: dict[str, Decimal] = {}
+    enrolled: dict[str, int] = {}
+    for enrollment in enrollments:
+        code = enrollment.cohort.code
+        due[code] = due.get(code, ZERO) + states[enrollment.pk].total_due
+        enrolled[code] = enrolled.get(code, 0) + 1
+
+    rows = []
+    for row in by_cohort.values():
+        code = row["code"]
+        rows.append(
+            {
+                **row,
+                "participants": len(row["participants"]),
+                # المسجّلون في الدفعة كلهم، لا الدافعون منهم وحدهم: النسبة
+                # بلا مقامٍ كامل تكذب لصالح الدفعة التي لم يدفع فيها أحد.
+                "enrolled": enrolled.get(code, 0),
+                "total_due": due.get(code, ZERO),
+                "outstanding": due.get(code, ZERO) - row["collected"],
+            }
+        )
+    return sorted(rows, key=lambda r: -r["collected"])
 
 
 # ---------------------------------------------------------------------------
@@ -185,13 +301,29 @@ def net_income_report(
         period_to__lte=date_to,
     ).select_related("partner")
 
+    # Sprint 8L · A-2 — «صافي الدخل بعد حصص الشركاء» بلا بسطٍ لكل شريك نصفُ
+    # جواب: المدير يريد أن يعرف أيّ شريك كلّف أكثر، وكم بقي للجامعة من كل
+    # دينار حُصّل من برامجه. الأرقام الثلاثة على المطالبة نفسها منذ Sprint 6
+    # (`gross_collected` و`partner_share` و`net_payable`) ولم تكن تُعرض.
     partner_total = ZERO
-    by_partner: dict[str, Decimal] = {}
+    by_partner: dict[str, dict[str, Any]] = {}
     for claim in claims:
         partner_total += claim.net_payable
-        by_partner[claim.partner.name_ar] = (
-            by_partner.get(claim.partner.name_ar, ZERO) + claim.net_payable
+        row = by_partner.setdefault(
+            claim.partner.name_ar,
+            {
+                "name_ar": claim.partner.name_ar,
+                "code": claim.partner.code,
+                "claims": 0,
+                "gross_collected": ZERO,
+                "partner_share": ZERO,
+                "net_payable": ZERO,
+            },
         )
+        row["claims"] += 1
+        row["gross_collected"] += claim.gross_collected
+        row["partner_share"] += claim.partner_share
+        row["net_payable"] += claim.net_payable
 
     expenses_total = expense_service.approved_total(
         actor=actor, date_from=date_from, date_to=date_to, request=request
@@ -228,11 +360,33 @@ def net_income_report(
         "historical_refunds_reversed": refunds_reversed,
         "historical_refunds_net": refunds_paid - refunds_reversed,
         "partner_total": partner_total,
-        "by_partner": sorted(by_partner.items()),
+        # حصة الجامعة = المحصَّل من برامج الشريك ناقص ما استحقّه فعلاً. تُشتقّ
+        # هنا من رقمين تملكهما مطالبةٌ معتمدة، ولا تُحتسب حصّةٌ من جديد.
+        "by_partner": [
+            {
+                **row,
+                "university_share": row["gross_collected"] - row["net_payable"],
+            }
+            for row in sorted(by_partner.values(), key=lambda r: -r["net_payable"])
+        ],
         "expenses_total": expenses_total,
+        # Sprint 8L-2 — جدولٌ فارغ يقول «لا مطالبات» صادقٌ وناقص: السبب قد
+        # يكون أن لا دفعة مرتبطة باتفاقية أصلاً، وهي حلقةٌ أعلى من التقرير.
+        # القارئ الذي لا يعرف ذلك يبحث عن الخلل في التقرير.
+        "any_cohort_has_agreement": _any_cohort_has_agreement(),
+        # سطرٌ وسيط في السلّم: القارئ يريد أن يرى أين وقف الرقم بعد الشركاء
+        # وقبل المصروفات، وحسابه في القالب كان سيضع طرحاً في قالب.
+        "after_partners": collected - partner_total,
         "net_income": collected - partner_total - expenses_total,
         "charge_type_note": ChargeType.DEPOSIT,
     }
+
+
+def _any_cohort_has_agreement() -> bool:
+    """استعلام وجودٍ واحد: هل ثمّة دفعة على اتفاقية أصلاً؟"""
+    from apps.operations.models import Cohort
+
+    return Cohort.objects.filter(agreement__isnull=False).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +412,8 @@ def partner_dues_report(
         "number": 3,
         "title": REPORT_TITLES[3],
         "partner_code": partner_code,
+        "partners": _partner_dues_rows(claims, settlements, obligations),
+        "any_cohort_has_agreement": _any_cohort_has_agreement(),
         "claims": claims,
         "settlements": settlements,
         "obligations": obligations,
@@ -265,6 +421,61 @@ def partner_dues_report(
         "settled_total": sum((s["total_paid"] for s in settlements), ZERO),
         "obligations_outstanding": sum((o["outstanding"] for o in obligations), ZERO),
     }
+
+
+def _partner_dues_rows(
+    claims: list[dict[str, Any]],
+    settlements: list[dict[str, Any]],
+    obligations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Sprint 8L · A-3 — صفّ واحد لكل شريك يجمع الثلاثة.
+
+    §9.3 يسأل عن «كشف مستحقات كل شريك ومخالصاته»، والجداول الثلاثة المسطّحة
+    تجيب عن المطالبات والمخالصات والالتزامات كلٌّ على حدة وتترك القارئ يجمع
+    بنفسه — وهو حسابٌ مالي يقع في رأس القارئ بدل أن يقع في خدمة.
+
+    والتجميع هنا لا في القالب: جمعٌ في قالب حسابُ مالٍ في قالب.
+    """
+    rows: dict[str, dict[str, Any]] = {}
+
+    def _row(name: str) -> dict[str, Any]:
+        return rows.setdefault(
+            name,
+            {
+                "name_ar": name,
+                "claim_count": 0,
+                "partner_share": ZERO,
+                "deductions": ZERO,
+                "net_payable": ZERO,
+                "settled": ZERO,
+                "settlement_balance": ZERO,
+                "obligations_outstanding": ZERO,
+                "last_settlement": None,
+            },
+        )
+
+    for claim in claims:
+        row = _row(claim["partner_name"])
+        row["claim_count"] += 1
+        row["partner_share"] += claim["partner_share"]
+        row["deductions"] += claim["total_deductions"]
+        row["net_payable"] += claim["net_payable"]
+
+    for settlement in settlements:
+        row = _row(settlement["partner_name"])
+        row["settled"] += settlement["total_paid"]
+        row["settlement_balance"] += settlement["balance"]
+        # آخر مخالصة بالفترة لا بترتيب الإدراج: المخالصات تُنشأ بأثر رجعي
+        # أحياناً، وآخر ما أُدخل ليس آخر ما جرى.
+        current = row["last_settlement"]
+        if current is None or settlement["period_to"] > current["period_to"]:
+            row["last_settlement"] = settlement
+
+    for obligation in obligations:
+        _row(obligation["partner_name"])["obligations_outstanding"] += obligation["outstanding"]
+
+    return sorted(rows.values(), key=lambda r: -r["net_payable"])
 
 
 # ---------------------------------------------------------------------------
@@ -282,23 +493,44 @@ def overdue_report(
     """
     policy.require_report(actor, 4, request=request)
 
+    from apps.operations.models import Enrollment
     from apps.operations.services import enrollment_service
     from apps.settlements.services import entitlement_service
 
-    rows: list[dict[str, Any]] = []
-    for row in enrollment_service.list_enrollments(
-        actor=actor, cohort_code=cohort_code, request=request
-    ):
-        if not row["participant_owes"]:
-            continue
-        enrollment = enrollment_service.get_enrollment(
-            actor=actor, code=row["code"], request=request
+    # Sprint 8L · A-6 — كان هنا ``get_enrollment`` داخل الحلقة، ومعه تقييمٌ
+    # مفرد للتأخّر: ثلاثة عشر استعلاماً لكل متأخّر (٣٠ لصفّ واحد و٩٦ لستّة،
+    # مقيسة في 8L-0). تقريرٌ يبطؤ كلّما زاد المتأخرون هو أبطأ ما يكون في اليوم
+    # الذي يُحتاج فيه.
+    #
+    # الآن: استعلامٌ واحد يجلب التسجيلات المرشَّحة، وتقييمٌ مجمَّع يقرأ القاعدة
+    # نفسها من ``entitlement_service`` — لا نسخة منها هنا.
+    candidates = [
+        row
+        for row in enrollment_service.list_enrollments(
+            actor=actor, cohort_code=cohort_code, request=request
         )
-        if not entitlement_service.is_payment_overdue(enrollment, as_of=as_of):
+        if row["participant_owes"]
+    ]
+
+    enrollments = list(
+        Enrollment.objects.filter(code__in=[row["code"] for row in candidates]).select_related(
+            "participant", "cohort__agreement"
+        )
+    )
+    overdue = entitlement_service.payment_overdue_map(enrollments, as_of=as_of)
+    by_code = {enrollment.code: enrollment for enrollment in enrollments}
+
+    rows: list[dict[str, Any]] = []
+    for row in candidates:
+        enrollment = by_code.get(row["code"])
+        if enrollment is None or not overdue.get(enrollment.pk):
             continue
         rows.append(
             {
                 **row,
+                # الهاتف: هذا التقرير هو الذي تُلاحَق به الذمم، وملاحقةٌ بلا
+                # رقمٍ تُرسل الموظّف إلى شاشة أخرى لكل صفّ.
+                "participant_phone": enrollment.participant.phone,
                 "voids_partner_entitlement": enrollment.cohort.agreement_id is not None,
             }
         )
@@ -309,13 +541,101 @@ def overdue_report(
         "as_of": as_of,
         "rows": rows,
         "total_outstanding": sum((r["balance"] for r in rows), ZERO),
+        "total_due_sum": sum((r["total_due"] for r in rows), ZERO),
+        "total_paid_sum": sum((r["total_paid"] for r in rows), ZERO),
         "count": len(rows),
+        # كم منهم يُسقط استحقاق شريك فعلاً — الرقم الذي يهمّ المدير قبل أن
+        # يعتمد مطالبة، ولا يُعرف بعدّ الصفوف لأن ليس لكل تسجيل شريك.
+        "voiding_count": sum(1 for r in rows if r["voids_partner_entitlement"]),
+        # ومَن وُضع متأخراً بقرار موظّف لا بحساب المهلة: الحالتان تظهران في
+        # الجدول نفسه، والفرق بينهما أن الثانية يدافع عنها إنسان.
+        "manual_count": sum(1 for r in rows if r["status"] == "PAYMENT_OVERDUE"),
     }
 
 
 # ---------------------------------------------------------------------------
 # 5 — كشف حساب الطالب (§9.5)
 # ---------------------------------------------------------------------------
+def participant_dues_rows(*, actor: Any, query: str = "", request: Any = None) -> dict[str, Any]:
+    """
+    Sprint 8L · A-4 — صفٌّ لكل **مشارك**، لا لكل تسجيل.
+
+    §9.5 نصّه «كشف حساب مالي شامل **للطالب**»، وطالبٌ له تسجيلان له حسابٌ
+    واحد. وكانت الشاشة تطلب رمز تسجيلٍ يُكتب بالذاكرة: مَن لا يحفظ الرمز لا
+    يصل إلى الكشف أصلاً.
+
+    كل رقمٍ هنا مجموعُ ما تحتسبه الخدمة التي تملكه: الرصيد من
+    ``get_account_states`` والخصم منه أيضاً، والرسوم الإضافية والاستردادات
+    والنقل من جداولها — استعلامٌ مجمَّع لكلٍّ منها لا استعلامٌ لكل مشارك.
+
+    البحث يمرّ بـ ``list_participants``، فيطوي همزة الألف («أحمد» و«احمد»
+    سلسلتان مختلفتان عند ترتيب MySQL) ويحترم ما يراه الدور من حقول (BR-101).
+    """
+    policy.require_report(actor, 5, request=request)
+
+    from django.db.models import Count, Sum
+
+    from apps.billing.models import ExtraFee, Refund, RefundStatus
+    from apps.billing.services.account_service import get_account_states
+    from apps.operations.models import Enrollment, Transfer
+    from apps.people.services import participant_service
+
+    participants = participant_service.list_participants(actor=actor, query=query, request=request)
+    numbers = [row["participant_number"] for row in participants]
+    if not numbers:
+        return {"rows": [], "query": query}
+
+    enrollments = list(
+        Enrollment.objects.filter(participant__participant_number__in=numbers).select_related(
+            "participant"
+        )
+    )
+    states = get_account_states(enrollments)
+
+    def _by_participant(queryset: Any, field: str) -> dict[str, Decimal]:
+        return {
+            row["enrollment__participant__participant_number"]: row["total"] or ZERO
+            for row in queryset.values("enrollment__participant__participant_number").annotate(
+                total=Sum(field)
+            )
+        }
+
+    extra_fees = _by_participant(ExtraFee.objects.filter(enrollment__in=enrollments), "amount")
+    refunds = _by_participant(
+        # المنفَّذ وحده: استردادٌ مطلوب أو معتمد لم يخرج من الصندوق بعد،
+        # وإدراجه يُنقص رصيداً لم يُنقص فعلاً.
+        Refund.objects.filter(enrollment__in=enrollments, status=RefundStatus.EXECUTED),
+        "amount",
+    )
+    transfers = {
+        row["from_enrollment__participant__participant_number"]: row["moves"]
+        for row in Transfer.objects.filter(from_enrollment__in=enrollments)
+        .values("from_enrollment__participant__participant_number")
+        .annotate(moves=Count("id"))
+    }
+
+    rows: list[dict[str, Any]] = []
+    for participant in participants:
+        number = participant["participant_number"]
+        mine = [e for e in enrollments if e.participant.participant_number == number]
+        totals = [states[e.pk] for e in mine]
+        rows.append(
+            {
+                **participant,
+                "enrollments": len(mine),
+                "total_due": sum((t.total_due for t in totals), ZERO),
+                "total_paid": sum((t.total_paid for t in totals), ZERO),
+                "total_discount": sum((t.total_discount for t in totals), ZERO),
+                "balance": sum((t.balance for t in totals), ZERO),
+                "extra_fees": extra_fees.get(number, ZERO),
+                "refunds": refunds.get(number, ZERO),
+                "transfers": transfers.get(number, 0),
+                "codes": [e.code for e in mine],
+            }
+        )
+    return {"rows": rows, "query": query}
+
+
 def participant_statement_report(
     *, actor: Any, enrollment_code: str, request: Any = None
 ) -> dict[str, Any]:
@@ -344,7 +664,13 @@ def participant_statement_report(
 # ---------------------------------------------------------------------------
 # 6 — القبض اليومي والإقفال (§9.6 · §5.2)
 # ---------------------------------------------------------------------------
-def daily_closing_report(*, actor: Any, on_date: date, request: Any = None) -> dict[str, Any]:
+def daily_closing_report(
+    *,
+    actor: Any,
+    on_date: date,
+    date_from: date | None = None,
+    request: Any = None,
+) -> dict[str, Any]:
     """
     What each till took, and whether the count matched.
 
@@ -356,20 +682,71 @@ def daily_closing_report(*, actor: Any, on_date: date, request: Any = None) -> d
 
     from apps.cashbox.services import closing_service, payment_service
 
-    closings = closing_service.list_closings(actor=actor, on_date=on_date, request=request)
-    receipts = payment_service.list_receipts(actor=actor, on_date=on_date, request=request)
+    # Sprint 8L · A-5 — «اليومي» في §9.6 صفةُ الصفّ لا صفةُ التقرير: مطابقةُ
+    # أسبوعٍ سؤالٌ حقيقي للمدقّق، وكان يكلّفه سبع صفحات. واليوم الواحد يبقى
+    # الافتراضي، فمن كان يفتح الشاشة لليوم يجدها كما تركها.
+    if date_from is None or date_from > on_date:
+        date_from = on_date
+    single_day = date_from == on_date
+
+    closings = (
+        closing_service.list_closings(actor=actor, on_date=on_date, request=request)
+        if single_day
+        else closing_service.list_closings(
+            actor=actor, since=date_from, until=on_date, request=request
+        )
+    )
+    receipts = (
+        payment_service.list_receipts(actor=actor, on_date=on_date, request=request)
+        if single_day
+        else payment_service.list_receipts(
+            actor=actor, since=date_from, until=on_date, request=request
+        )
+    )
     issued = [r for r in receipts if r["status"] == "ISSUED"]
+
+    # مَن قبض وكم، ومطابقته: ملخّصان يقرآن الصفوف نفسها المعروضة تحتهما، فلا
+    # استعلام ولا حساب جديد — ترتيبٌ لما هو معروض أصلاً.
+    by_cashier: dict[str, dict[str, Any]] = {}
+    for closing in closings:
+        row = by_cashier.setdefault(
+            closing["cashier"],
+            {
+                "cashier": closing["cashier"],
+                "closings": 0,
+                "system_total": ZERO,
+                "counted_total": ZERO,
+                "variance": ZERO,
+            },
+        )
+        row["closings"] += 1
+        row["system_total"] += closing["system_total"]
+        row["counted_total"] += closing["counted_total"]
+        row["variance"] += closing["variance"]
+
+    by_method: dict[str, dict[str, Any]] = {}
+    for receipt in issued:
+        method = receipt.get("payment_method") or "—"
+        row = by_method.setdefault(method, {"method": method, "count": 0, "amount": ZERO})
+        row["count"] += 1
+        row["amount"] += receipt["amount"]
 
     return {
         "number": 6,
         "title": REPORT_TITLES[6],
         "on_date": on_date,
+        "date_from": date_from,
+        "single_day": single_day,
         "closings": closings,
         "receipts": issued,
         "receipts_total": sum((r["amount"] for r in issued), ZERO),
+        "system_total": sum((c["system_total"] for c in closings), ZERO),
         "counted_total": sum((c["counted_total"] for c in closings), ZERO),
         "variance_total": sum((c["variance"] for c in closings), ZERO),
         "unreconciled": [c for c in closings if c["status"] != "RECONCILED"],
+        "unvouched_total": sum((c["unvouched_count"] for c in closings), 0),
+        "by_cashier": sorted(by_cashier.values(), key=lambda r: -r["system_total"]),
+        "by_method": sorted(by_method.values(), key=lambda r: -r["amount"]),
     }
 
 
@@ -403,12 +780,17 @@ def expenses_report(
         date_to=date_to,
         request=request,
     )
+    grand_total = sum((r["amount"] for r in rows), ZERO)
     return {
         "number": 7,
         "title": REPORT_TITLES[7],
         "date_from": date_from,
         "date_to": date_to,
+        "category": category,
         "rows": rows,
+        # المجموع الكلّي للمعروض (معتمَداً كان أو منتظراً) — وهو مقام النِّسب
+        # على البطاقات. غيره يجعل النسب لا تُجمع على مئة.
+        "grand_total": grand_total,
         "totals": expense_service.totals_by_category(
             actor=actor, date_from=date_from, date_to=date_to, request=request
         ),
@@ -426,6 +808,30 @@ def expenses_report(
 #: columns to write. A report with no natural row list is not exportable, and
 #: saying so is better than exporting a summary that looks like data.
 EXPORTABLE: dict[int, tuple[str, tuple[tuple[str, str], ...]]] = {
+    # Sprint 8L · A-9 — السبعة تُصدَّر، لا أربعة منها. وكلٌّ يصدّر صفوفه هو:
+    # التقرير الأول يصدّر تفصيل الدفعات لا بطاقاته، والثاني صفوف الشركاء لا
+    # سلّم الاحتساب — فملفٌّ يحمل ملخّصاً يبدو بياناتٍ وليس بياناتٍ.
+    1: (
+        "by_cohort",
+        (
+            ("code", "الدفعة"),
+            ("name_ar", "اسم الدفعة"),
+            ("program_type_display", "النوع"),
+            ("participants", "المشاركون الدافعون"),
+            ("collected", "المقبوض"),
+        ),
+    ),
+    2: (
+        "by_partner",
+        (
+            ("code", "رمز الشريك"),
+            ("name_ar", "الشريك"),
+            ("claims", "المطالبات"),
+            ("gross_collected", "المحصَّل من برامجه"),
+            ("net_payable", "حصته المستحقة"),
+            ("university_share", "حصة الجامعة"),
+        ),
+    ),
     3: (
         "claims",
         (
@@ -445,10 +851,13 @@ EXPORTABLE: dict[int, tuple[str, tuple[tuple[str, str], ...]]] = {
             ("code", "التسجيل"),
             ("participant_name", "المشارك"),
             ("participant_number", "الرقم"),
+            ("participant_phone", "الهاتف"),
             ("cohort_code", "الدفعة"),
+            ("enrolled_on", "تاريخ التسجيل"),
             ("total_due", "المستحق"),
             ("total_paid", "المدفوع"),
             ("balance", "الرصيد"),
+            ("status_display", "الحالة"),
         ),
     ),
     6: (
@@ -460,6 +869,21 @@ EXPORTABLE: dict[int, tuple[str, tuple[tuple[str, str], ...]]] = {
             ("amount", "المبلغ"),
             ("payment_method", "الطريقة"),
             ("cashier", "الصندوق"),
+        ),
+    ),
+    5: (
+        "rows",
+        (
+            ("participant_number", "الرقم"),
+            ("name_ar", "المشارك"),
+            ("enrollments", "التسجيلات"),
+            ("total_due", "المستحق"),
+            ("total_paid", "المدفوع"),
+            ("total_discount", "الخصومات"),
+            ("refunds", "الاستردادات"),
+            ("extra_fees", "رسوم إضافية"),
+            ("transfers", "النقل"),
+            ("balance", "الرصيد"),
         ),
     ),
     7: (
@@ -477,6 +901,22 @@ EXPORTABLE: dict[int, tuple[str, tuple[tuple[str, str], ...]]] = {
 }
 
 
+class ExportTooLargeError(Exception):
+    """التصدير يتجاوز الحدّ — يُرفض ولا يُبتر."""
+
+
+def export_row_limit(*, as_of: date) -> int:
+    """
+    أقصى عدد صفوف يُصدَّر في ملف واحد.
+
+    إعدادٌ لا ثابتٌ في الشيفرة، كالترميز: منشأةٌ واحدة عنيدة قد تحتاج رقماً
+    آخر، وذلك لا يستحق إصداراً برمجياً.
+    """
+    from apps.core.services.settings_service import get_setting
+
+    return int(get_setting("report_export_max_rows", as_of=as_of, default=5000))
+
+
 def export_encoding(*, as_of: date) -> str:
     """
     ``utf-8-sig`` — the BOM is what makes Excel read Arabic correctly.
@@ -489,7 +929,9 @@ def export_encoding(*, as_of: date) -> str:
     return str(get_setting("report_export_encoding", as_of=as_of, default="utf-8-sig"))
 
 
-def csv_rows(report: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
+def csv_rows(
+    report: dict[str, Any], *, limit: int | None = None
+) -> tuple[list[str], list[list[str]]]:
     """
     Header and body for a report's CSV, or empty when it has no row list.
 
@@ -500,20 +942,35 @@ def csv_rows(report: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
     if spec is None:
         return [], []
     key, columns = spec
+
+    # Sprint 8L-2 · B-3 — **يُرفض ولا يُبتر.** ملفٌّ مبتور يفتحه محاسب فيرى
+    # جدولاً كاملاً في ظاهره وناقصاً في حقيقته هو أسوأ ما يمكن أن يخرج من
+    # تقرير مالي: لا شيء على الورقة يقول إن هناك بقيّة. والرفض يقول ما العمل.
+    rows = report.get(key) or []
+    if limit is not None and len(rows) > limit:
+        raise ExportTooLargeError(
+            f"التصدير يشمل {len(rows):,} صفّاً ويتجاوز الحدّ ({limit:,}). "
+            "ضيّق المدى أو أضف مرشّحاً ثم أعد التصدير."
+        )
     header = [label for _field, label in columns]
-    body = [[str(row.get(field, "")) for field, _label in columns] for row in report.get(key, [])]
+    body = [[str(row.get(field, "")) for field, _label in columns] for row in rows]
     return header, body
 
 
 __all__ = [
     "EXPORTABLE",
     "REPORTS",
+    "REPORT_ICONS",
+    "REPORT_QUESTIONS",
     "REPORT_TITLES",
+    "REPORT_TONES",
+    "ExportTooLargeError",
     "available_reports",
     "csv_rows",
     "daily_closing_report",
     "expenses_report",
     "export_encoding",
+    "export_row_limit",
     "net_income_report",
     "overdue_report",
     "participant_statement_report",

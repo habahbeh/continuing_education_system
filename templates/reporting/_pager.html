@@ -1,0 +1,27 @@
+{% load i18n %}
+{% comment %}
+  مرقّم صفحات التقرير — بنفس ترقيم السجلات (`/cashbox/payments/`) نصّاً وسلوكاً.
+
+  `param` يسمح بأكثر من جدول مرقَّم على صفحة واحدة (`page` للجدول الرئيس،
+  و`page_receipts` لجدول السندات مثلاً) بلا أن يحرّك أحدهما الآخر.
+
+  `qs` هو استعلام الصفحة بلا مفتاح هذه الصفحة، فالفترة والمرشّحات تبقى عند
+  الانتقال — وهو العيب نفسه الذي أُصلح في شريط التبويب.
+
+  ويختفي عند الطباعة: ورقةٌ تقول «١ / ٧» ثم لا تحمل الصفحات الست ورقةٌ ناقصة.
+  ولذلك تحمل الترويسة المطبوعة عدد الصفوف الكلّي.
+{% endcomment %}
+{% if page.pages > 1 %}
+  <div class="tbl-foot pager print:hidden">
+    <span class="muted">{{ page.start }}–{{ page.end }} {% translate "من" %} {{ page.total }}</span>
+    <span class="pager-btns">
+      {% if page.has_prev %}
+        <a class="btn2 ghost" href="?{{ qs }}&amp;{{ param }}={{ page.prev }}">‹ {% translate "السابق" %}</a>
+      {% endif %}
+      <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+      {% if page.has_next %}
+        <a class="btn2 ghost" href="?{{ qs }}&amp;{{ param }}={{ page.next }}">{% translate "التالي" %} ›</a>
+      {% endif %}
+    </span>
+  </div>
+{% endif %}

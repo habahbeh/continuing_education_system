@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -33,12 +33,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "إقرار كل فترة مع شريكها: ما استحقّ عليها، وما دُفع منه، وما بقي قبل التوقيع." %}</p>
   </div>
 </div>
 
-{% guided_help "settlements" %}
 
 <p class="hint">{% translate "المخالصة إقرار بعدم بقاء مستحقات في الفترة — لا تُوقَّع ورصيدها غير صفري. وفترتها تُشتق من دورة الاتفاقية: كل أربعة أشهر للدبلوم، ونهاية كل دورة للقصيرة." %}</p>
 
@@ -46,7 +45,7 @@
   <div class="card2-head">
     <h2>{% translate "المخالصات المسجَّلة" %}</h2>
     <div class="acts">
-      <span class="count muted">{% blocktranslate count n=settlements|length %}مخالصة واحدة{% plural %}{{ n }} مخالصات{% endblocktranslate %}</span>
+      <span class="count muted">{{ settlements|length|ar_count:"مخالصة واحدة|مخالصتان|مخالصات|مخالصة" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">

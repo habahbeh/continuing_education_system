@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -43,12 +43,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "كيف يصير الشريك مستحقاً: من الاتفاقية إلى ما حُصِّل فعلاً، ثم الأهلية والمطالبة والخصم والمخالصة." %}</p>
   </div>
 </div>
 
-{% guided_help "entitlement" %}
 
 <p class="hint boxed">
   <strong>{% translate "صفحة دليل — لا تحتسب مبلغاً." %}</strong>

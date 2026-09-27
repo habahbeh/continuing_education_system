@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% load i18n l10n arabic_ui %}
+{% comment %}
+  محضر الإقفال اليومي على الورق (§9 تقرير 6): يوم صندوق واحد — النظامي والوصولات
+  والفرق وحالته، ثم سندات اليوم واحداً واحداً برقم سند الدائرة المالية لكل
+  منها (والناقص مُعلَّم)، ثم تواقيع الصندوق والمعتمِد. الترويسة من document_settings.
+{% endcomment %}
+{% block title %}{{ closing.code }} — {% translate "محضر إقفال يومي" %}{% endblock %}
+{% block content %}
+<div class="no-print">
+  <div class="action-bar">
+    <button type="button" class="btn2 primary" x-data @click="window.print()">
+      <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc"/></svg>
+      {% translate "طباعة" %}
+    </button>
+    <a class="btn2 ghost" href="{% url 'cashbox:closing' %}">{% translate "العودة إلى الإقفال اليومي" %}</a>
+    <span class="spacer"></span>
+    <span class="muted">{% translate "التوقيع والختم باليد على الورقة." %}</span>
+  </div>
+</div>
+
+<div class="doc closing-doc">
+  {% include "print/_doc_head.html" with chrome=closing.chrome reference=closing.code %}
+  {% if not closing.chrome.is_verified and closing.chrome.unverified_note_ar %}
+    <div class="doc-warn">{{ closing.chrome.unverified_note_ar }}</div>
+  {% endif %}
+
+  <h1>{% translate "محضر الإقفال اليومي" %}</h1>
+
+  <div class="doc-section">
+    <dl class="doc-grid">
+      <dt>{% translate "الصندوق" %}</dt><dd>{{ closing.cashier }}</dd>
+      <dt>{% translate "اليوم" %}</dt><dd dir="ltr" class="num">{{ closing.closing_date|date:"Y/m/d" }}</dd>
+      <dt>{% translate "النظامي" %}</dt><dd class="num" dir="ltr">{{ closing.system_total|unlocalize }} <span class="muted">({{ closing.receipt_count|ar_count:"سند واحد|سندان|سندات|سنداً" }})</span></dd>
+      <dt>{% translate "الوصولات المستلمة" %}</dt><dd class="num" dir="ltr">{{ closing.counted_total|unlocalize }}</dd>
+      <dt>{% translate "الفرق" %}</dt><dd class="num" dir="ltr">{{ closing.variance|unlocalize }}{% if closing.variance == 0 %} <span class="chip ok">{% translate "مطابق" %}</span>{% elif closing.variance < 0 %} <span class="chip danger">{% translate "عجز" %}</span>{% else %} <span class="chip warn">{% translate "زيادة" %}</span>{% endif %}</dd>
+      <dt>{% translate "بلا وصل" %}</dt><dd>{% if closing.unvouched_count %}{{ closing.unvouched_count|ar_count:"سند واحد|سندان|سندات|سنداً" }}{% else %}—{% endif %}</dd>
+      <dt>{% translate "الحالة" %}</dt><dd>{{ closing.status_display }}</dd>
+      {% if closing.variance_resolution_ar %}<dt>{% translate "التسوية" %}</dt><dd>{{ closing.variance_resolution_ar }}</dd>{% endif %}
+    </dl>
+    {% if closing.summary.by_method %}
+      <div class="doc-methods">{% translate "حسب الطريقة" %}: {% for m in closing.summary.by_method %}{{ m.name }} <span class="num" dir="ltr">{{ m.amount|unlocalize }}</span> ({{ m.count }}){% if not forloop.last %} · {% endif %}{% endfor %}</div>
+    {% endif %}
+  </div>
+
+  <div class="doc-section">
+    <h2>{% translate "سندات اليوم" %}</h2>
+    <table class="doc-tbl">
+      <thead><tr><th>{% translate "رقم السند" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "الطريقة" %}</th><th>{% translate "سند الدائرة المالية" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <tbody>
+        {% for r in closing.receipts %}
+          <tr>
+            <td dir="ltr" class="num">{{ r.internal_receipt_number }}</td>
+            <td>{{ r.participant_name }}</td>
+            <td>{{ r.payment_method }}</td>
+            <td dir="ltr" class="num">{% if r.external_receipt_ref %}{{ r.external_receipt_ref }}{% else %}<span class="missing">{% translate "بلا وصل" %}</span>{% endif %}</td>
+            <td dir="ltr" class="num">{{ r.amount|unlocalize }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot><tr><td colspan="4">{% translate "الإجمالي" %}</td><td dir="ltr" class="num">{{ closing.system_total|unlocalize }}</td></tr></tfoot>
+    </table>
+  </div>
+
+  <div class="sign-row">
+    <div class="sign-box"><div class="sign-line"></div>{% translate "أمين الصندوق" %}<span class="who">{{ closing.cashier }}</span></div>
+    <div class="sign-box"><div class="sign-line"></div>{% translate "فتح الإقفال" %}<span class="who">{{ closing.opened_by|default:"—" }}</span></div>
+    <div class="sign-box"><div class="sign-line"></div>{% translate "المعتمِد" %}<span class="who">{{ closing.approved_by|default:"—" }}{% if closing.approved_at %} · <span dir="ltr">{{ closing.approved_at|date:"Y/m/d" }}</span>{% endif %}</span></div>
+    <div class="stamp-box"><div class="stamp-ring"></div>{% translate "ختم المركز" %}</div>
+  </div>
+  {% if closing.chrome.footer_ar %}<div class="doc-note">{{ closing.chrome.footer_ar }}</div>{% endif %}
+</div>
+{% endblock %}

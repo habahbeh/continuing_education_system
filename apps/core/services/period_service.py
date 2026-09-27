@@ -158,3 +158,37 @@ def is_open(on_date: date) -> bool:
 
 
 __all__ = ["ClosedPeriodError", "is_open", "period_for", "require_open"]
+
+
+# ---------------------------------------------------------------------------
+# الفصول الدراسية كمدى تاريخ (Sprint 8L-2)
+# ---------------------------------------------------------------------------
+def recent_semesters(*, limit: int = 4) -> list[dict[str, Any]]:
+    """
+    الفصول الأحدث بمداها، للشاشات التي تعرض «الفصل» بدل تاريخين.
+
+    «الفصل» هو الوحدة التي يفكّر بها المركز؛ سؤالٌ يومي مثل «كم حصّلنا هذا
+    الفصل؟» يصير بلا هذه الدالة عمليةَ حسابِ تاريخين في الرأس قبل كل استعلام.
+
+    هنا لا في الـ view: قراءة نموذج من عرضٍ مباشرةً يخالف ADR-008 (الفحص
+    الثابت A-05)، وقد أمسكها الفحص فعلاً حين كُتبت هناك أولاً.
+    """
+    from apps.core.models import Semester
+
+    return [
+        {
+            "code": semester.code,
+            "name_ar": semester.name_ar,
+            "starts_on": semester.starts_on,
+            "ends_on": semester.ends_on,
+        }
+        for semester in Semester.objects.order_by("-starts_on")[:limit]
+    ]
+
+
+def semester_range(code: str) -> tuple[date, date] | None:
+    """مدى الفصل بالرمز، أو ``None`` لرمزٍ لا وجود له — والرمز يأتي من العنوان."""
+    from apps.core.models import Semester
+
+    semester = Semester.objects.filter(code=code).only("starts_on", "ends_on").first()
+    return None if semester is None else (semester.starts_on, semester.ends_on)

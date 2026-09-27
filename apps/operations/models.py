@@ -163,6 +163,14 @@ class Cohort(models.Model):
         help_text=_("أساس غرامة غياب المدرب — BR-057 (Sprint 5)"),
     )
 
+    # Kept verbatim beside the status it explains: cancelling a cohort for low
+    # enrolment opens a full refund for everyone on it (§5.3) and waives the
+    # course-field bound on a transfer (BR-065), so the reason is evidence, not
+    # a note. The audit trail carries who and when.
+    cancellation_reason_ar = models.CharField(
+        max_length=255, blank=True, verbose_name=_("سبب الإلغاء")
+    )
+
     class Meta:
         verbose_name = _("دفعة")
         verbose_name_plural = _("الدفعات")
@@ -182,6 +190,13 @@ class Cohort(models.Model):
             models.CheckConstraint(
                 condition=models.Q(lecture_cost__isnull=True) | models.Q(lecture_cost__gte=0),
                 name="operations_cohort_lecture_cost_not_negative",
+            ),
+            # A cancelled cohort says why. Structural, because the reason is
+            # what a refund and a waived transfer bound are justified by.
+            models.CheckConstraint(
+                condition=~models.Q(status=CohortStatus.CANCELLED_LOW_ENROLLMENT)
+                | ~models.Q(cancellation_reason_ar=""),
+                name="operations_cohort_cancelled_has_reason",
             ),
         ]
         indexes = [

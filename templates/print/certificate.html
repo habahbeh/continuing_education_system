@@ -39,8 +39,15 @@
 
 <div class="cert-canvas">
 <article class="cert" aria-label="{{ certificate.labels.title_ar }}">
-  {# العلامة المائية: اسم الجامعة باهتاً خلف المحتوى، بلا ملفّ ولا شعار مُختلَق. #}
-  <div class="cert-watermark" aria-hidden="true">{{ certificate.chrome.university_ar }}</div>
+  {% comment %}
+    العلامة المائية: الصورة المرفوعة لخانة «العلامة المائية» إن وُجدت، وإلّا
+    اسم الجامعة باهتاً خلف المحتوى كما كان — بلا شعار مُختلَق.
+  {% endcomment %}
+  {% if brand.watermark %}
+    <img class="cert-watermark-img" src="{{ brand.watermark.url }}" alt="" aria-hidden="true">
+  {% else %}
+    <div class="cert-watermark" aria-hidden="true">{{ certificate.chrome.university_ar }}</div>
+  {% endif %}
 
   <div class="cert-meta">
     <span class="num" dir="ltr">{{ certificate.certificate_number }}</span>
@@ -49,13 +56,15 @@
 
   <header class="cert-identity">
     {% comment %}
-      LOGO PLACEHOLDER — no University of Petra logo asset exists under
-      static/ (the topbar's «UOP» is a text badge, not an image). When the
-      approved file is added, place it here:
-        <img class="cert-logo" src="{% static 'img/uop-logo.svg' %}" alt="">
-      and drop the `.cert-logo` rule's `display:none`. Until then nothing is
-      drawn — a stand-in mark on an official document is worse than none.
+      Sprint 8L — الشعار لم يعد ينتظر ملفاً تحت `static/`: يُرفع من شاشة
+      الإعدادات ويُخزَّن صفّاً مؤرّخاً في `core.BrandAsset`. وحين لا يُرفع شيء
+      لا يُرسم شيء، كما كان الحال — لأن علامةً بديلة على مستند رسمي أسوأ من
+      لا علامة.
     {% endcomment %}
+    {% if certificate.chrome.logo_url %}
+      <img class="cert-logo" src="{{ certificate.chrome.logo_url }}"
+           alt="{{ certificate.chrome.logo_alt }}">
+    {% endif %}
     <div class="cert-university">{{ certificate.chrome.university_ar }}</div>
     <div class="cert-centre">{{ certificate.chrome.center_ar }}</div>
   </header>

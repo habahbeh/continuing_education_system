@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n form_ui guided_help %}
+{% load i18n form_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -40,7 +40,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "نقل بنود العقد الموقّع كما وردت. يُحفظ مسودةً، ولا يسري إلا باعتماد منفصل من صفحته." %}</p>
   </div>
   <div class="acts">
@@ -49,7 +49,6 @@
   </div>
 </div>
 
-{% guided_help "agreement-new" %}
 
 <div class="card2" x-data="{ model: '{{ form.calculation_model.value|default:"PERCENT" }}' }">
   <div class="card2-body">

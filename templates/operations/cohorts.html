@@ -1,52 +1,85 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
   هذه الشاشة ليست للقراءة وحدها: خلف «فتح دفعة» خدمة حقيقية
   (`cohort_service.open_cohort`) ومسار POST على هذا العنوان نفسه، والعرض
-  يرفض POST ممن لا يملك CREATE. فالنموذج يبقى — وهو الفرق بين هذه الصفحة
-  وصفحات الكتالوج التي لا خدمة إدخال خلفها فلا يُرسم فيها زرّ.
+  يرفض POST ممن لا يملك CREATE.
 
-  ما تعرضه الصفوف كلّه من `list_cohorts` بلا استثناء: الفصل والمدرّب والموقع
-  والمقاعد المتبقّية كانت في الإسقاط ولم تكن تُرسم. ولا رقم اتفاقية ولا شرط
-  مالي: اسم الشريك يقول مع مَن تُشغَّل الدفعة، وما وراءه من نسب واستحقاقات
-  شأن شاشات الشركاء لا شأن سجلّ تشغيل.
+  ما تعرضه الصفوف كلّه من الخدمة بلا استثناء، ولا حساب يُخترع هنا: «المتبقّي»
+  وامتلاء المقاعد يأتيان محسوبَين، والعدّ يُحصى فوق الصفوف المرسومة لا فوق
+  السجل كلّه — فالشريحة تصف ما على الشاشة.
 
-  ولا حساب يُخترع هنا: «المتبقّي» يأتي محسوباً من الخدمة، والعدّ يُحصى فوق
-  الصفوف المرسومة لا فوق السجل كلّه — فالشريحة تصف ما على الشاشة.
+  الخطوة التالية على كل صفّ: دفعة بلا اعتماد وزاري تعرض «ملف وزاري» (يفتح
+  نموذج الإرسال والدفعة مختارة)، والمعتمدة تعرض «التسجيلات». الزرّ يُرسم
+  من الصلاحية لا من الدور.
 
-  مرشّح الحالة يصل من الرابط ويُحمَل مع البحث كي لا يسقط عنده، ويُسمّى في
-  شريط «نتائج مصفّاة» باسمه لا برمزه المخزَّن.
+  حوار «فتح دفعة جديدة»: كل ما يمكن اختياره يُختار — البرنامج مجمَّعاً بنوعه،
+  والفصل يقترح فترته، والمستوى يظهر للبرنامج ذي المستويات وحده (BR-007)،
+  والمدرّب والمكان من المسجَّل سابقاً. الرمز والاسم يولَّدان إن تُركا فارغين.
+  لا سكربت في هذه الصفحة: Alpine الموجود أصلاً يقرأ سمات الخيارات.
 
-  BR-013 كان في `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
-  (قواعد التحسين §6.5). النصّ نفسه، في `.hint` تحت عنوان النموذج.
+  BR-013: الدفعة تُفتح مخطَّطة ولا يُسجَّل عليها قبل اعتماد الوزارة.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ title }}</h1>
-    <p class="sub">{% translate "الدفعات المُشغّلة على برامج الكتالوج: فترتها ومقاعدها وحالتها ومَن يشغّلها. الدفعة تُفتح مخطَّطة، ولا يُسجَّل عليها قبل اعتماد الوزارة (BR-013). والسعر يُقرأ من قائمة الأسعار السارية لا من هذه الشاشة." %}</p>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "الدفعات المُشغّلة على برامج الكتالوج: فترتها ومقاعدها ومَن يشغّلها، وعلى كل صفّ مرحلته والخطوة التالية. الدفعة تُفتح بانتظار الملف الوزاري ولا يُسجَّل عليها قبل الاعتماد (BR-013)، ثم تبدأ وتُنهى — أو تُلغى لقلة التسجيل فيستحق المسجَّلون استرداداً كاملاً (§5.3). والسعر يُقرأ من قائمة الأسعار السارية لا من هذه الشاشة." %}</p>
   </div>
+  {% if can_create %}
+    <div class="acts">
+      <button class="btn2 primary" type="button" @click="document.getElementById('cohort-new').showModal()">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+        {% translate "فتح دفعة جديدة" %}
+      </button>
+    </div>
+  {% endif %}
 </div>
 
-{% guided_help "cohorts" %}
+{# شريط مؤشرات: عدّ صفوف السجل كله، وكل بطاقة مرشّح بنقرة. لا مال ولا توقّع. #}
+<div class="kpi-grid tiles co-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
 
-<form method="get" class="filterbar" role="search">
-  <div class="fld">
+{# البحث فوري: يشمل رمز البرنامج واسمه والمدرّب — فروابط الكتالوج تصل إلى صفوف. #}
+{# `hx-get` فارغاً تعني «العنوان الحالي بمعاملاته»، فيضيف htmx حقول النموذج فوق ما #}
+      {# في العنوان: ?q=ت ثم ?q=ت&q=تص مع كل حرف، فينمو الرابط ويحشو تاريخ المتصفح. #}
+      {# المسار وحده يجعل معاملات النموذج هي الاستعلام كلَّه. #}
+<form method="get" class="filterbar co-filters" role="search" id="co-form"
+      hx-get="{{ request.path }}" hx-target="#co-results" hx-select="#co-results" hx-swap="outerHTML"
+      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_stage" hx-push-url="true" hx-indicator="#co-busy">
+  <div class="fld grow">
     <label for="f_q">{% translate "بحث" %}</label>
-    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'بالرمز أو الاسم…' %}" spellcheck="false" id="f_q">
+    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'الرمز، الاسم، البرنامج، المدرّب…' %}" spellcheck="false" id="f_q">
   </div>
-  {# مرشّح الحالة يصل من الرابط؛ يُحمل مع البحث كي لا يسقط عنده. #}
-  {% if request.GET.status %}<input type="hidden" name="status" value="{{ request.GET.status }}">{% endif %}
-  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+  <div class="fld">
+    <label for="f_stage">{% translate "المرحلة" %}</label>
+    <select name="stage" id="f_stage">
+      <option value="">{% translate "كل المراحل" %}</option>
+      {% for key, label, tone in stages %}
+        <option value="{{ key }}"{% if key == stage %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if statuses %}<input type="hidden" name="status" value="{{ statuses }}">{% endif %}
+  <span class="busy" id="co-busy" aria-hidden="true"></span>
   {% if active_filters %}
     <a class="btn2 ghost" href="{% url 'operations:cohorts' %}">{% translate "إلغاء التصفية" %}</a>
   {% endif %}
-  <span class="count">{% blocktranslate count n=cohorts|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
+  <span class="count">{{ cohorts|length|ar_count:"نتيجة واحدة|نتيجتان|نتائج|نتيجة" }}</span>
 </form>
 
 {% if active_filters %}
@@ -67,11 +100,12 @@
       {% if status_counts %}
         <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
         {% for s in status_counts %}
-          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
+          <span class="chip {{ s.tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
         {% endfor %}
       {% endif %}
     </div>
   </div>
+  <div id="co-results">
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -83,27 +117,28 @@
           <th class="num">{% translate "المقاعد" %}</th>
           <th>{% translate "التشغيل" %}</th>
           <th>{% translate "الشريك" %}</th>
-          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "المرحلة والتالي" %}</th>
         </tr>
       </thead>
       <tbody>
         {% for c in cohorts %}
           <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+            <td dir="ltr" translate="no">{% if c.offers_edit %}<button class="row-link num" type="button" @click="document.getElementById('co-edit-{{ c.code }}').showModal()">{{ c.code }}</button>{% else %}<strong class="num">{{ c.code }}</strong>{% endif %}</td>
             <td>{{ c.name_ar }}
-              {% if c.level %}<br><small class="muted">{% translate "مستوى" %} <span class="num">{{ c.level }}</span></small>{% endif %}
+              <br><small class="muted">{{ c.delivery_method_display }}{% if c.level %} · {% translate "مستوى" %} <span class="num">{{ c.level }}</span>{% endif %}</small>
             </td>
             <td>{{ c.program_name }}
-              <br><small class="muted" dir="ltr" translate="no">{{ c.program_code }}</small>
+              <br><small class="muted">{{ c.program_type_display }} · <span dir="ltr" translate="no">{{ c.program_code }}</span></small>
             </td>
             <td>
               <span dir="ltr" class="num">{{ c.starts_on|date:"Y/m/d" }} — {{ c.ends_on|date:"Y/m/d" }}</span>
               <br><small class="muted">{{ c.semester }}</small>
             </td>
-            <td class="num">
+            <td class="num seats">
               {# الكسر بترتيب لاتيني صراحةً: في RTL يتقدّم المقام فيُقرأ «٢٥ / ٢». #}
               <span dir="ltr" class="num">{{ c.enrolled_count }} / {{ c.capacity }}</span>
-              <br><small class="muted">{% blocktranslate with n=c.seats_left %}متبقٍّ {{ n }}{% endblocktranslate %}</small>
+              <div class="hbar{% if c.seats_left == 0 %} full{% endif %}" aria-hidden="true"><span class="fill lv-{{ c.seat_level }}"></span></div>
+              <small class="muted">{% blocktranslate with n=c.seats_left %}متبقٍّ {{ n }}{% endblocktranslate %}</small>
             </td>
             <td>
               {% if c.trainer_name %}{{ c.trainer_name }}
@@ -114,7 +149,118 @@
               {% if c.partner_name %}{{ c.partner_name }}
               {% else %}<span class="muted">{% translate "بلا شريك" %}</span>{% endif %}
             </td>
-            <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
+            <td class="acts-col">
+              {# مرحلة واحدة صريحة بدل «مخطَّطة» التي كانت تعني شيئين. #}
+              <span class="chip {{ c.stage_tone }} dot">{{ c.stage_display }}</span>
+              {% if c.stage == "CANCELLED" and c.cancellation_reason_ar %}<small class="muted sub-line">{{ c.cancellation_reason_ar }}</small>{% endif %}
+              <div class="co-acts">
+                {% if c.is_mohe_approved %}
+                  {% if can_view_enrollments %}<a class="btn2 sm" href="{% url 'operations:enrollments' %}?cohort={{ c.code }}">{% translate "التسجيلات" %}</a>{% endif %}
+                {% elif c.mohe_file and c.mohe_file.status != "REJECTED" %}
+                  {% if can_submit_mohe %}<a class="btn2 sm" href="{% url 'operations:mohe-detail' c.mohe_file.id %}">{% translate "فتح الملف" %}</a>{% endif %}
+                {% elif c.stage == "NEEDS_FILE" or c.stage == "MOHE_REJECTED" %}
+                  {% if can_submit_mohe %}<a class="btn2 sm" href="{% url 'operations:mohe-submit' %}?cohort={{ c.code }}">{% translate "ملف وزاري" %}</a>{% endif %}
+                {% endif %}
+                {% if c.offers_start %}<button class="btn2 sm" type="button" @click="document.getElementById('co-start-{{ c.code }}').showModal()">{% translate "بدء التنفيذ…" %}</button>{% endif %}
+                {% if c.offers_complete %}<button class="btn2 sm" type="button" @click="document.getElementById('co-complete-{{ c.code }}').showModal()">{% translate "إنهاء…" %}</button>{% endif %}
+                {% if c.offers_edit %}<button class="btn2 sm ghost" type="button" @click="document.getElementById('co-edit-{{ c.code }}').showModal()">{% translate "تعديل…" %}</button>{% endif %}
+                {% if c.offers_cancel %}<button class="btn2 sm ghost danger-ghost" type="button" @click="document.getElementById('co-cancel-{{ c.code }}').showModal()">{% translate "إلغاء لقلة التسجيل…" %}</button>{% endif %}
+                {# §9.7 — a marketing or consumables expense lands on the cohort whatever its stage. #}
+                {% if can_record_expense %}<a class="btn2 sm ghost" href="{% url 'expenses:expenses' %}?cohort={{ c.code }}#record">{% translate "مصروف" %}</a>{% endif %}
+              </div>
+
+              {% if c.offers_edit %}
+                <dialog class="modal confirm-modal co-modal" id="co-edit-{{ c.code }}" dir="rtl" aria-labelledby="co-edit-{{ c.code }}-t"{% if edit_form.errors and posted_action == "edit" and posted_code == c.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                  <form method="post">{% csrf_token %}
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="cohort_code" value="{{ c.code }}">
+                    <div class="modal-head">
+                      <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-calendar"/></svg></span>
+                      <h2 id="co-edit-{{ c.code }}-t">{% translate "تعديل الدفعة" %} <span class="num" dir="ltr">{{ c.code }}</span></h2>
+                    </div>
+                    <div class="modal-body">
+                      {% if posted_action == "edit" and posted_code == c.code %}{% for e in edit_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}{% endif %}
+                      <div class="grid2">
+                        <div class="fld"><label for="ce-s-{{ c.code }}">{% translate "تبدأ في" %}<span class="req" aria-hidden="true">*</span></label><input type="date" id="ce-s-{{ c.code }}" name="starts_on" value="{{ c.starts_on|date:'Y-m-d' }}" required></div>
+                        <div class="fld"><label for="ce-e-{{ c.code }}">{% translate "تنتهي في" %}<span class="req" aria-hidden="true">*</span></label><input type="date" id="ce-e-{{ c.code }}" name="ends_on" value="{{ c.ends_on|date:'Y-m-d' }}" required></div>
+                        <div class="fld"><label for="ce-c-{{ c.code }}">{% translate "السعة" %}<span class="req" aria-hidden="true">*</span></label><input type="number" min="1" max="500" id="ce-c-{{ c.code }}" name="capacity" dir="ltr" value="{{ c.capacity }}" required><div class="help">{% blocktranslate with n=c.enrolled_count %}التسجيلات القائمة {{ n }} — لا تُخفَّض السعة تحتها.{% endblocktranslate %}</div></div>
+                        <div class="fld"><label for="ce-d-{{ c.code }}">{% translate "طريقة التقديم" %}</label><select id="ce-d-{{ c.code }}" name="delivery_method">{% for value, label in edit_form.fields.delivery_method.choices %}<option value="{{ value }}"{% if label == c.delivery_method_display %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                        <div class="fld"><label for="ce-t-{{ c.code }}">{% translate "المدرب" %}</label><input type="text" id="ce-t-{{ c.code }}" name="trainer_name" list="trainers" value="{{ c.trainer_name }}"></div>
+                        <div class="fld"><label for="ce-l-{{ c.code }}">{% translate "المكان" %}</label><input type="text" id="ce-l-{{ c.code }}" name="location" list="locations" value="{{ c.location }}"></div>
+                      </div>
+                      <div class="fld"><label for="ce-a-{{ c.code }}">{% translate "الاتفاقية" %}</label><select id="ce-a-{{ c.code }}" name="agreement_number">{% for value, label in edit_form.fields.agreement_number.choices %}<option value="{{ value }}"{% if value == c.agreement_number %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><div class="help">{% translate "اتركها فارغة إن كانت الدفعة بلا شريك." %}</div></div>
+                      <p class="hint">{% translate "البرنامج والمستوى والرمز هوية الدفعة في التسجيلات والملفات الوزارية — لا تُعدَّل من هنا. كل تعديل يُسجَّل في سجل التدقيق." %}</p>
+                    </div>
+                    <div class="modal-acts">
+                      <button class="btn2 primary" type="submit">{% translate "حفظ" %}</button>
+                      <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "رجوع" %}</button>
+                    </div>
+                  </form>
+                </dialog>
+              {% endif %}
+
+              {% if c.offers_start %}
+                <dialog class="modal confirm-modal" id="co-start-{{ c.code }}" dir="rtl" aria-labelledby="co-start-{{ c.code }}-t">
+                  <form method="post">{% csrf_token %}
+                    <input type="hidden" name="action" value="start">
+                    <input type="hidden" name="cohort_code" value="{{ c.code }}">
+                    <div class="modal-head">
+                      <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-route"/></svg></span>
+                      <h2 id="co-start-{{ c.code }}-t">{% translate "بدء تنفيذ الدفعة" %} — {{ c.name_ar }}</h2>
+                    </div>
+                    <div class="modal-body"><p class="hint">{% translate "الدفعة معتمدة من الوزارة، وبدء التنفيذ يقول إنها انطلقت فعلاً: التسجيل يبقى ممكناً، والحضور والمخالصات تُقرأ من هنا." %}</p></div>
+                    <div class="modal-acts">
+                      <button class="btn2 primary" type="submit">{% translate "بدء التنفيذ" %}</button>
+                      <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "رجوع" %}</button>
+                    </div>
+                  </form>
+                </dialog>
+              {% endif %}
+
+              {% if c.offers_complete %}
+                <dialog class="modal confirm-modal" id="co-complete-{{ c.code }}" dir="rtl" aria-labelledby="co-complete-{{ c.code }}-t">
+                  <form method="post">{% csrf_token %}
+                    <input type="hidden" name="action" value="complete">
+                    <input type="hidden" name="cohort_code" value="{{ c.code }}">
+                    <div class="modal-head">
+                      <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+                      <h2 id="co-complete-{{ c.code }}-t">{% translate "إنهاء الدفعة" %} — {{ c.name_ar }}</h2>
+                    </div>
+                    <div class="modal-body"><p class="hint">{% translate "الدفعة المكتملة لا تُعدَّل ولا تُفتح للتسجيل؛ ما بعدها المخالصات والشهادات." %}</p></div>
+                    <div class="modal-acts">
+                      <button class="btn2 primary" type="submit">{% translate "إنهاء" %}</button>
+                      <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "رجوع" %}</button>
+                    </div>
+                  </form>
+                </dialog>
+              {% endif %}
+
+              {% if c.offers_cancel %}
+                <dialog class="modal confirm-modal" id="co-cancel-{{ c.code }}" dir="rtl" aria-labelledby="co-cancel-{{ c.code }}-t"{% if cancel_form.errors and posted_action == "cancel" and posted_code == c.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                  <form method="post">{% csrf_token %}
+                    <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="cohort_code" value="{{ c.code }}">
+                    <div class="modal-head">
+                      <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-user-off"/></svg></span>
+                      <h2 id="co-cancel-{{ c.code }}-t">{% translate "إلغاء الدفعة لقلة التسجيل" %} — {{ c.name_ar }}</h2>
+                    </div>
+                    <div class="modal-body">
+                      <p class="hint">{% blocktranslate with n=c.enrolled_count %}على الدفعة {{ n }} تسجيلاً قائماً. إلغاؤها لقلة التسجيل يفتح لهم استرداداً كاملاً (§5.3) ويرفع قيد المجال عن نقلهم إلى دورة أخرى (BR-065).{% endblocktranslate %}</p>
+                      <div class="fld{% if cancel_form.errors and posted_action == 'cancel' and posted_code == c.code %} has-error{% endif %}">
+                        <label for="cc-r-{{ c.code }}">{% translate "سبب الإلغاء" %}<span class="req" aria-hidden="true">*</span></label>
+                        <input type="text" id="cc-r-{{ c.code }}" name="reason_ar" maxlength="255" required placeholder="{% translate 'مثال: لم يكتمل العدد الأدنى — سُجّل مشاركان فقط' %}">
+                        <div class="help">{% translate "يُحفظ كما هو بجانب حالة الدفعة — سند الاسترداد." %}</div>
+                        {% if posted_action == "cancel" and posted_code == c.code %}{% for e in cancel_form.reason_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}{% endif %}
+                      </div>
+                    </div>
+                    <div class="modal-acts">
+                      <button class="btn2 primary" type="submit">{% translate "إلغاء الدفعة" %}</button>
+                      <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "رجوع" %}</button>
+                    </div>
+                  </form>
+                </dialog>
+              {% endif %}
+            </td>
           </tr>
         {% empty %}
           <tr><td colspan="8" class="empty">
@@ -130,6 +276,7 @@
       </tbody>
     </table>
   </div>
+  </div>
   <div class="card2-body">
     <p class="hint">
       {% translate "«المقاعد» تُحصي التسجيلات القائمة على الدفعة: الملغى والمنقول عنها لا يشغلان مقعداً. و«الشريك» يقول مع مَن تُشغَّل الدفعة فقط — شروط الاتفاقية ومستحقاتها تُقرأ من شاشات الشركاء." %}
@@ -138,18 +285,133 @@
 </div>
 
 {% if can_create %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "فتح دفعة جديدة" %}</h2></div>
-    <div class="card2-body">
-      <p class="hint boxed">
-        {% translate "تُفتح الدفعة مخطَّطة — التسجيل عليها يبقى ممنوعاً حتى اعتماد الوزارة (BR-013)." %}
-      </p>
-      <form method="post">
-        {% csrf_token %}
-        {% include "partials/_form.html" %}
-        <button class="btn2 primary" type="submit">{% translate "فتح الدفعة" %}</button>
-      </form>
-    </div>
-  </div>
+  <dialog class="modal cohort-modal" id="cohort-new" dir="rtl" aria-labelledby="cohort-new-t"
+          x-data="{ program: '', leveled: false, levels: 0, ptype: '' }"
+          {# يُعاد فتحه على رفضِ حفظٍ وحده، كإخوته في هذه الشاشة: شرطٌ بلا اسم الفعل #}
+          {# يفتحه على أي أخطاءٍ في النموذج مهما كان مصدرها. #}
+          {% if form.errors and posted_action == "open" %}x-init="$nextTick(() => $el.showModal())"{% endif %}>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="open">
+      <div class="modal-head">
+        <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-calendar"/></svg></span>
+        <div class="min-w-0">
+          <h2 id="cohort-new-t">{% translate "فتح دفعة جديدة" %}</h2>
+          <div class="sub">{% translate "تُفتح مخطَّطة — التسجيل عليها يبقى ممنوعاً حتى اعتماد الوزارة (BR-013)." %}</div>
+        </div>
+      </div>
+      <div class="modal-body">
+        {% if form.non_field_errors %}<div class="note danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+
+        <div class="step-lbl"><span class="n">1</span>{% translate "البرنامج والفصل" %}</div>
+        <div class="grid2">
+          <div class="fld{% if form.program_code.errors %} has-error{% endif %}">
+            <label for="c_program">{% translate "البرنامج" %} <span aria-hidden="true">*</span></label>
+            <select id="c_program" name="program_code" required
+                    @change="const o = $event.target.selectedOptions[0]; program = o.value; leveled = o.dataset.leveled === '1'; levels = Number(o.dataset.levels || 0); ptype = o.dataset.type || ''">
+              <option value="">{% translate "— اختر البرنامج —" %}</option>
+              {% regroup programs by type_label as groups %}
+              {% for g in groups %}
+                <optgroup label="{{ g.grouper }}">
+                  {% for p in g.list %}
+                    <option value="{{ p.code }}" data-type="{{ p.type }}" data-leveled="{% if p.is_leveled %}1{% else %}0{% endif %}" data-levels="{{ p.levels|length }}"{% if form.program_code.value == p.code %} selected{% endif %}>{{ p.label }} ({{ p.code }}){% if not p.is_priced %} — {% translate "بلا سعر ساري" %}{% endif %}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            </select>
+            {% for e in form.program_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+          </div>
+          <div class="fld{% if form.semester_code.errors %} has-error{% endif %}">
+            <label for="c_semester">{% translate "الفصل" %} <span aria-hidden="true">*</span></label>
+            <select id="c_semester" name="semester_code" required
+                    @change="const o = $event.target.selectedOptions[0]; if (o.dataset.starts) { $refs.starts.value = o.dataset.starts; $refs.ends.value = o.dataset.ends }">
+              <option value="">{% translate "— اختر الفصل —" %}</option>
+              {% for s in semesters %}
+                <option value="{{ s.code }}" data-starts="{{ s.starts_on|date:'Y-m-d' }}" data-ends="{{ s.ends_on|date:'Y-m-d' }}"{% if form.semester_code.value == s.code %} selected{% endif %}>{{ s.label }}{% if s.is_active %} — {% translate "الحالي" %}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <div class="help">{% translate "اختيار الفصل يقترح فترة الدفعة؛ عدّلها إن لزم." %}</div>
+          </div>
+          <div class="fld" x-show="leveled" x-cloak>
+            <label for="c_level">{% translate "المستوى" %} <span aria-hidden="true">*</span></label>
+            <select id="c_level" name="level" :required="leveled" :disabled="!leveled">
+              <option value="">{% translate "— اختر المستوى —" %}</option>
+              {% for n in form.fields.level.choices %}{% if n.0 %}<option value="{{ n.0 }}" x-show="Number('{{ n.0 }}') <= levels">{{ n.1 }}</option>{% endif %}{% endfor %}
+            </select>
+            <div class="help">{% translate "هذا البرنامج ذو مستويات (BR-007)؛ الدفعة تُفتح على مستوى واحد." %}</div>
+          </div>
+        </div>
+
+        <div class="step-lbl"><span class="n">2</span>{% translate "الفترة والسعة" %}</div>
+        <div class="grid2">
+          <div class="fld{% if form.starts_on.errors %} has-error{% endif %}">
+            <label for="c_starts">{% translate "تبدأ في" %} <span aria-hidden="true">*</span></label>
+            <input type="date" id="c_starts" name="starts_on" x-ref="starts" value="{{ form.starts_on.value|default:'' }}" required>
+          </div>
+          <div class="fld{% if form.ends_on.errors %} has-error{% endif %}">
+            <label for="c_ends">{% translate "تنتهي في" %} <span aria-hidden="true">*</span></label>
+            <input type="date" id="c_ends" name="ends_on" x-ref="ends" value="{{ form.ends_on.value|default:'' }}" required>
+          </div>
+          <div class="fld">
+            <label for="c_capacity">{% translate "السعة" %} <span aria-hidden="true">*</span></label>
+            <input type="number" id="c_capacity" name="capacity" min="1" max="500" value="{{ form.capacity.value|default:30 }}" required>
+          </div>
+          <div class="fld">
+            <label for="c_delivery">{% translate "طريقة التقديم" %}</label>
+            <select id="c_delivery" name="delivery_method">
+              {% for value, label in form.fields.delivery_method.choices %}
+                <option value="{{ value }}"{% if form.delivery_method.value|default:'IN_PERSON' == value %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="step-lbl"><span class="n">3</span>{% translate "التشغيل" %} <span class="muted">— {% translate "اختياري" %}</span></div>
+        <div class="grid2">
+          <div class="fld">
+            <label for="c_trainer">{% translate "المدرب" %}</label>
+            <input type="text" id="c_trainer" name="trainer_name" list="trainers" value="{{ form.trainer_name.value|default:'' }}" placeholder="{% translate 'اختر من المسجَّل أو اكتب اسماً' %}">
+            <datalist id="trainers">{% for t in suggestions.trainers %}<option value="{{ t }}">{% endfor %}</datalist>
+          </div>
+          <div class="fld">
+            <label for="c_location">{% translate "المكان" %}</label>
+            <input type="text" id="c_location" name="location" list="locations" value="{{ form.location.value|default:'' }}" placeholder="{% translate 'اختر من المسجَّل أو اكتب مكاناً' %}">
+            <datalist id="locations">{% for l in suggestions.locations %}<option value="{{ l }}">{% endfor %}</datalist>
+          </div>
+          <div class="fld">
+            <label for="c_agreement">{% translate "الاتفاقية" %}</label>
+            <select id="c_agreement" name="agreement_number">
+              {% for value, label in form.fields.agreement_number.choices %}
+                <option value="{{ value }}"{% if form.agreement_number.value == value %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="help">{% translate "اتركها فارغة إن كانت الدفعة بلا شريك." %}</div>
+          </div>
+        </div>
+
+        <details class="adv">
+          <summary>{% translate "الرمز والاسم — يولَّدان تلقائياً" %}</summary>
+          <div class="grid2">
+            <div class="fld">
+              <label for="c_code">{% translate "رمز الدفعة" %}</label>
+              <input type="text" id="c_code" name="code" dir="ltr" value="{{ form.code.value|default:'' }}" placeholder="CO-…" spellcheck="false">
+              <div class="help">{% translate "فارغاً يُولَّد من البرنامج:" %} <span dir="ltr" class="num" x-text="program ? 'CO-' + program + '-n' : 'CO-…'"></span></div>
+            </div>
+            <div class="fld">
+              <label for="c_name">{% translate "اسم الدفعة" %}</label>
+              <input type="text" id="c_name" name="name_ar" value="{{ form.name_ar.value|default:'' }}" placeholder="{% translate 'فارغاً: اسم البرنامج — الفصل' %}">
+            </div>
+          </div>
+        </details>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+          {% translate "فتح الدفعة" %}
+        </button>
+        <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "إلغاء" %}</button>
+      </div>
+    </form>
+  </dialog>
 {% endif %}
 {% endblock %}

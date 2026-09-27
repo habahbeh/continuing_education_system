@@ -611,7 +611,11 @@ def test_the_confirm_button_is_primary_not_destructive(signed_in, manager, settl
         r'<button class="([^"]*)" type="submit" autofocus>تأكيد فتح البراءة</button>', body
     )
     assert "primary" in button.split() and "danger" not in button.split()
-    assert "danger" not in body[body.index("<dialog") : body.index("</dialog>")]
+    # Same reason as above: the confirm dialog by ID, because the quick-jump
+    # palette is now the first `<dialog>` in every document.
+    start = body.index('id="clearance-confirm"')
+    confirm = body[body.rindex("<dialog", 0, start) : body.index("</dialog>", start)]
+    assert "danger" not in confirm
 
 
 def test_the_preview_refuses_what_the_opening_would_refuse(
@@ -670,7 +674,12 @@ def test_the_confirmation_is_a_dialog_the_keyboard_can_leave(signed_in, manager,
         )
         .content.decode()
     )
-    dialog = body[body.index("<dialog") : body.index("</dialog>")]
+    # The dialog by ID, not «the first one on the page»: the quick-jump palette
+    # moved above the sidebar (so that guards slicing the body stop reading every
+    # screen name in the system as this screen's own content), and it is now the
+    # first `<dialog>` in the document on every page.
+    start = body.index('id="clearance-confirm"')
+    dialog = body[body.rindex("<dialog", 0, start) : body.index("</dialog>", start) + len("</dialog>")]
 
     assert 'id="clearance-confirm" open' in dialog
     assert 'aria-labelledby="clearance-confirm-title"' in dialog
@@ -682,6 +691,93 @@ def test_the_confirmation_is_a_dialog_the_keyboard_can_leave(signed_in, manager,
 
 
 def test_no_dialog_is_drawn_before_anything_was_asked(signed_in, manager, seeded_settings) -> None:
-    body = signed_in(manager).get(reverse("operations:clearances")).content.decode()
+    page = signed_in(manager).get(reverse("operations:clearances")).content.decode()
+    # The page's own body: the shell carries the quick-jump palette, which is a
+    # <dialog> on every screen and is not this page drawing one.
+    body = page.split('id="main"', 1)[1].split("</main>", 1)[0]
     assert "<dialog" not in body
     assert "فتح براءة ذمة" in body, "the form is there; only the confirmation waits"
+
+
+# -- SUPER_ADMIN and the departmental steps (2026-09-26) -----------------------
+def test_the_super_administrator_is_not_refused_a_departmental_step(
+    db, seeded_settings
+) -> None:
+    """
+    ``permissions/policy.py`` settles SUPER_ADMIN at «Stage 0 — full authority,
+    by role not by Django flag … decided here so no role-scoped deny rule
+    written for a business role can match it».
+
+    These two role checks were the ONLY place in the codebase comparing
+    ``actor.role`` directly, and so the only place that bypassed Stage 0: on a
+    fresh install carrying one account, no clearance could be completed at all —
+    the screen printed «هذه الخطوة للدور CENTER_MANAGER» and offered nothing.
+    """
+    from apps.operations.services import clearance_service
+    from apps.people.models import Role, User
+
+    admin = User.objects.create_user(username="clr.super", password="x-1234", role=Role.SUPER_ADMIN)
+
+    for required in (Role.CENTER_MANAGER, Role.FINANCE_MANAGER, Role.REGISTRATION_OFFICER):
+        assert clearance_service.role_may_take_step(actor=admin, required_role=required), required
+
+
+def test_a_business_role_still_only_takes_its_own_department_step(
+    db, seeded_settings
+) -> None:
+    """
+    §6.4 assigns the steps to DEPARTMENTS, and the permission check above them is
+    not enough: the finance officer holds ``CLEARANCE.APPROVE`` and must still
+    not recover the centre's property. Stage 0 widened for one role, not for all.
+    """
+    from apps.operations.services import clearance_service
+    from apps.people.models import Role, User
+
+    finance = User.objects.create_user(
+        username="clr.fin", password="x-1234", role=Role.FINANCE_OFFICER
+    )
+    manager = User.objects.create_user(
+        username="clr.mgr", password="x-1234", role=Role.CENTER_MANAGER
+    )
+
+    assert not clearance_service.role_may_take_step(
+        actor=finance, required_role=Role.CENTER_MANAGER
+    )
+    assert clearance_service.role_may_take_step(actor=manager, required_role=Role.CENTER_MANAGER)
+    assert not clearance_service.role_may_take_step(
+        actor=manager, required_role=Role.FINANCE_MANAGER
+    )
+
+
+def test_two_signatures_from_one_person_stay_impossible(db, seeded_settings) -> None:
+    """
+    The limit that no role lifts, SUPER_ADMIN included.
+
+    ``C-30 · D-30`` is a DATABASE constraint — ``second_certified_by <>
+    certified_by`` — and «two signatures from one person is a single control
+    wearing a costume». Widening the ROLE gate must not have widened this: a
+    super-administrator may be EITHER signature on the financial step, and the
+    other one belongs to somebody else.
+    """
+    from apps.operations.models import ClearanceStep
+
+    names = {c.name for c in ClearanceStep._meta.constraints}
+    assert "operations_clearance_step_second_certifier_differs" in names, (
+        "the two-person constraint is gone"
+    )
+
+
+def test_the_screen_asks_the_service_rather_than_comparing_the_role_itself() -> None:
+    """
+    The view held its own copy of «whose step is this» and compared
+    ``user.role`` to the setting, so the same decision lived in two places and
+    the SUPER_ADMIN case had to be found twice — which is how a screen comes to
+    refuse what the service beneath it allows.
+    """
+    from pathlib import Path
+
+    source = Path("apps/operations/views.py").read_text(encoding="utf-8")
+    card = source.split('"can_custody"', 1)[1].split('"can_close"', 1)[0]
+
+    assert "role_may_take_step" in card
+    assert 'role == clearance[' not in card, "the screen decides the step role on its own again"

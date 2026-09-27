@@ -148,7 +148,7 @@ def link_queue(
     policy.require(actor, Screen.MIGRATION, Action.VIEW, request=request)
     queryset = HistoricalParticipant.objects.select_related(
         "batch", "source_row", "linked_participant", "linked_by"
-    )
+    ).prefetch_related("enrollments__cohort", "enrollments__source_row")
     if code:
         queryset = queryset.filter(batch__code=code)
     if only_unlinked:
@@ -156,6 +156,17 @@ def link_queue(
     return [
         {
             "id": historical.pk,
+            # The archived enrolments behind this person — each one is what an
+            # opening balance is proposed FROM (BR-094), by its source row.
+            "enrollments": [
+                {
+                    "row_id": e.source_row_id,
+                    "label": text_of(e.cohort, "name_ar") or text_of(e.cohort, "code"),
+                    "tuition": e.tuition,
+                    "collected": e.collected,
+                }
+                for e in historical.enrollments.all()
+            ],
             "batch_code": historical.batch.code,
             "legacy_number": historical.legacy_number,
             "legacy_alt_number": historical.legacy_alt_number,

@@ -1,29 +1,174 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n money_ui arabic_ui chart_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.1 — إجمالي الإيرادات ضمن فترة (Sprint 8L).
+
+  ما يجيب عنه هذا التقرير سؤالان لا سؤال: «كم قُبض؟» ثم «من أين؟». البطاقات
+  تجيب الأول، وجدول الدفعات يجيب الثاني — وكان غائباً كلّه حتى 8L رغم أن
+  الخدمة تحتسب أرقامه.
+
+  والبطاقات بحاشية واحدة لا بقوس ألوان كما في الديمو: قرارٌ مكتوب في
+  `input.css` منذ 8J — «مؤسسة تعليمية لا نظام مبيعات»، والعدّاد الرئيسي وحده
+  يأخذ لون الهوية.
+
+  أربعة أرقام تظهر هنا ولم تكن تظهر رغم أنها محتسَبة في الحمولة منذ 8D:
+  الإيراد حسب نوع البرنامج، وتحصيل ذمم السنوات السابقة (قرار العميل 3: بندٌ
+  مستقلّ لا ضمن إيراد السنة)، والتأمينات (التزام لا إيراد — C-21)، والدفعات
+  غير المخصَّصة.
+
+  الأساس نقدي: فاتورةٌ صدرت ليست إيراداً قُبض، و§9.1 يسأل عن الثاني.
+{% endcomment %}
+
 {% block content %}
 {% include "reporting/_shell.html" %}
-<div class="grid2">
-  <div class="kpi"><div class="label">{% translate "إجمالي المقبوض" %}</div><div class="value num">{{ report.total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "رسوم التسجيل" %}</div><div class="value num">{{ report.registration_total }}</div>
-    <div class="muted">{% translate "مستثناة من وعاء الشركاء" %}</div></div>
-  <div class="kpi"><div class="label">{% translate "الرسوم الدراسية" %}</div><div class="value num">{{ report.tuition_total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "التأمينات" %}</div><div class="value num">{{ report.deposit_total }}</div>
-    <div class="muted">{% translate "التزام لا إيراد" %}</div></div>
+
+<div class="kpi-grid tiles">
+  <div class="kpi tile is-lead">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "إجمالي المقبوض" %}</span>
+      <span class="value num">{% money report.total %}</span>
+      <span class="foot">{{ report.receipt_count|ar_count:"سند واحد|سندان|سندات|سنداً" }}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-book"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "الرسوم الدراسية" %}</span>
+      <span class="value num">{% money report.tuition_total %}</span>
+      <span class="foot">{% translate "وعاء حصص الشركاء" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-user-plus"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "رسوم التسجيل" %}</span>
+      <span class="value num">{% money report.registration_total %}</span>
+      <span class="foot">{% translate "مستثناة من وعاء الشركاء (§3.1)" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "رسوم إضافية" %}</span>
+      <span class="value num">{% money report.extra_fee_total %}</span>
+      <span class="foot">{% translate "إعادة مادة · بدل فاقد شهادة" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-shield-check"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "التأمينات" %}</span>
+      <span class="value num">{% money report.deposit_total %}</span>
+      <span class="foot">{% translate "التزام لا إيراد (C-21)" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-database"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "ذمم سنوات سابقة" %}</span>
+      <span class="value num">{% money report.prior_year_settlements %}</span>
+      <span class="foot">{% translate "قُبضت في المدى، وليست من نشاطه" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-calendar"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "إيراد المدى نفسه" %}</span>
+      <span class="value num">{% money report.current_period_total %}</span>
+      <span class="foot">{% translate "الإجمالي بلا ذمم السنوات السابقة" %}</span>
+    </span>
+  </div>
+  {% if report.unallocated_credit %}
+    <div class="kpi tile">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+      <span class="txt">
+        <span class="label">{% translate "دفعات غير مخصَّصة" %}</span>
+        <span class="value num">{% money report.unallocated_credit %}</span>
+        <span class="foot">{% translate "قُبضت ولم تُنزَّل على بند" %}</span>
+      </span>
+    </div>
+  {% endif %}
 </div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "تفصيل الإيراد حسب الدفعة" %}</h2></div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>{% translate "الدفعة" %}</th>
+          <th>{% translate "النوع" %}</th>
+          <th class="num">{% translate "المسجّلون" %}</th>
+          <th class="num">{% translate "المستحق" %}</th>
+          <th class="num">{% translate "المقبوض" %}</th>
+          <th class="num">{% translate "المتبقّي" %}</th>
+          <th>{% translate "نسبة التحصيل" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in report.by_cohort %}
+          <tr>
+            <td><strong>{{ c.name_ar }}</strong><br><small class="muted" dir="ltr">{{ c.code }}</small></td>
+            <td><span class="chip">{{ c.program_type_display }}</span></td>
+            <td class="num">{{ c.enrolled }}<small class="muted"> / {{ c.participants }} {% translate "دفعوا" %}</small></td>
+            <td class="num amt">{% money c.total_due %}</td>
+            <td class="num amt">{% money c.collected %}</td>
+            <td class="num amt">{% money c.outstanding %}</td>
+            <td>{% percent_bar c.collected c.total_due %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty">
+            <span class="empty-title">{% translate "لا مقبوضات في هذا المدى" %}</span>
+            <span class="empty-body">{% translate "غيّر «من تاريخ» و«إلى تاريخ» أعلاه. الفراغ هنا نتيجة صحيحة لا عطل: لم يُقبض في المدى المختار شيء." %}</span>
+          </td></tr>
+        {% endfor %}
+      </tbody>
+      {% if report.by_cohort %}
+        <tfoot>
+          <tr>
+            <td colspan="4">{% translate "الإجمالي" %}</td>
+            <td class="num amt">{% money report.total %}</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "حسب نوع البند" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "النوع" %}</th><th>{% translate "المقبوض" %}</th></tr></thead>
+      <thead><tr><th>{% translate "البند" %}</th><th class="num">{% translate "المقبوض" %}</th></tr></thead>
       <tbody>
-        {% for kind, amount in report.by_type %}<tr><td>{{ kind }}</td><td class="num">{{ amount }}</td></tr>{% empty %}
-        <tr><td colspan="3" class="empty">
-          <span class="empty-title">{% translate "لا صفوف في هذه الفترة" %}</span>
-          <span class="empty-body">{% translate "غيّر «من تاريخ» و«إلى تاريخ» أعلاه. الفراغ هنا نتيجة صحيحة لا عطل: لم يقع في المدى المختار ما يُدرَج." %}</span>
-        </td></tr>
+        {% for kind, amount in report.by_type %}
+          <tr><td>{{ kind }}</td><td class="num amt">{% money amount %}</td></tr>
+        {% empty %}
+          <tr><td colspan="2" class="empty"><span class="empty-title">{% translate "لا بنود" %}</span></td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+{% if report.by_program_type %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "حسب نوع البرنامج" %}</h2></div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>{% translate "النوع" %}</th><th class="num">{% translate "المقبوض" %}</th></tr></thead>
+        <tbody>
+          {% for kind, amount in report.by_program_type %}
+            <tr><td>{{ kind }}</td><td class="num amt">{% money amount %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

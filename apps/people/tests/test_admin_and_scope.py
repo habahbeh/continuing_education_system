@@ -173,6 +173,10 @@ def test_no_business_model_exists_yet() -> None:
             "AuditEvent",
             "Attachment",
             "FinancialPeriod",
+            # Sprint 8L — هوية المؤسسة: الشعار وما يجري مجراه. بنيةٌ تحتية
+            # كـ``Attachment`` لا قاعدةَ عمل: لا يقرّر شيئاً عن مالٍ ولا عن
+            # مشارك، ومكانه ``core`` لأن كل مستند مطبوع يقرؤه.
+            "BrandAsset",
         },
         "people": {"User", "Participant"},
         # Sprint 4 — billing and the till.

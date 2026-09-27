@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -8,28 +8,30 @@
   النموذج ولا يملأه، فتُرسم الحقول له ولا يُرسم زرّ الحفظ — والعرض يرفض POST
   منه على كل حال، فالزرّ الغائب عرضٌ لا حراسة.
 
-  قائمة الدفعات من `submittable_cohort_choices` وحدها: الخدمة تستبعد الدفعة
+  قائمة الدفعات من `submittable_cohort_options` وحدها: الخدمة تستبعد الدفعة
   التي لها ملف مسودة أو مُرسل أو معتمد، وتعيد المرفوضة إلى القائمة. القالب لا
   يوسّع القائمة ولا يضيّقها ولا يعرف لماذا خرجت دفعة منها.
 
   وإن كانت القائمة فارغة فلا يُرسم النموذج: `cohort_code` حقل إلزامي بخيارات
-  صفر، فالحفظ لا يمكن أن ينجح مهما كُتب. زرٌّ لا يُفلح أسوأ من غيابه، فتُقال
-  الحالة بدل أن تُترك قائمةً خاوية وزرّاً يردّ خطأ تحقّق.
+  صفر، فالحفظ لا يمكن أن ينجح مهما كُتب.
+
+  الشكل (بأسلوب لوحة المؤشرات): شريط مسار الملف الوزاري في أعلى الصفحة
+  — أربع محطات والحالية مضاءة — ثم النموذج في ثلاث خطوات مرقّمة، وإلى
+  جانبه بطاقة «الدفعة المختارة» تُقرأ من سمات الخيار المختار (Alpine بلا
+  سكربت في القالب)، وتملأ المدرّب والمكان من بيانات الدفعة إن كانا فارغين.
+  القوائم المقترَحة `<datalist>` بما قالته ملفات سابقة — تُعرض ولا تُفرض.
 
   والحقول السبعة نصّ النموذج الوزاري نفسه (BR-014)، لا ملاحظات داخلية: تُحفظ
   كما تُكتب وتخرج باسم المركز. وكلها اختيارية عمداً — الملف يُجمَّع على أيام،
   والمرفقان الإلزاميان والإرسال يأتيان من صفحة الملف بعد الحفظ (BR-016). لا
   تحكم هذه الشاشة على اكتمال شيء.
-
-  BR-013 قيل في العنوان الفرعي، وكان في `.note info`: الأزرق تنبيه، وشرحُ
-  قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5).
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "فتح ملف وزاري لدفعة قائمة: يُحفظ مسودةً باسم المركز، ثم يُرفَع مرفقاه الإلزاميان ويُرسَل من صفحة الملف (BR-016). ولا يُسجَّل مشارك على الدفعة قبل اعتماد الوزارة (BR-013)." %}</p>
   </div>
   <div class="acts">
@@ -37,7 +39,33 @@
   </div>
 </div>
 
-{% guided_help "mohe-submit" %}
+{# مسار الملف الوزاري: خريطة لا مؤشّر تقدّم — المحطة الحالية مضاءة وحدها. #}
+<ol class="stepper flow-strip">
+  <li class="tone-violet on is-here">
+    <span class="stop" data-tip="{% translate 'هذه الشاشة: اختيار الدفعة وحفظ نصّ النموذج مسودةً.' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc-plus"/></svg><span class="n">1</span></span>
+      <span class="txt"><span class="t">{% translate "فتح الملف" %}</span><span class="w">{% translate "أنت هنا" %}</span></span>
+    </span>
+  </li>
+  <li class="tone-info on">
+    <span class="stop" data-tip="{% translate 'على صفحة الملف: السيرة الذاتية للمدرّب ورخصة الجهة، PDF (BR-016).' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg><span class="n">2</span></span>
+      <span class="txt"><span class="t">{% translate "المرفقان" %}</span><span class="w">{% translate "صفحة الملف" %}</span></span>
+    </span>
+  </li>
+  <li class="tone-amber on">
+    <span class="stop" data-tip="{% translate 'زرّ الإرسال يظهر بعد اكتمال المرفقين؛ يُسجَّل تاريخ الإرسال.' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-globe"/></svg><span class="n">3</span></span>
+      <span class="txt"><span class="t">{% translate "الإرسال" %}</span><span class="w">{% translate "صفحة الملف" %}</span></span>
+    </span>
+  </li>
+  <li class="tone-ok on">
+    <span class="stop" data-tip="{% translate 'يُسجَّل قرار الوزارة كما ورد: اعتماد برقم وزاري أو ردّ بسبب.' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg><span class="n">4</span></span>
+      <span class="txt"><span class="t">{% translate "قرار الوزارة" %}</span><span class="w">{% translate "اعتماد أو ردّ" %}</span></span>
+    </span>
+  </li>
+</ol>
 
 {% if not can_create %}
   <p class="hint boxed">
@@ -45,40 +73,183 @@
   </p>
 {% endif %}
 
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "بيانات النموذج الوزاري" %}</h2>
-    <div class="acts">
-      <span class="chip">{% translate "دفعات بلا ملف" %}: <span class="num">{{ form.fields.cohort_code.choices|length }}</span></span>
+{% if unknown_cohort %}
+  <div class="note" role="status">
+    <div>{% blocktranslate with code=preselected %}لا دفعة بالرمز «{{ code }}» تقبل فتح ملف: إمّا أن الرمز غير موجود، وإمّا أن للدفعة ملفاً وزارياً قائماً.{% endblocktranslate %}</div>
+  </div>
+{% endif %}
+
+{% if existing_file %}
+  <div class="card2 pointer-card tone-info">
+    <div class="card2-body">
+      <div class="pointer">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc-check"/></svg></span>
+        <div class="min-w-0">
+          <strong>{% translate "للدفعة" %} <span dir="ltr" translate="no" class="num">{{ preselected }}</span> {% translate "ملف وزاري قائم بالفعل" %} — <span class="chip">{{ existing_file.status_display }}</span></strong>
+          <div class="muted">{% translate "لا يُفتح ملف ثانٍ لدفعة لها ملف قائم. تابع من صفحة الملف: المرفقان، ثم الإرسال، ثم القرار." %}</div>
+        </div>
+        <a class="btn2 primary" href="{% url 'operations:mohe-detail' existing_file.id %}">{% translate "فتح الملف" %}</a>
+      </div>
     </div>
   </div>
-  {% if form.fields.cohort_code.choices %}
-    <div class="card2-body">
-      <p class="hint boxed">
-        {% translate "الحقول السبعة أدناه نصّ النموذج الوزاري نفسه، لا ملاحظات داخلية: تُحفظ كما تُكتب وتخرج باسم المركز (BR-014). وكلها اختيارية عند الحفظ — الملف يُجمَّع على أيام من مصادر مختلفة، ولا يُرسَل ناقصاً على أي حال." %}
-      </p>
-      <form method="post">{% csrf_token %}
-        {% include "partials/_form.html" %}
-        <div class="form-acts">
-          {% if can_create %}
-            <button class="btn2 primary" type="submit">{% translate "حفظ كمسودة" %}</button>
-          {% endif %}
-          <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "إلغاء" %}</a>
+{% endif %}
+
+{% if cohorts or refused_post %}
+  <div class="dash-cols" x-data="{ c: {} }">
+    <div class="dash-main">
+      <div class="card2">
+        <div class="card2-head">
+          <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc"/></svg></span>
+          <h2>{% translate "بيانات النموذج الوزاري" %}</h2>
+          <div class="acts">
+            <span class="chip">{% translate "دفعات بلا ملف" %}: <span class="num">{{ cohorts|length }}</span></span>
+          </div>
         </div>
-      </form>
+        <div class="card2-body">
+          <p class="hint">
+            {% translate "الحقول السبعة أدناه نصّ النموذج الوزاري نفسه، لا ملاحظات داخلية: تُحفظ كما تُكتب وتخرج باسم المركز (BR-014). وكلها اختيارية عند الحفظ — الملف يُجمَّع على أيام من مصادر مختلفة، ولا يُرسَل ناقصاً على أي حال." %}
+          </p>
+          <form method="post">{% csrf_token %}
+            {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+            {% if refused_post and form.errors %}
+              <div class="err" role="alert">{% translate "لم يُحفظ شيء — صحّح ما هو معلَّم أدناه، وما كتبته باقٍ كما هو." %}</div>
+            {% endif %}
+
+            <div class="step-lbl"><span class="n">1</span>{% translate "الدفعة" %}</div>
+            <div class="fld{% if form.cohort_code.errors %} has-error{% endif %}">
+              <label for="id_cohort_code">{{ form.cohort_code.label }} <span aria-hidden="true">*</span></label>
+              <select id="id_cohort_code" name="cohort_code" required
+                      x-init="c = $el.selectedOptions[0]?.dataset || {}; $nextTick(() => { if (!$refs.trainer.value) $refs.trainer.value = c.trainer || ''; if (!$refs.place.value) $refs.place.value = c.location || '' })"
+                      @change="c = $event.target.selectedOptions[0].dataset; if (!$refs.trainer.value) $refs.trainer.value = c.trainer || ''; if (!$refs.place.value) $refs.place.value = c.location || ''">
+                {% for co in cohorts %}
+                  <option value="{{ co.code }}"
+                          data-program="{{ co.program_name }}" data-type="{{ co.program_type }}" data-semester="{{ co.semester }}"
+                          data-period="{{ co.starts_on|date:'Y/m/d' }} — {{ co.ends_on|date:'Y/m/d' }}" data-capacity="{{ co.capacity }}"
+                          data-delivery="{{ co.delivery }}" data-trainer="{{ co.trainer_name }}" data-location="{{ co.location }}"
+                          data-status="{{ co.status_display }}"
+                          {% if form.cohort_code.value == co.code or preselected == co.code and not form.cohort_code.value %} selected{% endif %}>{{ co.label }}</option>
+                {% endfor %}
+              </select>
+              {% for e in form.cohort_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              <div class="help">{% translate "تُعرض الدفعات التي لا ملف وزاري قائماً لها. الدفعة المرفوضة تعود إلى القائمة، والأفضل لها إعادة الإرسال من صفحة ملفها." %}</div>
+            </div>
+
+            <div class="step-lbl"><span class="n">2</span>{% translate "محتوى التدريب" %}</div>
+            <div class="fld{% if form.training_axes_ar.errors %} has-error{% endif %}">
+              <label for="id_training_axes_ar">{{ form.training_axes_ar.label }}</label>
+              <textarea id="id_training_axes_ar" name="training_axes_ar" rows="3" placeholder="{% translate 'محور في كل سطر…' %}">{{ form.training_axes_ar.value|default:'' }}</textarea>
+            </div>
+            <div class="grid2">
+              <div class="fld">
+                <label for="id_practical_aspects_ar">{{ form.practical_aspects_ar.label }}</label>
+                <textarea id="id_practical_aspects_ar" name="practical_aspects_ar" rows="3">{{ form.practical_aspects_ar.value|default:'' }}</textarea>
+              </div>
+              <div class="fld">
+                <label for="id_target_audience_ar">{{ form.target_audience_ar.label }}</label>
+                <textarea id="id_target_audience_ar" name="target_audience_ar" rows="3">{{ form.target_audience_ar.value|default:'' }}</textarea>
+                {% if suggestions.audiences %}
+                  <div class="help">{% translate "سابقاً" %}:
+                    {% for a in suggestions.audiences|slice:":3" %}<button type="button" class="chip pick" @click="$el.closest('.fld').querySelector('textarea').value = $el.textContent.trim()">{{ a|truncatechars:40 }}</button> {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="step-lbl"><span class="n">3</span>{% translate "المدرّب والجهة" %}</div>
+            <div class="grid2">
+              <div class="fld">
+                <label for="id_trainer_name">{{ form.trainer_name.label }}</label>
+                <input type="text" id="id_trainer_name" name="trainer_name" x-ref="trainer" list="trainers" value="{{ form.trainer_name.value|default:'' }}" placeholder="{% translate 'يُقترح من الدفعة أو من المسجَّل' %}">
+                <datalist id="trainers">{% for t in suggestions.trainers %}<option>{{ t }}</option>{% endfor %}</datalist>
+              </div>
+              <div class="fld">
+                <label for="id_training_location">{{ form.training_location.label }}</label>
+                <input type="text" id="id_training_location" name="training_location" x-ref="place" list="locations" value="{{ form.training_location.value|default:'' }}" placeholder="{% translate 'يُقترح من الدفعة أو من المسجَّل' %}">
+                <datalist id="locations">{% for l in suggestions.locations %}<option>{{ l }}</option>{% endfor %}</datalist>
+              </div>
+              <div class="fld">
+                <label for="id_trainer_qualifications">{{ form.trainer_qualifications.label }}</label>
+                <textarea id="id_trainer_qualifications" name="trainer_qualifications" rows="2">{{ form.trainer_qualifications.value|default:'' }}</textarea>
+              </div>
+              <div class="fld">
+                <label for="id_responsible_entity">{{ form.responsible_entity.label }}</label>
+                <input type="text" id="id_responsible_entity" name="responsible_entity" list="entities" value="{{ form.responsible_entity.value|default:'' }}" placeholder="{{ suggestions.entities.0 }}">
+                <datalist id="entities">{% for e in suggestions.entities %}<option>{{ e }}</option>{% endfor %}</datalist>
+                <div class="help">{% translate "اختر من القائمة أو اكتب اسم الجهة كما يجب أن يظهر في الملف." %}</div>
+              </div>
+            </div>
+
+            <div class="form-acts">
+              {% if can_create %}
+                <button class="btn2 primary" type="submit">
+                  <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc-plus"/></svg>
+                  {% translate "حفظ كمسودة" %}
+                </button>
+              {% endif %}
+              <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "إلغاء" %}</a>
+            </div>
+          </form>
+        </div>
+        <div class="card2-body">
+          <p class="hint">
+            {% translate "بعد الحفظ تفتح صفحة الملف: هناك يُرفع المستندان الإلزاميان، وهناك وحدها يظهر زرّ الإرسال بعد اكتمالهما (BR-016). ولا تحكم هذه الشاشة باكتمال ملف ولا بجاهزيته." %}
+          </p>
+        </div>
+      </div>
     </div>
-    <div class="card2-body">
-      <p class="hint">
-        {% translate "بعد الحفظ تفتح صفحة الملف: هناك يُرفع المستندان الإلزاميان، وهناك وحدها يظهر زرّ الإرسال بعد اكتمالهما (BR-016). ولا تحكم هذه الشاشة باكتمال ملف ولا بجاهزيته." %}
-      </p>
+
+    <div class="dash-side">
+      {# الدفعة المختارة — تُقرأ من سمات الخيار، فلا استعلام ولا إعادة تحميل. #}
+      <div class="card2 cohort-card">
+        <div class="card2-head">
+          <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-calendar"/></svg></span>
+          <h2>{% translate "الدفعة المختارة" %}</h2>
+        </div>
+        <div class="card2-body">
+          <dl class="dl">
+            <dt>{% translate "البرنامج" %}</dt><dd><span x-text="c.program"></span> <small class="muted" x-text="c.type"></small></dd>
+            <dt>{% translate "الفصل" %}</dt><dd x-text="c.semester"></dd>
+            <dt>{% translate "الفترة" %}</dt><dd class="num" dir="ltr" x-text="c.period"></dd>
+            <dt>{% translate "السعة" %}</dt><dd class="num" x-text="c.capacity"></dd>
+            <dt>{% translate "طريقة التقديم" %}</dt><dd x-text="c.delivery"></dd>
+            <dt>{% translate "المدرّب" %}</dt><dd><span x-show="c.trainer" x-text="c.trainer"></span><span class="muted" x-show="!c.trainer">{% translate "غير مسجَّل على الدفعة" %}</span></dd>
+            <dt>{% translate "المكان" %}</dt><dd><span x-show="c.location" x-text="c.location"></span><span class="muted" x-show="!c.location">{% translate "غير مسجَّل على الدفعة" %}</span></dd>
+            <dt>{% translate "الحالة" %}</dt><dd><span class="chip" x-text="c.status"></span></dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card2">
+        <div class="card2-head">
+          <span class="head-ico tone-amber" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+          <h2>{% translate "ما بعد الحفظ" %}</h2>
+        </div>
+        <div class="card2-body">
+          <ol class="todo">
+            <li><span class="n">1</span>{% translate "رفع السيرة الذاتية للمدرّب (PDF)" %}</li>
+            <li><span class="n">2</span>{% translate "رفع رخصة الجهة (PDF)" %}</li>
+            <li><span class="n">3</span>{% translate "الإرسال إلى الوزارة من صفحة الملف" %}</li>
+            <li><span class="n">4</span>{% translate "تسجيل القرار كما ورد من الوزارة" %}</li>
+          </ol>
+          <p class="hint">{% translate "المرفقان إلزاميان قبل الإرسال (BR-016)، وتُعلَّق الدفعة «بانتظار الوزارة» حتى القرار." %}</p>
+        </div>
+      </div>
     </div>
-  {% else %}
+  </div>
+{% else %}
+  <div class="card2">
     <div class="card2-body">
       <p class="empty">
         <span class="empty-title">{% translate "لا دفعة تقبل فتح ملف الآن" %}</span>
         <span class="empty-body">{% translate "القائمة تعرض الدفعات التي لا ملف وزاري قائماً لها: الدفعة التي ملفها مسودة أو مُرسل أو معتمد لا تُعرض هنا، والمرفوضة تعود إلى القائمة — والأفضل لها إعادة الإرسال من صفحة ملفها المرفوض، فيحمل الملف الجديد صلته بالرفض الذي يردّ عليه. فإما أن كل دفعة قائمة لها ملف بالفعل، وإما أن لا دفعة عُرِّفت بعد." %}</span>
+        {% if can_view_files or can_view_cohorts %}
+          <span class="empty-act">
+            {% if can_view_files %}<a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "عرض الملفات الوزارية" %}</a>{% endif %}
+            {% if can_view_cohorts %}<a class="btn2 ghost" href="{% url 'operations:cohorts' %}">{% translate "سجلّ الدفعات المُشغّلة" %}</a>{% endif %}
+          </span>
+        {% endif %}
       </p>
     </div>
-  {% endif %}
-</div>
+  </div>
+{% endif %}
 {% endblock %}

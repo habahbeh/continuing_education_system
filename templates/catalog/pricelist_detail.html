@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ price_list.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -19,8 +19,9 @@
   لذلك لا يُختبر أيٌّ منهما باختبار صدقٍ عادي — الصفر يكذب فيه — بل بالمقارنة
   مع `None` صراحةً، وتُرسم الحالتان بشكلين مختلفين لا برقمٍ وشرطة.
 
-  ولا حكم «سارية اليوم» ولا نتيجة BR-006: أولهما تحسمه خدمة التسعير بتاريخٍ
-  مُعطى، والثاني يحتاج مجموع أسعار المواد وهو ليس في سياق هذه الصفحة.
+  «سارية اليوم» من خدمة التسعير نفسها (قراءة محضة)، فالشاشة لا تخالف ما يُسعَّر
+  به فعلاً؛ وBR-012 يبقى الحاكم: التسعير بتاريخ الواقعة. أما نتيجة BR-006 فلا
+  تُطبع هنا: تحتاج مجموع أسعار المواد وهو ليس في سياق هذه الصفحة.
 
   ولا حصة شريك ولا قسمة إيراد: شرطٌ تجاري مع طرف ثالث لا محلّ له في قائمة أسعار.
 
@@ -32,19 +33,44 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ price_list.name_ar }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ price_list.name_ar }}</h1>
     <p class="sub">
       <span dir="ltr" translate="no">{{ price_list.code }}</span> —
-      {% translate "بنود قائمة أسعار مؤرّخة: ما يُسعَّر به كل برنامج، وما يُستوفى من رسوم تسجيل ومن تأمين. لا تعديل من هذه الشاشة." %}
+      {% translate "بنود قائمة أسعار مؤرّخة: ما يُسعَّر به كل برنامج، وما يُستوفى من رسوم تسجيل ومن تأمين." %}
     </p>
   </div>
   <div class="acts">
-    <span class="chip info dot">{% translate "قراءة فقط" %}</span>
-    <a class="btn2 ghost" href="{% url 'catalog:pricelists' %}">{% translate "عودة إلى قوائم الأسعار المؤرّخة" %}</a>
+    {% if is_frozen %}
+      {# D-14 — المعتمدة والمؤرشفة دليلٌ لا مسودة: الخدمة ترفض كل تعديل، فلا يُرسم فعل. #}
+      {# ورقاقةٌ تقول «غير قابلة للتعديل» تصف الحال ولا تعطي مخرجاً: القارئ الذي #}
+      {# جاء ليُضيف قاعدةً يحتاج أن يعرف أن المخرج قائمةٌ جديدة، لا أن يبحث عن زرّ. #}
+      <span class="chip info dot">{% translate "غير قابلة للتعديل" %}</span>
+      {% if can_edit %}
+        <a class="btn2" href="{% url 'catalog:pricelists' %}">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc-plus"/></svg>
+          {% translate "إصدار قائمة جديدة" %}
+        </a>
+      {% endif %}
+    {% elif can_edit %}
+      <button class="btn2 primary" type="button" @click="document.getElementById('price-item-new').showModal()">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+        {% translate "إضافة سعر برنامج" %}
+      </button>
+      <button class="btn2" type="button" @click="document.getElementById('price-list-edit').showModal()">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc"/></svg>
+        {% translate "تعديل المسودة" %}
+      </button>
+      <button class="btn2" type="button" @click="document.getElementById('price-list-approve').showModal()">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-stamp"/></svg>
+        {% translate "تسجيل قرار الاعتماد" %}
+      </button>
+    {% else %}
+      <span class="chip info dot">{% translate "قراءة فقط" %}</span>
+    {% endif %}
+    <a class="btn2 ghost" href="{% url 'catalog:pricelists' %}">{% translate "سجل القوائم" %}</a>
   </div>
 </div>
 
-{% guided_help "pricelist-detail" %}
 
 <div class="card2">
   <div class="card2-head">
@@ -54,6 +80,9 @@
       {% if price_list.is_frozen %}
         <span class="chip info">{% translate "مجمَّدة" %}</span>
       {% endif %}
+      {% if price_list.code == in_force_code %}
+        <span class="chip ok dot">{% translate "سارية اليوم" %}</span>
+      {% endif %}
     </div>
   </div>
   <div class="card2-body">
@@ -61,6 +90,7 @@
       <dt>{% translate "الرمز" %}</dt>
       <dd dir="ltr" translate="no"><strong class="num">{{ price_list.code }}</strong></dd>
       <dt>{% translate "الفصل" %}</dt>
+      {# لا رابط إلى دفعات الفصل: بحث السجل لا يشمل الفصل فيعيد بعضها لا كلّها. #}
       <dd>{{ price_list.semester.name_ar }}</dd>
       <dt>{% translate "تاريخ الإصدار" %}</dt>
       <dd dir="ltr" class="num">{{ price_list.issued_on|date:"Y/m/d" }}</dd>
@@ -95,12 +125,42 @@
 <div class="card2">
   <div class="card2-head">
     <h2>{% translate "بنود الأسعار" %}</h2>
-    {% if items %}
-      <div class="acts">
-        <span class="chip">{% blocktranslate count n=items|length %}بند واحد{% plural %}{{ n }} بنود{% endblocktranslate %}</span>
-      </div>
-    {% endif %}
+    <div class="acts">
+      {% if items %}
+        <span class="chip">{{ item_count|ar_count:"بند واحد|بندان|بنود|بنداً" }}</span>
+        <small class="muted">{% translate "على" %} {{ program_count|ar_count:"برنامج واحد|برنامجين|برامج|برنامجاً" }}</small>
+      {% endif %}
+    </div>
   </div>
+
+  {# قائمة كاملة تُقرأ بالبحث لا بالتمرير: بنود القائمة تبلغ العشرات مع الكتالوج الكامل. #}
+  {# hx-get فارغاً تعني «العنوان الحالي بمعاملاته»، فيضيف htmx حقول النموذج فوق ما في العنوان: #}
+  {# ?rq=ه ثم ?rq=ه&rq=هن مع كل حرف. المسار صريحاً يجعل معاملات النموذج وحدها هي الاستعلام. #}
+  <form method="get" class="filterbar plist-filters" role="search" id="pl-item-form"
+        hx-get="{% url 'catalog:pricelist-detail' price_list.code %}" hx-target="#pl-items" hx-select="#pl-items" hx-swap="outerHTML"
+        hx-trigger="input changed delay:350ms from:#f_item" hx-push-url="true" hx-indicator="#pl-item-busy">
+    {# البحثان يتعايشان: كلٌّ يحمل الآخر معه وإلّا مسحه. #}
+    {% if rule_query %}<input type="hidden" name="rq" value="{{ rule_query }}">{% endif %}
+    <div class="fld grow">
+      <label for="f_item">{% translate "بحث في البنود" %}</label>
+      <input type="search" name="q" value="{{ query }}" id="f_item" spellcheck="false" placeholder="{% translate 'اسم البرنامج أو رمزه…' %}">
+    </div>
+    <span class="busy" id="pl-item-busy" aria-hidden="true"></span>
+    {% if is_filtered %}<a class="btn2 ghost" href="?{% if rule_query %}rq={{ rule_query|urlencode }}{% endif %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
+  </form>
+
+  {% if unpriced %}
+    {# BR-008: برنامج نشط بلا بند على القائمة السارية لا يُسعَّر عليه تسجيل أصلاً. #}
+    <div class="card2-body">
+      <p class="note warn" role="status">
+        {% blocktranslate count n=unpriced|length %}برنامج نشط واحد بلا بند على هذه القائمة:{% plural %}{{ n }} برامج نشطة بلا بند على هذه القائمة:{% endblocktranslate %}
+        {% for p in unpriced %}<a class="row-link" href="{% url 'catalog:program-detail' p.code %}">{{ p.name_ar }}</a> <small class="muted num" dir="ltr">{{ p.code }}</small>{% if not forloop.last %} · {% endif %}{% endfor %}
+        — {% if price_list.code == in_force_code %}{% translate "وهذه هي القائمة السارية اليوم: لا يُسعَّر عليه تسجيل جديد (BR-008)." %}{% else %}{% translate "وهذه ليست القائمة السارية اليوم، فلا أثر لذلك الآن — ويصير أثراً إن صارت هي السارية (BR-008)." %}{% endif %}
+      </p>
+    </div>
+  {% endif %}
+
+  <div id="pl-items">
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -108,46 +168,65 @@
           <th>{% translate "البرنامج" %}</th>
           <th class="num">{% translate "المستوى" %}</th>
           <th class="num">{% translate "رسوم الدورة" %}</th>
-          <th>{% translate "التأمين" %}</th>
-          <th>{% translate "سياسة التأمين" %}</th>
-          <th>{% translate "ملاحظات" %}</th>
+          <th>{% translate "التأمين وسياسته" %}</th>
+          {% if has_notes %}<th>{% translate "ملاحظات" %}</th>{% endif %}
+          {% if not is_frozen and can_edit %}<th aria-label="{% translate 'إجراءات' %}"></th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% for item in items %}
           <tr>
-            <td>{{ item.program.name_ar }}
-              <br><small class="muted" dir="ltr" translate="no">{{ item.program.code }}</small>
+            <td>
+              <a class="row-link" href="{% url 'catalog:program-detail' item.program_code %}">{{ item.program_name }}</a>
+              <br><small class="muted" dir="ltr" translate="no">{{ item.program_code }}</small>
             </td>
             <td class="num">
-              {% if item.level is None %}<span class="muted">{% translate "بلا مستويات" %}</span>
-              {% else %}{{ item.level }}{% endif %}
+              {% if item.level_from is None %}<span class="muted">{% translate "بلا مستويات" %}</span>
+              {% elif item.levels > 1 %}<span dir="ltr">{{ item.level_from }}–{{ item.level_to }}</span>
+                <small class="muted sub-line">{{ item.levels|ar_count:"مستوى واحد|مستويان|مستويات|مستوى" }} {% translate "بالسعر نفسه" %}</small>
+              {% else %}{{ item.level_from }}{% endif %}
             </td>
-            <td class="num">{{ item.course_fee }}</td>
+            <td class="num">{{ item.course_fee }}
+              {% if item.levels > 1 %}<small class="muted sub-line">{% translate "لكل مستوى" %}</small>{% endif %}
+            </td>
             <td>
               {% if item.deposit_amount is None %}
                 <span class="chip">{% translate "لا تأمين" %}</span>
               {% else %}
                 <span class="num">{{ item.deposit_amount }}</span>
+                {% if item.deposit_policy %}<small class="muted sub-line">{{ item.deposit_policy }}</small>{% endif %}
               {% endif %}
             </td>
-            <td>
-              {% if item.deposit_policy %}{{ item.deposit_policy.name_ar }}
-              {% else %}<span class="muted">—</span>{% endif %}
-            </td>
-            <td>
-              {% if item.notes %}{{ item.notes }}
-              {% else %}<span class="muted">—</span>{% endif %}
-            </td>
+            {% if has_notes %}
+              <td>{% if item.notes %}{{ item.notes }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            {% endif %}
+                      {% if not is_frozen and can_edit %}
+              {# على المسودة وحدها: الرقم الخطأ يُصحَّح بحذف البند وإعادة إضافته. #}
+              <td class="acts">
+                <form class="inline-form" method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="remove-item">
+                  <input type="hidden" name="program" value="{{ item.program_code }}">
+                  <button class="btn2 sm danger" type="submit">{% translate "حذف" %}</button>
+                </form>
+              </td>
+            {% endif %}
           </tr>
         {% empty %}
-          <tr><td colspan="6" class="empty">
-            <span class="empty-title">{% translate "لا بنود على هذه القائمة" %}</span>
-            <span class="empty-body">{% translate "قائمة بلا بنود لا تُسعِّر شيئاً: البند هو ما يربط برنامجاً برسومه على هذه القائمة بالذات، والتسعير يقرأ منه بتاريخ الواقعة (BR-012)." %}</span>
+          <tr><td colspan="{% if has_notes %}5{% else %}4{% endif %}" class="empty">
+            {% if is_filtered %}
+              <span class="empty-title">{% translate "لا بند يطابق البحث" %}</span>
+              <span class="empty-body">{% translate "البحث أعلاه هو ما ضيّق النتيجة، لا أن القائمة بلا بنود." %}</span>
+              <a class="btn2 ghost empty-act" href="?{% if rule_query %}rq={{ rule_query|urlencode }}{% endif %}">{% translate "كل البنود" %}</a>
+            {% else %}
+              <span class="empty-title">{% translate "لا بنود على هذه القائمة" %}</span>
+              <span class="empty-body">{% translate "قائمة بلا بنود لا تُسعِّر شيئاً: البند هو ما يربط برنامجاً برسومه على هذه القائمة بالذات، والتسعير يقرأ منه بتاريخ الواقعة (BR-012)." %}</span>
+            {% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
   </div>
   <div class="card2-body">
     <p class="hint boxed">
@@ -159,12 +238,52 @@
 <div class="card2">
   <div class="card2-head">
     <h2>{% translate "قواعد رسوم التسجيل" %}</h2>
-    {% if fee_rules %}
-      <div class="acts">
-        <span class="chip">{% blocktranslate count n=fee_rules|length %}قاعدة واحدة{% plural %}{{ n }} قواعد{% endblocktranslate %}</span>
-      </div>
-    {% endif %}
+    <div class="acts">
+      {% if fee_rules %}<span class="chip">{{ fee_rules|length|ar_count:"قاعدة واحدة|قاعدتان|قواعد|قاعدة" }}</span>{% endif %}
+      {% if not is_frozen and can_edit %}
+        <button class="btn2" type="button" data-opens="fee-rule-new">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+          {% translate "إضافة قاعدة رسم" %}
+        </button>
+      {% endif %}
+    </div>
   </div>
+
+  {# البحث ببرنامج يُبقي القواعد العامة: الأخصّ يسبق العام، فحجب العام يخفي نصف الجواب (BR-009). #}
+  <form method="get" class="filterbar plist-filters" role="search" id="pl-rule-form"
+        hx-get="{% url 'catalog:pricelist-detail' price_list.code %}" hx-target="#pl-rules" hx-select="#pl-rules" hx-swap="outerHTML"
+        hx-trigger="input changed delay:350ms from:#f_rule" hx-push-url="true" hx-indicator="#pl-rule-busy">
+    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+    <div class="fld grow">
+      <label for="f_rule">{% translate "بحث في القواعد" %}</label>
+      <input type="search" name="rq" value="{{ rule_query }}" id="f_rule" spellcheck="false" placeholder="{% translate 'اسم البرنامج أو رمزه — والقواعد العامة تبقى ظاهرة…' %}">
+    </div>
+    <span class="busy" id="pl-rule-busy" aria-hidden="true"></span>
+    {% if rule_query %}<a class="btn2 ghost" href="?{% if query %}q={{ query|urlencode }}{% endif %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
+  </form>
+
+  {% if not is_frozen and uncovered_categories %}
+    {# محرّك التسعير يقرأ هذه القواعد في كل تسجيل: قائمةٌ تُعتمد وفئةٌ بلا قاعدة #}
+    {# تعني أن أوّل تسجيل عليها يُرفض — وD-14 يمنع إضافة القاعدة بعد الاعتماد. #}
+    <div class="card2-body">
+      <div class="note warn">
+        <div>
+          <strong>{% translate "فئات لا تستطيع هذه القائمة تسعيرها بعد:" %}</strong>
+          {% for category, label in uncovered_categories %}<span class="chip warn">{{ label }}</span>{% endfor %}
+          <p class="muted">{% translate "لا قاعدة عامة لهذه الفئات على القائمة، فأي تسجيل لمشارك منها على برنامج غير أونلاين سيُرفض عند تحميل الرسوم (BR-009). والاعتماد يجمّد القائمة فلا تُضاف القاعدة بعده (D-14) — أضفها الآن أو اقصد أن القائمة لبرامج أونلاين فقط (BR-010)." %}</p>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div id="pl-rules">
+  {% if rules_are_general_only %}
+    <div class="card2-body">
+      <p class="note" role="status">
+        {% blocktranslate with q=rule_query %}لا قاعدة خاصة بـ«{{ q }}» على هذه القائمة — والمعروض أدناه هو القواعد العامة التي تسري عليه (BR-009).{% endblocktranslate %}
+      </p>
+    </div>
+  {% endif %}
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -173,13 +292,14 @@
           <th>{% translate "فئة المشارك" %}</th>
           <th>{% translate "الرسم" %}</th>
           <th>{% translate "سبب الاستثناء" %}</th>
+          {% if not is_frozen and can_edit %}<th aria-label="{% translate 'إجراءات' %}"></th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% for rule in fee_rules %}
           <tr>
             <td>
-              {% if rule.program %}{{ rule.program.name_ar }}
+              {% if rule.program %}<a class="row-link" href="{% url 'catalog:program-detail' rule.program.code %}">{{ rule.program.name_ar }}</a>
                 <br><small class="muted" dir="ltr" translate="no">{{ rule.program.code }}</small>
               {% else %}<span class="chip">{% translate "كل البرامج" %}</span>{% endif %}
             </td>
@@ -195,15 +315,36 @@
               {% if rule.note %}{{ rule.note }}
               {% else %}<span class="muted">—</span>{% endif %}
             </td>
+            {% if not is_frozen and can_edit %}
+              <td class="acts">
+                <button class="btn2 ghost danger-ghost" type="button" data-opens="rule-del-{{ rule.id }}"
+                        aria-label="{% translate 'حذف قاعدة' %} {{ rule.category_display }}">{% translate "حذف" %}</button>
+              </td>
+            {% endif %}
           </tr>
         {% empty %}
-          <tr><td colspan="4" class="empty">
-            <span class="empty-title">{% translate "لا قواعد رسوم تسجيل على هذه القائمة" %}</span>
+          <tr><td colspan="{% if not is_frozen and can_edit %}5{% else %}4{% endif %}" class="empty">
+            <span class="empty-title">{% if rule_query %}{% translate "لا قاعدة تطابق البحث" %}{% else %}{% translate "لا قواعد رسوم تسجيل على هذه القائمة" %}{% endif %}</span>
             <span class="empty-body">{% translate "بلا قاعدة لا يُحسب رسم تسجيل لأي فئة على هذه القائمة، وهذا غير «الرسم صفر». القاعدة الأخصّ تسبق العامة: قاعدة لبرنامج وفئة تتقدّم على قاعدة الفئة لكل البرامج (BR-009)." %}</span>
+            {% if not is_frozen and can_edit %}
+              <button class="btn2 primary empty-act" type="button" data-opens="fee-rule-new">{% translate "إضافة قاعدة رسم" %}</button>
+            {% elif is_frozen %}
+              {# الحالة التي أوقعت القارئ: بطاقةٌ تشرح غياب القواعد ولا تقول إن #}
+              {# هذه القائمة بالذات لا تقبلها، فيبحث عن زرٍّ لا وجود له. الغياب #}
+              {# سببه D-14 لا عطل، والمخرج قائمةٌ جديدة — فيُقالان هنا مع رابطهما. #}
+              {# و`note` لا `empty-body` ثانية: لكل جدولٍ حالةٌ فارغةٌ واحدة، وهذا #}
+              {# تعليلُها لا حالةٌ ثانية — وحارسٌ يعدّ الحالات كان سيقرأها ثانيةً. #}
+              <span class="note warn empty-why">
+                <strong>{% translate "ولا تُضاف قاعدة إلى هذه القائمة:" %}</strong>
+                {% blocktranslate with code=price_list.code %}القائمة {{ code }} معتمدة، والمعتمدة دليلٌ لا يُعدَّل (D-14 · BR-008) — فلا زرّ إضافة هنا. والتغيير يكون بإصدار قائمة جديدة تُكتب فيها القواعد قبل اعتمادها.{% endblocktranslate %}
+              </span>
+              <a class="btn2 primary empty-act" href="{% url 'catalog:pricelists' %}">{% translate "إصدار قائمة جديدة" %}</a>
+            {% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
   </div>
   <div class="card2-body">
     <p class="hint boxed">
@@ -211,4 +352,135 @@
     </p>
   </div>
 </div>
+
+{% if not is_frozen and can_edit %}
+  {# الفعلان حوارٌ يُفتح من الرأس لا بطاقتان في القاع: كانتا تقعان عند 1413 و1783 #}
+  {# بكسل على صفحة طولها 2384 — أي فعلٌ على بُعد شاشة ونصف من موضع قراره. #}
+  <dialog class="modal confirm-modal" id="price-item-new" dir="rtl" aria-labelledby="price-item-new-t"{% if item_form.errors %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="item">
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2 id="price-item-new-t">{% translate "إضافة سعر برنامج" %}</h2>
+      </div>
+      <div class="modal-body">
+        {% for e in item_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "partials/_form.html" with form=item_form %}
+        <p class="hint">{% translate "البرامج المسعَّرة على هذه القائمة لا تُعرض في القائمة المنسدلة — لكل برنامج بندٌ واحد على القائمة الواحدة." %}</p>
+        {# الحقل يشترط سياسةً مع المبلغ (C-26) ويُسمّيها من قائمةٍ تُعرَّف في شاشة #}
+        {# أخرى: حالةٌ فارغة تشرح ولا تشير تترك القارئ يقرأ القيد ولا يعرف أين يُرفع. #}
+        <div class="note info">
+          <div>
+            {% translate "التأمين اختياري، وإن أردتَه فالمبلغ يحتاج سياسةً تحكمه: متى يُردّ ومتى يُصادر (C-26 · BR-096)." %}
+            <a href="{% url 'catalog:deposit-policies' %}">{% translate "سياسات التأمين" %}</a>
+          </div>
+        </div>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "إضافة البند" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('price-item-new').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  {# المسودة وثيقةٌ تُكتب لا دليلٌ يُحفظ: تاريخٌ مطبوعٌ خطأً كان يبقى للأبد #}
+  {# لأن لا خدمة تعديل ولا شاشة. والمعتمدة تبقى محصّنة كما كانت (D-14). #}
+  <dialog class="modal confirm-modal" id="price-list-edit" dir="rtl" aria-labelledby="price-list-edit-t">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="edit">
+      <div class="modal-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc"/></svg></span>
+        <h2 id="price-list-edit-t">{% translate "تعديل المسودة" %} — <span dir="ltr" translate="no">{{ price_list.code }}</span></h2>
+      </div>
+      <div class="modal-body">
+        {% include "partials/_form.html" with form=edit_form only=edit_fields %}
+        <p class="hint">{% translate "الرمز لا يُعدَّل: هو ما يُشار به إلى القائمة في كل مكان. والتعديل متاح ما دامت مسودة — بعد الاعتماد يكون التغيير بإصدار قائمة جديدة." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "حفظ التعديلات" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('price-list-edit').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  {# قواعد الرسوم كانت تُقرأ هنا وتُدخل من admin وحده: محرّك التسعير يقرأها في #}
+  {# كل تسجيل، فقائمةٌ بلا قاعدة ترفض أوّل تسجيل عليها ولا تقبل إصلاحاً بعد الاعتماد. #}
+  <dialog class="modal confirm-modal" id="fee-rule-new" dir="rtl" aria-labelledby="fee-rule-new-t"{% if rule_form.errors %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="fee-rule">
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2 id="fee-rule-new-t">{% translate "إضافة قاعدة رسم تسجيل" %}</h2>
+      </div>
+      <div class="modal-body">
+        {% for e in rule_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "partials/_form.html" with form=rule_form %}
+        <p class="hint">{% translate "ابدأ بالقاعدة العامة لكل فئة، ثم أضف قاعدةً خاصةً ببرنامج حيث يختلف رسمه — الأخصّ يتقدّم على العام (BR-009). ودورات الأونلاين لا تُذكر: لا رسم تسجيل عليها أصلاً (BR-010)." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "إضافة القاعدة" %}</button>
+        <button class="btn2 ghost" type="button" data-closes="fee-rule-new">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  {% for rule in fee_rules %}
+    <dialog class="modal confirm-modal" id="rule-del-{{ rule.id }}" dir="rtl" aria-labelledby="rule-del-{{ rule.id }}-t">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="remove-rule">
+        <input type="hidden" name="rule" value="{{ rule.id }}">
+        <div class="modal-head">
+          <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+          <h2 id="rule-del-{{ rule.id }}-t">{% translate "حذف قاعدة رسم" %}</h2>
+        </div>
+        <div class="modal-body">
+          <p>{% blocktranslate with scope=rule.program.name_ar|default:"كل البرامج" category=rule.category_display %}حذف قاعدة «{{ scope }}» لفئة «{{ category }}» من هذه المسودة؟{% endblocktranslate %}</p>
+          <p class="hint">{% translate "المسودة وثيقةٌ تُكتب، فالقاعدة المكتوبة خطأً تُحذف. وبعد حذف القاعدة العامة لفئةٍ لا يُسعَّر لها شيء حتى تُكتب غيرها." %}</p>
+        </div>
+        <div class="modal-acts">
+          <button class="btn2 danger" type="submit">{% translate "حذف" %}</button>
+          <button class="btn2 ghost" type="button" data-closes="rule-del-{{ rule.id }}">{% translate "رجوع" %}</button>
+        </div>
+      </form>
+    </dialog>
+  {% endfor %}
+
+  <dialog class="modal confirm-modal" id="price-list-approve" dir="rtl" aria-labelledby="price-list-approve-t">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="approve">
+      <div class="modal-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg></span>
+        <h2 id="price-list-approve-t">{% translate "تسجيل قرار الاعتماد" %}</h2>
+      </div>
+      <div class="modal-body">
+        <div class="note warn">
+          <div>{% translate "بالتسجيل تصير القائمة معتمدةً وغير قابلة للتعديل، وتُؤرشف سابقةُ الفصل نفسه (BR-008 · D-14). أضف كل البنود قبل هذه الخطوة." %}</div>
+        </div>
+        {% if not rule_count %}
+          {# الرفض الذي لا تستطيع الشاشة إصلاحه بعد وقوعه يُقال قبله لا بعده. #}
+          <div class="note danger">
+            <div>
+              <strong>{% translate "لا قاعدة رسم تسجيل واحدة على هذه القائمة." %}</strong>
+              {% translate "أي تسجيل على برنامج غير أونلاين سيُرفض عند تحميل الرسوم، والاعتماد يجمّد القائمة فلا تُضاف القاعدة بعده (BR-009 · D-14). اعتمدها الآن فقط إن كانت لبرامج أونلاين وحدها (BR-010)." %}
+            </div>
+          </div>
+        {% elif uncovered_categories %}
+          <div class="note warn">
+            <div>
+              <strong>{% translate "فئات بلا قاعدة عامة:" %}</strong>
+              {% for category, label in uncovered_categories %}<span class="chip warn">{{ label }}</span>{% endfor %}
+              {% translate "تسجيلها على برنامج بلا قاعدة خاصة سيُرفض بعد الاعتماد بلا طريق للإصلاح." %}
+            </div>
+          </div>
+        {% endif %}
+        {% include "partials/_form.html" with form=approval_form %}
+        <p class="hint">{% translate "الاعتماد ليس فعلاً داخل النظام: رئيس الجامعة يعتمد خارجه وهذه الشاشة تسجّل قراره (D-31). ولذلك جهة الاعتماد ومرجع القرار إلزاميان — هما الدليل الوحيد على وقوعه." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "تسجيل الاعتماد" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('price-list-approve').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
 {% endblock %}

@@ -1,48 +1,197 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n money_ui status_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.6 · §5.2 — إجمالي القبض اليومي ومطابقة الإقفال (Sprint 8L).
+
+  «اليومي» صفةُ الصفّ لا صفةُ التقرير: مطابقةُ أسبوعٍ سؤالٌ حقيقي للمدقّق،
+  وكانت تكلّفه سبع صفحات. واليوم الواحد يبقى الافتراضي.
+
+  الرقم النظامي محتسَبٌ من السندات نفسها التي يقرؤها التقرير الأول، فالرقمان
+  يجب أن يتطابقا لليوم الواحد — واختبارٌ يمسك ذلك، لأن اختلافهما يعني خللاً
+  فوقهما لا فيهما.
+
+  الفرق يُظهر بإشارته: `+` زيادة في الصندوق و`−` نقص. و«12.00» وحدها لا تقول
+  أيّهما، والفرق بين الاثنين هو الفرق بين خطأ عدٍّ وخطأ تسجيل.
+{% endcomment %}
+
 {% block content %}
 {% include "reporting/_shell.html" %}
-<div class="note info">
-  {% translate "الإجمالي النظامي محتسب من السندات الصادرة نفسها التي يقرؤها التقرير الأول — فالرقمان يجب أن يتطابقا لليوم الواحد." %}
+
+<div class="kpi-grid tiles">
+  <div class="kpi tile is-lead">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-receipt"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "إجمالي السندات" %}</span>
+      <span class="value num">{% money report.receipts_total %}</span>
+      <span class="foot">{{ report.receipts|length }} {% translate "سند صادر" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-vault"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "النظامي في الإقفالات" %}</span>
+      <span class="value num">{% money report.system_total %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "المعدود" %}</span>
+      <span class="value num">{% money report.counted_total %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-scale"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "الفرق" %}</span>
+      <span class="value num">{% money_signed report.variance_total %}</span>
+      <span class="foot">{% translate "موجب: زيادة في الصندوق" %}</span>
+    </span>
+  </div>
 </div>
-<div class="grid2">
-  <div class="kpi"><div class="label">{% translate "إجمالي السندات" %}</div><div class="value num">{{ report.receipts_total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "المعدود" %}</div><div class="value num">{{ report.counted_total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "الفرق" %}</div><div class="value num">{{ report.variance_total }}</div></div>
-</div>
+
 {% if report.unreconciled %}
-  <div class="note warn">{% translate "توجد إقفالات غير معتمدة في هذا اليوم." %}</div>
+  <div class="note warn">
+    {% blocktranslate count n=report.unreconciled|length %}إقفال واحد لم يُعتمد بعد في هذا المدى.{% plural %}{{ n }} إقفالات لم تُعتمد بعد في هذا المدى.{% endblocktranslate %}
+    {% translate "الإقفال غير المعتمد رقمٌ لم يوقّعه أحد." %}
+  </div>
 {% endif %}
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الإقفالات" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الصندوق" %}</th><th>{% translate "النظامي" %}</th>
-        <th>{% translate "المعدود" %}</th><th>{% translate "الفرق" %}</th><th>{% translate "التسوية" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "التاريخ" %}</th>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "أمين الصندوق" %}</th>
+          <th class="num">{% translate "السندات" %}</th>
+          <th class="num">{% translate "النظامي" %}</th>
+          <th class="num">{% translate "المعدود" %}</th>
+          <th class="num">{% translate "الفرق" %}</th>
+          <th>{% translate "التسوية" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "اعتمده" %}</th>
+          <th class="num">{% translate "وقت الاعتماد" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for c in report.closings %}
-          <tr><td dir="ltr">{{ c.code }}</td><td>{{ c.cashier }}</td>
-              <td class="num">{{ c.system_total }}</td><td class="num">{{ c.counted_total }}</td>
-              <td class="num">{{ c.variance }}</td><td>{{ c.variance_resolution_ar|default:"—" }}</td>
-              <td>{{ c.status_display }}</td></tr>
-        {% empty %}<tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا إقفالات" %}</span></td></tr>{% endfor %}
+          <tr{% if c.variance %} class="is-flagged"{% endif %}>
+            <td class="num"><span dir="ltr">{{ c.closing_date }}</span></td>
+            <td dir="ltr">{{ c.code }}</td>
+            <td>{{ c.cashier }}</td>
+            <td class="num">{{ c.receipt_count }}</td>
+            <td class="num amt">{% money c.system_total %}</td>
+            <td class="num amt">{% money c.counted_total %}</td>
+            <td class="num amt">{% money_signed c.variance %}</td>
+            <td>{{ c.variance_resolution_ar|default:"—" }}</td>
+            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
+            <td>{{ c.approved_by|default:"—" }}</td>
+            <td class="num">{% if c.approved_at %}<span dir="ltr">{{ c.approved_at|date:"Y-m-d H:i" }}</span>{% else %}—{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="11" class="empty">
+            <span class="empty-title">{% translate "لا إقفالات في هذا المدى" %}</span>
+            <span class="empty-body">{% translate "يومٌ بلا إقفال ليس يوماً بلا قبض: السندات أدناه تقول ما قُبض، والإقفال هو ما لم يُجرَ بعد." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
+      {% if report.closings %}
+        <tfoot>
+          <tr>
+            <td colspan="4">{% translate "الإجمالي" %}</td>
+            <td class="num amt">{% money report.system_total %}</td>
+            <td class="num amt">{% money report.counted_total %}</td>
+            <td class="num amt">{% money_signed report.variance_total %}</td>
+            <td colspan="4"></td>
+          </tr>
+        </tfoot>
+      {% endif %}
     </table>
   </div>
 </div>
+
+<div class="split2">
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "حسب أمين الصندوق" %}</h2></div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>{% translate "أمين الصندوق" %}</th><th class="num">{% translate "الإقفالات" %}</th>
+          <th class="num">{% translate "القبض" %}</th><th class="num">{% translate "الفروقات" %}</th></tr></thead>
+        <tbody>
+          {% for c in report.by_cashier %}
+            <tr>
+              <td><strong>{{ c.cashier }}</strong></td>
+              <td class="num">{{ c.closings }}</td>
+              <td class="num amt">{% money c.system_total %}</td>
+              <td class="num amt">{% money_signed c.variance %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="empty"><span class="empty-title">{% translate "لا إقفالات" %}</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "حسب طريقة الدفع" %}</h2></div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>{% translate "الطريقة" %}</th><th class="num">{% translate "السندات" %}</th>
+          <th class="num">{% translate "الإجمالي" %}</th></tr></thead>
+        <tbody>
+          {% for m in report.by_method %}
+            <tr>
+              <td><span class="chip">{{ m.method }}</span></td>
+              <td class="num">{{ m.count }}</td>
+              <td class="num amt">{% money m.amount %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="3" class="empty"><span class="empty-title">{% translate "لا سندات" %}</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "سندات اليوم" %}</h2></div>
+  <div class="card2-head"><h2>{% translate "السندات" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "رقم السند" %}</th><th>{% translate "المشارك" %}</th>
-        <th>{% translate "الطريقة" %}</th><th>{% translate "الصندوق" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <thead><tr><th>{% translate "رقم السند" %}</th><th class="num">{% translate "التاريخ" %}</th>
+        <th>{% translate "المشارك" %}</th><th>{% translate "الطريقة" %}</th>
+        <th>{% translate "أمين الصندوق" %}</th><th class="num">{% translate "المبلغ" %}</th></tr></thead>
       <tbody>
         {% for r in report.receipts %}
-          <tr><td dir="ltr">{{ r.internal_receipt_number }}</td><td>{{ r.participant_name }}</td>
-              <td>{{ r.payment_method }}</td><td>{{ r.cashier }}</td><td class="num">{{ r.amount }}</td></tr>
-        {% empty %}<tr><td colspan="5" class="empty"><span class="empty-title">{% translate "لا سندات" %}</span></td></tr>{% endfor %}
+          <tr>
+            <td dir="ltr">{{ r.internal_receipt_number }}</td>
+            <td class="num"><span dir="ltr">{{ r.received_on }}</span></td>
+            <td>{{ r.participant_name }}</td>
+            <td><span class="chip">{{ r.payment_method }}</span></td>
+            <td>{{ r.cashier }}</td>
+            <td class="num amt">{% money r.amount %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا سندات في هذا المدى" %}</span></td></tr>
+        {% endfor %}
       </tbody>
+      {% if report.receipts %}
+        <tfoot><tr><td colspan="5">{% translate "الإجمالي" %}</td>
+          <td class="num amt">{% money report.receipts_total %}</td></tr></tfoot>
+      {% endif %}
     </table>
   </div>
+  {% include "reporting/_pager.html" with page=pages.page_receipts param="page_receipts" qs=params_qs %}
+</div>
+
+<div class="note info">
+  {% translate "الإجمالي النظامي محتسَب من السندات نفسها التي يقرؤها التقرير الأول، فالرقمان يتطابقان لليوم الواحد. واختلافهما يعني خللاً فوقهما لا فيهما." %}
 </div>
 {% endblock %}

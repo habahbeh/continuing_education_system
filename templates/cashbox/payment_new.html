@@ -1,98 +1,387 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n l10n %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  شاشة استيفاء الدفعة، وعليها فعل واحد: إصدار سند القبض. §3.4/17 لا يفتحها
-  إلا لأمين الصندوق والموظف المالي، وكلاهما يملك CREATE — فلا رايةَ في السياق
-  تحجب الزرّ ولا حاجة إليها، والباب نفسه هو الحارس (`policy.require` على VIEW).
-  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس.
+  الصندوق في ثلاث خطوات على شاشة واحدة: من يدفع؟ على أي تسجيل؟ كم؟
 
-  حدّ الدفعة الأولى خرج من `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً
-  (قواعد التحسين §6.5). النصّ نفسه، في `.hint boxed` داخل البطاقة فوق الحقول
-  التي يخصّها — فلا تتراكم كتلتان مؤطَّرتان فوق الصفحة تحت كتلة الإرشاد.
-
-  والرقم يُقرأ من الإعداد المؤرّخ `diploma_minimum_first_payment` لا من نصّ
-  القالب: كان مكتوباً «400» فيبقى على الشاشة بعد أن يتغيّر الإعداد، فتقول
-  الصفحة حدّاً لا يرفضه الحفظ.
-
-  أما التفصيل «300 تسجيل + 100 أول مادة» فيظهر مع قيمته وحدها: هو تعليل الـ400
-  ولا يصحّ لغيرها، ولا يعرف النظام كيف ينقسم حدٌّ آخر. فإن تغيّر الإعداد بقي
-  المبلغ وحده بلا تفصيل — والقسمة تُحذف ولا تُخمَّن. والشرط يُحسَب في العرض
-  مرّة واحدة (`_BREAKDOWN_HOLDS_AT`) لا في القالب.
-
-  والقراءة بتاريخ اليوم لأن القارئ لم يختر تاريخ الاستيفاء بعد. أما الفحص
-  فيجري في الخدمة بتاريخ السند — فهذا ما تقوله الشاشة، لا ما يقرّره الحفظ.
-  وإن لم يكن الإعداد مضبوطاً فلا جملة: رقمٌ مخمَّن أسوأ من سطرٍ غائب.
-
-  وحدّ الدبلوم الخاص (Q-15) يُذكر حين يُختار تسجيلٌ لبرنامجٍ يحمله: قراءةُ
-  حقلٍ واحد، لا حكماً على هذه الدفعة. فالقاعدة نفسها — أهي دبلوم؟ أهي الدفعة
-  الأولى؟ — تبقى كلّها في `check_minimum_first_payment`، ولا يُعاد شيء منها
-  هنا. لذلك يُقال «يتقدّم على الحدّ العام» لا «هذا ما سيُفحص»: الأول صحيح
-  دائماً، والثاني قد يكذب على تسجيلٍ استُوفيت أولى دفعاته.
-
-  وقبل الاختيار لا يُخمَّن حدُّ برنامج: يُقال نطاق القاعدة وأن لبعض الدبلومات
-  حدّاً أعلى، بالصياغة نفسها المستقرّة في صفحة مسار التسجيل.
-
-  والتوزيع على بنود الرسوم يجري في الخدمة (BR-022) بعد الحفظ، ويُقرأ في صفحة
-  السند. لا تحسب هذه الشاشة شيئاً ولا تعرض تخصيصاً قبل إصداره.
+  * تبدأ الشاشة بالمشارك لا بالتسجيل: أمين الصندوق أمامه طالب يعرف اسمه أو
+    رقمه، لا رمز تسجيل. البحث بالرقم أو الاسم أو الهاتف أو رقم الهوية.
+    وإن وصلت الشاشة من كشف الحساب أو السجل أو التخليص (`?enrollment=`) جاءت
+    معبّأة والخطوة الأولى مطوية.
+  * التسجيل بطاقةٌ تُنقر لا قائمة: نوع البرنامج ورصيده وهل هذه دفعته الأولى.
+    تسجيلٌ واحد يُختار وحده.
+  * الرصيد المستحق أكبر رقم على الشاشة، ومعه زرّ «الرصيد كاملاً». السطر تحت
+    المبلغ يقول ما سيبقى، أو أن الزيادة تصير رصيداً دائناً، أو أن المبلغ دون
+    حدّ الدفعة الأولى (BR-020) — قبل الحفظ لا بعده. والحكم للخدمة عند الحفظ.
+  * لا حقل تاريخ: السند مؤرَّخ بيوم إصداره، تضعه الشاشة لا الكاتب. ورقم سند
+    الدائرة المالية اختياري ومطويّ. البيان يُقترح من التسجيل ويبقى قابلاً
+    للتعديل.
+  * لا وسم script: القيم الحيّة من Alpine المحمَّل عامّةً، والبيانات على
+    البطاقات نفسها (`data-*`) لا في JSON مخفي.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "قبض مبلغ على تسجيل قائم وإصدار سنده. التوزيع على بنود الرسوم يجري عند الحفظ، ويُقرأ في صفحة السند." %}</p>
   </div>
-</div>
-
-{% guided_help "payment-new" %}
-
-<div class="card2">
-  <div class="card2-head"><h2>{% translate "بيانات الدفعة" %}</h2></div>
-  <div class="card2-body">
-    <p class="hint boxed">
-      {% translate "تسمح المتطلبات بدفعة واحدة أو دفعات على الحساب. وقد يفرض النظام حدًا أدنى للدفعة الأولى للدبلومات فقط حسب حالة التسجيل (BR-020)." %}
-    </p>
-    {% if selected_minimum_first_payment is not None %}
-      <p class="hint">
-        {% blocktranslate with minimum=selected_minimum_first_payment|floatformat:"-3" %}للتسجيل المختار، تبدو هذه دفعة أولى لدبلوم؛ الحد الأدنى الذي سيتحقق منه النظام هو {{ minimum }} ديناراً. إذا كان المبلغ غير صالح فستظهر رسالة BR-020 عند الحفظ.{% endblocktranslate %}
-      </p>
-    {% endif %}
-    <form method="post">
-      {% csrf_token %}
-      {% include "partials/_form.html" %}
-      <p class="hint boxed" id="overpayment-warning" hidden>
-        {% translate "المبلغ أكبر من الرصيد المستحق. سيتم تسجيل الفرق كرصيد دائن للمشارك." %}
-      </p>
-      <div class="form-acts">
-        <button class="btn2 primary" type="submit">{% translate "إصدار سند القبض" %}</button>
-      </div>
-    </form>
+  <div class="acts">
+    <a class="btn2 ghost" href="{% url 'cashbox:payments' %}">{% translate "سجل الدفعات" %}</a>
   </div>
 </div>
-{{ enrollment_balances|json_script:"payment-enrollment-balances" }}
-<script>
-  (() => {
-    const balancesNode = document.getElementById("payment-enrollment-balances");
-    const enrollmentField = document.querySelector("[name='enrollment_code']");
-    const amountField = document.querySelector("[name='amount']");
-    const warning = document.getElementById("overpayment-warning");
-    if (!balancesNode || !enrollmentField || !amountField || !warning) return;
 
-    const balances = JSON.parse(balancesNode.textContent || "{}");
-    const readNumber = (value) => Number(String(value || "").replace(",", "."));
-    const updateWarning = () => {
-      const balance = readNumber(balances[enrollmentField.value]);
-      const amount = readNumber(amountField.value);
-      warning.hidden = !(Number.isFinite(balance) && Number.isFinite(amount) && amount > balance);
-    };
+{% if not account %}
+  {# ---------------- الخطوة ١: من يدفع؟ ---------------- #}
+  <div class="dash-cols">
+    <div class="dash-main">
+      <div class="card2">
+        <div class="card2-head">
+          <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-users"/></svg></span>
+          <h2>{% translate "من يدفع؟" %}</h2>
+        </div>
+        <div class="card2-body">
+          <form method="get" class="till-search" role="search">
+            <div class="fld">
+              <label for="till-q">{% translate "ابحث عن المشارك" %}</label>
+              <div class="till-search-row">
+                <input type="search" id="till-q" name="q" value="{{ query }}" autofocus autocomplete="off"
+                       placeholder="{% translate 'الرقم الجامعي، الاسم، الهاتف، أو رقم الهوية…' %}">
+                <button class="btn2 primary" type="submit">
+                  <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-users"/></svg>
+                  {% translate "بحث" %}
+                </button>
+              </div>
+              <div class="help">{% translate "اكتب أول أرقام الرقم الجامعي أو جزءاً من الاسم. تُعرض المستحقات مع كل نتيجة." %}</div>
+            </div>
+          </form>
 
-    enrollmentField.addEventListener("change", updateWarning);
-    amountField.addEventListener("input", updateWarning);
-    updateWarning();
-  })();
-</script>
+          {% if query %}
+            {% if matches %}
+              <ul class="pick-list" aria-label="{% translate 'نتائج البحث' %}">
+                {% for m in matches %}
+                  <li>
+                    <div class="who">
+                      <strong>{{ m.name_ar }}</strong>
+                      <span class="chip num" dir="ltr" translate="no">{{ m.participant_number }}</span>
+                      {% if m.phone %}<span class="muted num" dir="ltr">{{ m.phone }}</span>{% endif %}
+                      <span class="muted">{{ m.category }}</span>
+                    </div>
+                    <div class="owe">
+                      {% if m.owing_count %}
+                        <span class="chip warn">{% translate "مستحق" %} <span class="num">{{ m.owing_total }}</span> {% translate "د.أ" %} · {{ m.owing_count }} {% translate "تسجيل" %}</span>
+                      {% else %}
+                        <span class="chip ok">{% translate "لا مستحقات" %}</span>
+                      {% endif %}
+                    </div>
+                    <a class="btn2 {% if m.owing_count %}primary{% else %}ghost{% endif %}" href="{% url 'cashbox:payment-new' %}?participant={{ m.participant_number }}">{% translate "اختيار" %}</a>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="empty">
+                <span class="empty-title">{% translate "لا مشارك يطابق البحث" %}</span>
+                <span class="empty-body">{% translate "جرّب رقماً جامعياً أو جزءاً آخر من الاسم. المشارك غير المسجَّل يُضاف من شاشة المشاركين أولاً." %}</span>
+              </div>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-side">
+      <div class="card2 next-card tone-amber">
+        <div class="card2-head">
+          <span class="head-ico tone-amber" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-clock"/></svg></span>
+          <h2>{% translate "مستحقات حديثة" %}</h2>
+        </div>
+        <div class="card2-body">
+          {% if recent %}
+            <ul class="quick-list">
+              {% for r in recent %}
+                <li>
+                  <a href="{% url 'cashbox:payment-new' %}?enrollment={{ r.code }}">
+                    <span class="ico tone-{{ r.tone }}" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ r.icon }}"/></svg></span>
+                    <span class="txt">
+                      <strong>{{ r.participant_name }}</strong>
+                      <span class="muted">{{ r.cohort_name }}</span>
+                    </span>
+                    <span class="amt num">{{ r.balance }}</span>
+                  </a>
+                </li>
+              {% endfor %}
+            </ul>
+            <p class="hint">{% translate "أحدث التسجيلات التي ما زال عليها رصيد — انقر لفتح الدفعة عليها مباشرة." %}</p>
+          {% else %}
+            <p class="hint">{% translate "لا تسجيلات عليها رصيد مستحق الآن." %}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% if minimum_first_payment is not None %}
+        <p class="hint boxed">
+          {% translate "أقل دفعة أولى للدبلوم" %} <b class="num">{{ minimum_first_payment|floatformat:"-3" }}</b> {% translate "ديناراً" %}{% if minimum_breakdown_holds %} (300 تسجيل + 100 أول مادة){% endif %} — BR-020.
+          {% translate "القاعدة تخصّ الدبلومات وحدها، ولبعضها حدّ أعلى (Q-15)." %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+
+{% else %}
+  {# ---------------- الخطوتان ٢ و٣: التسجيل والمبلغ ---------------- #}
+  <div class="dash-cols"
+       x-data="{ en: '', amt: '', bal: 0, min: 0, first: false, name: '', stmt: '', auto: '', ref: '{{ form.external_receipt_ref.value|default:''|escapejs }}',
+                 due: '', paid: '', status: '', enrolled: '', otext: '', url: '', confirmed: false,
+                 method() { const m = $root.querySelector('input[name=payment_method]:checked'); return m ? m.dataset.label : '' },
+                 pick(el) {
+                   const d = el.dataset, prev = this.bal;
+                   this.en = el.value; this.bal = Number(d.balance) || 0; this.min = Number(d.min) || 0; this.first = d.first === '1'; this.name = d.name;
+                   this.due = d.due; this.paid = d.paid; this.status = d.status; this.enrolled = d.enrolled; this.otext = d.otext || ''; this.url = d.url || '';
+                   const next = d.text || ''; if (!this.edited()) this.stmt = next; this.auto = next;
+                   if (this.amt !== '' && this.a() === prev) this.amt = this.bal.toFixed(3);
+                 },
+                 edited() { return this.stmt.trim() !== '' && this.stmt !== this.auto },
+                 a() { return Number(String(this.amt).replace(',', '.')) || 0 },
+                 rest() { return Math.max(this.bal - this.a(), 0) },
+                 over() { return this.a() > this.bal },
+                 low() { return this.min > 0 && this.a() > 0 && this.a() < this.min },
+                 fmt(v) { return Number(v).toFixed(3).replace('.', ',') } }"
+       x-init="stmt = $refs.stmt.value; amt = $refs.amount.value; const r = $root.querySelector('input[name=enrollment_code]:checked'); if (r) { auto = r.dataset.text || ''; if (!stmt) stmt = auto; pick(r) }">
+    <div class="dash-main">
+      <div class="card2">
+        <div class="card2-head">
+          <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+          <h2>{% translate "بيانات الدفعة" %}</h2>
+          <div class="acts">
+            <a class="btn2 ghost" href="{% url 'cashbox:payment-new' %}">{% translate "تغيير المشارك" %}</a>
+          </div>
+        </div>
+        <div class="card2-body">
+          <form method="post" x-ref="form" @submit="if (!confirmed) { $event.preventDefault(); $refs.confirm.showModal() }">
+            {% csrf_token %}
+            {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+            <input type="hidden" name="participant_number" value="{{ account.participant_number }}">
+
+            {# 1 — التسجيل #}
+            <div class="step-lbl"><span class="n">1</span>{% translate "التسجيل الذي تُدفع عليه" %}
+              {% if rows|length == 1 %}<span class="muted">{% translate "— تسجيل واحد عليه رصيد، اختير تلقائياً" %}</span>{% endif %}
+            </div>
+            {% if rows %}
+              <div class="seg-cards enroll-cards" role="radiogroup" aria-label="{% translate 'التسجيل' %}">
+                {% for r in rows %}
+                  <label class="seg-card tone-{{ r.tone }}" :class="{ 'is-on': en === '{{ r.code }}' }">
+                    <input type="radio" name="enrollment_code" value="{{ r.code }}" class="seg-radio"
+                           data-balance="{{ r.balance|unlocalize }}" data-min="{{ r.minimum_first_payment|default:0|unlocalize }}"
+                           data-first="{% if r.is_first_payment %}1{% else %}0{% endif %}" data-name="{{ r.cohort_name }}" data-text="{{ r.default_text }}"
+                           data-due="{{ r.total_due }}" data-paid="{{ r.total_paid }}" data-status="{{ r.status_display }}" data-enrolled="{{ r.enrolled_on|date:'Y/m/d' }}"
+                           data-otext="{% if r.is_first_payment and r.program_minimum_override is not None %}{% translate "ولهذا البرنامج حدّ أدنى خاص للدفعة الأولى" %} {{ r.program_minimum_override|floatformat:"-3" }} {% translate "ديناراً يتقدّم على الحدّ العام (Q-15)." %}{% endif %}"
+                           {% if can_view_account %}data-url="{% url 'operations:account' r.code %}"{% endif %}
+                           {% if preselected == r.code %}checked{% endif %} @change="pick($event.target)">
+                    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ r.icon }}"/></svg></span>
+                    <span class="t">{{ r.cohort_name }}</span>
+                    <span class="c">{{ r.type_label }} · <span dir="ltr" translate="no">{{ r.code }}</span></span>
+                    <span class="due num">{{ r.balance }} <small>{% translate "د.أ" %}</small></span>
+                    {% if r.is_first_payment %}<span class="chip warn">{% translate "دفعة أولى" %}</span>{% else %}<span class="chip ok">{% translate "مدفوع" %} <span class="num">{{ r.total_paid }}</span></span>{% endif %}
+                    {% if r.pending_void_receipt %}<span class="chip danger">{% translate "إلغاء معلّق" %} <span class="num" dir="ltr">{{ r.pending_void_receipt }}</span></span>{% endif %}
+                  </label>
+                {% endfor %}
+              </div>
+              {% for e in form.enrollment_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            {% else %}
+              <div class="empty">
+                <span class="empty-title">{% translate "لا رصيد مستحق على هذا المشارك" %}</span>
+                <span class="empty-body">{% translate "كل تسجيلاته مسدَّدة أو ملغاة. القبض على رصيد صفري يُنتج رصيداً دائناً يُردّ عند التخليص، فلا يُعرض هنا." %}</span>
+              </div>
+            {% endif %}
+
+            {# 2 — المبلغ وطريقة الدفع #}
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">2</span>{% translate "المبلغ وطريقة الدفع" %}</div>
+            <div class="grid2">
+              <div class="fld{% if form.amount.errors %} has-error{% endif %}">
+                <label for="id_amount">{{ form.amount.label }}<span class="req" aria-hidden="true">*</span></label>
+                <div class="amount-row">
+                  <input type="number" step="0.001" min="0" inputmode="decimal" id="id_amount" name="amount" required dir="ltr"
+                         x-ref="amount" x-model="amt" value="{{ form.amount.value|default:'' }}" placeholder="0.000">
+                  <button type="button" class="btn2" :disabled="!en" @click="amt = bal.toFixed(3)">{% translate "الرصيد كاملاً" %}</button>
+                </div>
+                {% for e in form.amount.errors %}<div class="err">{{ e }}</div>{% endfor %}
+                <div class="help live" x-cloak>
+                  <span x-show="en && a() > 0 && !over() && !low()">{% translate "المتبقي بعد هذه الدفعة" %}: <b class="num" x-text="fmt(rest())"></b> {% translate "د.أ" %}</span>
+                  <span class="is-warn" x-show="over()">{% translate "المبلغ أكبر من الرصيد المستحق؛ يُسجَّل الفرق" %} (<b class="num" x-text="fmt(a() - bal)"></b>) {% translate "رصيداً دائناً للمشارك." %}</span>
+                  <span class="is-danger" x-show="low()">{% translate "أقل من الحدّ الأدنى للدفعة الأولى" %} (<b class="num" x-text="fmt(min)"></b> {% translate "د.أ" %}) — {% translate "سيرفضه الحفظ (BR-020)." %}</span>
+                  <span x-show="!en">{% translate "اختر التسجيل أولاً." %}</span>
+                </div>
+              </div>
+              <div class="fld{% if form.payment_method.errors %} has-error{% endif %}">
+                <span class="lbl">{{ form.payment_method.label }}<span class="req" aria-hidden="true">*</span></span>
+                <div class="seg-cards method-cards" role="radiogroup" aria-label="{{ form.payment_method.label }}" x-data="{ pm: '{{ form.payment_method.value|default:default_method }}' }">
+                  {% for m in methods %}
+                    <label class="seg-card tone-{{ m.tone }}" :class="{ 'is-on': pm === '{{ m.code }}' }">
+                      <input type="radio" name="payment_method" value="{{ m.code }}" class="seg-radio" x-model="pm" data-label="{{ m.name }}" required>
+                      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ m.icon }}"/></svg></span>
+                      <span class="t">{{ m.name }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+                {% for e in form.payment_method.errors %}<div class="err">{{ e }}</div>{% endfor %}
+                {% if not methods %}
+                  <select name="payment_method" disabled aria-describedby="no-methods"><option value="">{% translate "لا طرق دفع نشطة" %}</option></select>
+                  <div class="err" id="no-methods">{% translate "لا طرق دفع نشطة — تُضاف من لوحة الإدارة (نقد، شيك، فيزا) أو بالأمر seed_payment_methods." %}</div>
+                {% endif %}
+              </div>
+            </div>
+
+            {# 3 — البيان والتفاصيل #}
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">3</span>{% translate "البيان" %}</div>
+            <div class="fld{% if form.breakdown_text_ar.errors %} has-error{% endif %}">
+              <label for="id_breakdown_text_ar">{{ form.breakdown_text_ar.label }}</label>
+              <div class="stmt-row">
+                <input type="text" id="id_breakdown_text_ar" name="breakdown_text_ar" maxlength="255" x-ref="stmt" x-model="stmt"
+                       value="{{ form.breakdown_text_ar.value|default:'' }}">
+                <button type="button" class="btn2 ghost" x-cloak x-show="edited() && auto" @click="stmt = auto">{% translate "البيان المقترح" %}</button>
+              </div>
+              <div class="help">{{ form.breakdown_text_ar.help_text }} <span x-cloak x-show="edited() && auto">{% translate "عدّلته بيدك؛ لن يتغيّر مع تغيير التسجيل إلا بالزرّ." %}</span></div>
+              {% for e in form.breakdown_text_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            {% if voucher_required %}
+              {# §5.2 — القبض في الدائرة المالية؛ رقم وصلها شرط الإصدار، فهو خطوة لا تفصيلة مطوية. #}
+              <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">4</span>{% translate "وصل الدائرة المالية" %}</div>
+              <div class="fld{% if form.external_receipt_ref.errors %} has-error{% endif %}">
+                <label for="id_external_receipt_ref">{{ form.external_receipt_ref.label }} <span class="req" aria-hidden="true">*</span></label>
+                <input type="text" id="id_external_receipt_ref" name="external_receipt_ref" maxlength="32" dir="ltr" required autocomplete="off" x-model="ref"
+                       placeholder="{% translate 'الرقم كما هو على الوصل' %}" value="{{ form.external_receipt_ref.value|default:'' }}">
+                <div class="help">{{ form.external_receipt_ref.help_text }}</div>
+                {% for e in form.external_receipt_ref.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+            {% else %}
+              <details class="adv"{% if form.external_receipt_ref.errors %} open{% endif %}>
+                <summary>
+                  {% translate "رقم سند الدائرة المالية" %}: <span class="muted">{% if form.external_receipt_ref.value %}{{ form.external_receipt_ref.value }}{% else %}{% translate "بلا (اختياري)" %}{% endif %}</span>
+                  — <span class="lnk">{% translate "إضافة" %}</span>
+                </summary>
+                <div class="fld{% if form.external_receipt_ref.errors %} has-error{% endif %}">
+                  <label for="id_external_receipt_ref">{{ form.external_receipt_ref.label }}</label>
+                  <input type="text" id="id_external_receipt_ref" name="external_receipt_ref" maxlength="32" dir="ltr" x-model="ref" value="{{ form.external_receipt_ref.value|default:'' }}">
+                  <div class="help">{{ form.external_receipt_ref.help_text }}</div>
+                  {% for e in form.external_receipt_ref.errors %}<div class="err">{{ e }}</div>{% endfor %}
+                </div>
+              </details>
+            {% endif %}
+
+            <div class="form-acts till-acts">
+              <button class="btn2 primary" type="submit" :disabled="!en || !(a() > 0){% if voucher_required %} || !ref.trim(){% endif %}">
+                <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg>
+                {% translate "إصدار سند القبض" %}
+              </button>
+              <span class="muted" x-cloak x-show="en && a() > 0">
+                <b class="num" x-text="fmt(a())"></b> {% translate "د.أ" %} · {{ account.name_ar }} · <span x-text="name"></span>
+              </span>
+              <span class="muted till-date">{% translate "تاريخ السند" %}: <b class="num" dir="ltr">{{ today|date:"Y/m/d" }}</b> ({% translate "يوم الإصدار" %})</span>
+            </div>
+          </form>
+
+          {# تأكيد الإصدار: حوار لا تنبيه متصفح — السند لا يُعدَّل بعد إصداره (BR-025). #}
+          <dialog class="modal confirm-modal" x-ref="confirm" dir="rtl" aria-labelledby="confirm-t" @close="confirmed = false">
+            <div class="modal-head">
+              <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-receipt"/></svg></span>
+              <h2 id="confirm-t">{% translate "إصدار سند القبض؟" %}</h2>
+            </div>
+            <div class="modal-body">
+              <div class="confirm-amt"><b class="num" x-text="fmt(a())"></b> <small>{% translate "د.أ" %}</small></div>
+              <dl class="dl">
+                <dt>{% translate "المشارك" %}</dt><dd>{{ account.name_ar }} <span class="chip num" dir="ltr" translate="no">{{ account.participant_number }}</span></dd>
+                <dt>{% translate "التسجيل" %}</dt><dd x-text="name"></dd>
+                <dt>{% translate "طريقة الدفع" %}</dt><dd x-text="method()"></dd>
+                <dt>{% translate "البيان" %}</dt><dd x-text="stmt || '—'"></dd>
+                <dt>{% translate "التاريخ" %}</dt><dd class="num" dir="ltr">{{ today|date:"Y/m/d" }}</dd>
+                <dt>{% translate "يبقى بعدها" %}</dt><dd class="num" x-text="over() ? '0,000 (+' + fmt(a() - bal) + ' {% translate "رصيد دائن" %})' : fmt(rest())"></dd>
+              </dl>
+              <p class="hint" x-cloak x-show="low()"><b>{% translate "تنبيه" %}:</b> {% translate "المبلغ أقل من الحدّ الأدنى للدفعة الأولى" %} (<span class="num" x-text="fmt(min)"></span>) — {% translate "ارجع وعدّل المبلغ (BR-020)." %}</p>
+              <p class="hint">{% translate "السند لا يُعدَّل بعد إصداره؛ إلغاؤه يحتاج طلباً وسبباً واعتماداً (BR-025)." %}</p>
+            </div>
+            <div class="modal-acts">
+              <button type="button" class="btn2 primary" :disabled="low()" @click="confirmed = true; $refs.confirm.close(); $refs.form.requestSubmit()">
+                <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-checks"/></svg>
+                {% translate "تأكيد الإصدار" %}
+              </button>
+              <button type="button" class="btn2 ghost" @click="$refs.confirm.close()">{% translate "رجوع للتعديل" %}</button>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-side">
+      <div class="card2 next-card tone-ok">
+        <div class="card2-head">
+          <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-wallet"/></svg></span>
+          <h2>{% translate "حساب المشارك" %}</h2>
+        </div>
+        <div class="card2-body">
+          <div class="who-card">
+            <strong>{{ account.name_ar }}</strong>
+            <div class="muted">
+              <span class="chip num" dir="ltr" translate="no">{{ account.participant_number }}</span>
+              {% if account.phone %}<span class="num" dir="ltr">{{ account.phone }}</span>{% endif %}
+              · {{ account.category }}
+            </div>
+          </div>
+          <div class="kpi tone-danger till-kpi">
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-wallet"/></svg></span>
+            <span class="txt">
+              <span class="label">{% translate "الرصيد المستحق" %}</span>
+              <span class="value num" x-text="en ? fmt(bal) : '—'">{% if selected %}{{ selected.balance }}{% else %}—{% endif %}</span>
+              <span class="foot">{% translate "كل المستحقات" %}: <span class="num">{{ account.owing_total }}</span> {% translate "د.أ" %} · {{ rows|length }} {% translate "تسجيل" %}</span>
+            </span>
+          </div>
+          <dl class="dl till-dl" x-cloak x-show="en">
+            <dt>{% translate "المطلوب" %}</dt><dd class="num" x-text="due">{% if selected %}{{ selected.total_due }}{% endif %}</dd>
+            <dt>{% translate "المدفوع" %}</dt><dd class="num" x-text="paid">{% if selected %}{{ selected.total_paid }}{% endif %}</dd>
+            <dt>{% translate "بعد هذه الدفعة" %}</dt><dd class="num" x-text="a() > 0 ? fmt(rest()) : '—'">—</dd>
+            <dt>{% translate "الحالة" %}</dt><dd x-text="status">{% if selected %}{{ selected.status_display }}{% endif %}</dd>
+            <dt>{% translate "تاريخ التسجيل" %}</dt><dd class="num" dir="ltr" x-text="enrolled">{% if selected %}{{ selected.enrolled_on|date:"Y/m/d" }}{% endif %}</dd>
+          </dl>
+          {% if minimum_first_payment is not None %}
+            <p class="hint boxed">
+              {% translate "أقل دفعة أولى للدبلوم" %} <b class="num">{{ minimum_first_payment|floatformat:"-3" }}</b> {% translate "ديناراً" %}{% if minimum_breakdown_holds %} (300 تسجيل + 100 أول مادة){% endif %} — BR-020.
+              <span x-cloak x-show="otext" x-text="otext">{% if selected_program_minimum is not None %}{% translate "ولهذا البرنامج حدّ أدنى خاص للدفعة الأولى" %} {{ selected_program_minimum|floatformat:"-3" }} {% translate "ديناراً يتقدّم على الحدّ العام (Q-15)." %}{% endif %}</span>
+              <span x-show="!otext"{% if selected_program_minimum is not None %} x-cloak{% endif %}>{% translate "القاعدة تخصّ الدبلومات وحدها، ولبعضها حدّ أعلى (Q-15)." %}</span>
+            </p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card2">
+        <div class="card2-head"><h2>{% translate "إجراءات سريعة" %}</h2></div>
+        <div class="card2-body">
+          <div class="quick-acts">
+            <a class="btn2" href="{% url 'cashbox:payments' %}?q={{ account.name_ar|urlencode }}">
+              <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg>
+              {% translate "سندات هذا المشارك" %}
+            </a>
+            {% if can_view_account %}
+              <a class="btn2" x-cloak x-show="url" :href="url" href="{% if selected %}{% url 'operations:account' selected.code %}{% endif %}">
+                <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-wallet"/></svg>
+                {% translate "كشف حساب التسجيل" %}
+              </a>
+            {% endif %}
+            {% if can_view_enrollments %}
+              <a class="btn2" href="{% url 'operations:enrollments' %}?participant={{ account.participant_number }}">
+                <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-list"/></svg>
+                {% translate "تسجيلات المشارك" %}
+              </a>
+            {% endif %}
+            <a class="btn2 ghost" href="{% url 'cashbox:payment-new' %}">
+              <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-users"/></svg>
+              {% translate "مشارك آخر" %}
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

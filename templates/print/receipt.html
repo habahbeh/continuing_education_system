@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% load i18n l10n %}
+{% comment %}
+  سند القبض على الورق: نسختان على صفحة A4 واحدة — الأصل للمشارك ونسخة للصندوق —
+  بينهما خطّ قصّ. كل ما على الورقة من السند نفسه كما صدر: رقمه ومبلغه رقماً
+  (بالنقطة العشرية، فلا يُقرأ «270,000» ألوفاً) وكتابةً، طريقته وسند الدائرة
+  المالية إن وُجد، البيان سطراً والبرنامج والدفعة سطراً ثانياً دائماً، بنوده،
+  وتوقيع أمين الصندوق واسمه تحت السطر. نسخة الصندوق تحمل رقم الإقفال اليومي
+  الذي دخل فيه السند (أو سطراً فارغاً يُملأ باليد). السند الملغى يُطبَع مع
+  علامة «ملغى» وسبب الإلغاء ومن اعتمده ومتى — لا يُخفى شيء (BR-025).
+
+  `?auto=1` (من «طباعة الآن» بعد الإصدار) يفتح حوار الطباعة عند التحميل عبر
+  Alpine؛ لا سكربت داخلي. الترويسة من document_settings كباقي المستندات.
+{% endcomment %}
+{% block title %}{{ receipt.internal_receipt_number }} — {% translate "سند قبض" %}{% endblock %}
+{% block content %}
+<div class="no-print" {% if auto_print %}x-data x-init="$nextTick(() => window.print())"{% endif %}>
+  <div class="action-bar">
+    <button type="button" class="btn2 primary" x-data @click="window.print()">
+      <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc"/></svg>
+      {% translate "طباعة" %}
+    </button>
+    <a class="btn2 ghost" href="{% url 'cashbox:receipt-detail' receipt.internal_receipt_number %}">{% translate "العودة إلى السند" %}</a>
+    <a class="btn2 ghost" href="{% url 'cashbox:payment-new' %}?participant={{ receipt.participant_number }}">{% translate "دفعة أخرى للمشارك" %}</a>
+    <span class="spacer"></span>
+    <span class="muted">{% translate "نسختان على ورقة واحدة: الأصل للمشارك ونسخة الصندوق. التوقيع والختم باليد." %}</span>
+  </div>
+</div>
+
+{% for copy in "12" %}
+<div class="doc rcpt{% if receipt.is_voided %} is-void{% endif %}">
+  {% include "print/_doc_head.html" with chrome=receipt.chrome reference=receipt.internal_receipt_number %}
+  {% if not receipt.chrome.is_verified and receipt.chrome.unverified_note_ar %}
+    <div class="doc-warn">{{ receipt.chrome.unverified_note_ar }}</div>
+  {% endif %}
+
+  <div class="rcpt-title">
+    <h1>{% translate "سند قبض" %} <span class="num" dir="ltr">{{ receipt.internal_receipt_number }}</span></h1>
+    <span class="rcpt-copy">{% if copy == "1" %}{% translate "الأصل — للمشارك" %}{% else %}{% translate "نسخة — للصندوق" %}{% endif %}</span>
+  </div>
+  {% if receipt.is_voided %}<div class="rcpt-void" aria-hidden="true"><span>{% translate "ملغى" %}</span></div>{% endif %}
+
+  <div class="rcpt-grid">
+    <div class="rcpt-amount">
+      <span class="lbl">{% translate "المبلغ" %}</span>
+      <span class="val num" dir="ltr">{{ receipt.amount|unlocalize }}</span>
+      <span class="cur">{% translate "دينار أردني" %}</span>
+    </div>
+    <dl class="doc-grid">
+      <dt>{% translate "التاريخ" %}</dt><dd dir="ltr" class="num">{{ receipt.received_on|date:"Y/m/d" }}</dd>
+      <dt>{% translate "استلمنا من" %}</dt><dd>{{ receipt.participant_name }} <span class="muted">· {% translate "الرقم الجامعي" %}</span> <span dir="ltr" class="num">{{ receipt.participant_number }}</span></dd>
+      <dt>{% translate "مبلغاً وقدره" %}</dt><dd>{{ receipt.amount_words }}</dd>
+      <dt>{% translate "طريقة الدفع" %}</dt><dd>{{ receipt.payment_method }} <span class="muted">· {% translate "سند الدائرة المالية" %}</span> <span dir="ltr" class="num">{% if receipt.external_receipt_ref %}{{ receipt.external_receipt_ref }}{% else %}—{% endif %}</span></dd>
+      <dt>{% translate "البيان" %}</dt><dd>{% if receipt.breakdown_text_ar %}{{ receipt.breakdown_text_ar }}{% else %}—{% endif %}</dd>
+      {% if receipt.enrollment_code %}
+        <dt>{% translate "وذلك عن" %}</dt><dd>{{ receipt.program_name }}{% if receipt.cohort_name %} / {{ receipt.cohort_name }}{% endif %} <span dir="ltr" class="num muted">({{ receipt.enrollment_code }})</span></dd>
+      {% endif %}
+    </dl>
+  </div>
+
+  {% if receipt.allocations %}
+    <table class="doc-tbl rcpt-tbl">
+      <thead><tr><th>{% translate "البند" %}</th><th>{% translate "المبلغ" %}</th></tr></thead>
+      <tbody>
+        {% for a in receipt.allocations %}{% if a.amount > 0 %}
+          <tr><td>{{ a.against }}</td><td class="num" dir="ltr">{{ a.amount|unlocalize }}</td></tr>
+        {% endif %}{% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if receipt.is_voided %}
+    <div class="rcpt-void-note">
+      <strong>{% translate "أُلغي هذا السند" %}</strong> —
+      {% translate "السبب" %}: {{ receipt.void_reason_ar }} ·
+      {% translate "اعتمده" %}: {{ receipt.void_approved_by }}{% if receipt.void_approved_at %} · <span dir="ltr" class="num">{{ receipt.void_approved_at|date:"Y/m/d" }}</span>{% endif %} ·
+      {% translate "قيد عكسي بكامل المبلغ (BR-025)." %}
+    </div>
+  {% endif %}
+
+  <div class="sign-row rcpt-sign">
+    <div class="sign-box"><div class="sign-line"></div>{% translate "أمين الصندوق" %}<span class="who">{{ receipt.cashier }}</span></div>
+    {% if copy == "1" %}
+      <div class="sign-box"><div class="sign-line"></div>{% translate "توقيع المستلم" %}</div>
+    {% else %}
+      <div class="sign-box"><div class="sign-line closing-line">{% if receipt.closing_code %}<span class="num" dir="ltr">{{ receipt.closing_code }}</span>{% endif %}</div>{% translate "رقم الإقفال اليومي" %}</div>
+    {% endif %}
+    <div class="stamp-box"><div class="stamp-ring"></div>{% translate "ختم المركز" %}</div>
+  </div>
+  {% if receipt.chrome.footer_ar %}<div class="doc-note">{{ receipt.chrome.footer_ar }}</div>{% endif %}
+</div>
+{% if copy == "1" %}<div class="rcpt-cut" aria-hidden="true"></div>{% endif %}
+{% endfor %}
+{% endblock %}

@@ -22,11 +22,12 @@ Capability settings reflect the REVISED decisions of 2026-08-14
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from apps.core.models import EffectiveSetting, SettingValueType
 
@@ -87,9 +88,18 @@ SEED: list[tuple[str, Any, str, str]] = [
     ("money_display_dp", 2, I, "Q-04: التخزين DECIMAL(12,3) والعرض بخانتين."),
     (
         "external_receipt_required",
-        False,
+        True,
         B,
-        "Q-03: رقم السند الخارجي اختياري؛ تحويله إلى true يجعله إلزامياً بلا هجرة.",
+        "Q-03 · §5.2: القبض في الدائرة المالية والمركز يسجّل وصلها — فلا يصدر سند "
+        "بلا رقمه. تحويله إلى false يجعله اختيارياً بلا هجرة.",
+    ),
+    (
+        "closing_requires_vouchers",
+        True,
+        B,
+        "§5.2 «إقفال يومي: مطابقة المقبوض بالوصولات»: دفعة اليوم بلا رقم سند من "
+        "الدائرة المالية فرقٌ في الإقفال يحتاج تسوية مكتوبة (BR-027). false يجعلها "
+        "معلومة تُعرض ولا تمنع.",
     ),
     # --- Business thresholds from the demo -------------------------------
     ("diploma_minimum_first_payment", "400.000", D, "BR-020: 300 تسجيل + 100 أول مادة."),
@@ -271,14 +281,19 @@ SEED: list[tuple[str, Any, str, str]] = [
     (
         "participant_qualifications",
         (
-            '[["HIGH_SCHOOL","الثانوية العامة"],["DIPLOMA","دبلوم"],'
+            '[["BELOW_HIGH_SCHOOL","أقل من الثانوية"],'
+            '["HIGH_SCHOOL","الثانوية العامة"],["DIPLOMA","دبلوم"],'
             '["BACHELOR","بكالوريوس"],["HIGHER_DIPLOMA","دبلوم عالٍ"],'
             '["MASTER","ماجستير"],["PHD","دكتوراه"]]'
         ),
         S,
-        "🟠 Q-31 — قائمة مبدئية غير معتمدة. SPEC §6 يذكر «6 مستويات» بلا تعدادها. "
-        "تُخزَّن كإعداد لا كثوابت في الكود، فتصحيحها بعد جواب العميل إدخال بيانات "
-        "لا هجرة. ولا قيد CHECK على الحقل لهذا السبب.",
+        "Q-31 — «أقل من الثانوية» مضافة عن نصّ العميل: requirements.md §2.2 يعدّد "
+        "المؤهلات الستة صراحةً، وكان أوّلها غائباً عن القائمة — فموظف التسجيل لا "
+        "يجد مؤهلاً لمن لم يُكمل الثانوية، وهم شريحة أصيلة في التعليم المستمر، "
+        "فيتركه فارغاً أو يختار خطأً. و«دبلوم عالٍ» لم يعدّه العميل وتبقى: قد "
+        "يحملها سجلٌّ قائم، وحذف خيار ليس تصحيحاً (قواعد التحسين §1). إخفاؤها "
+        "قرار العميل من الإعدادات. تُخزَّن كإعداد لا كثوابت في الكود، فتعديلها "
+        "إدخال بيانات لا هجرة، ولا قيد CHECK على الحقل لهذا السبب.",
     ),
     (
         "participant_cities",
@@ -307,6 +322,12 @@ SEED: list[tuple[str, Any, str, str]] = [
 #: their presence rather than leaving a stale row unnoticed.
 RETIRED_KEYS = ["deposits_enabled", "tax_enabled"]
 
+#: Q-31 reference lists — the only seeded keys whose CONTENT is expected to be
+#: corrected after the client answers, rather than configured once and left.
+#: ``--refresh-lists`` re-issues these against the values above; everything
+#: else stays untouchable, which is what makes this command safe to re-run.
+REFRESHABLE_KEYS = ["participant_qualifications", "participant_cities"]
+
 
 class Command(BaseCommand):
     help = "Seed initial effective-dated settings. Idempotent and non-destructive."
@@ -317,6 +338,16 @@ class Command(BaseCommand):
             type=date.fromisoformat,
             default=date(2026, 1, 1),
             help="Effective-from date for seeded rows (default 2026-01-01).",
+        )
+        parser.add_argument(
+            "--refresh-lists",
+            action="store_true",
+            help=(
+                "أعِد إصدار قوائم Q-31 المرجعية (المؤهلات والمدن) بقيمها أعلاه إن "
+                "اختلفت عمّا في قاعدة البيانات. تُغلق الفترة القائمة وتُفتح فترة "
+                "جديدة من اليوم — لا تُعدَّل صفوف سابقة، فسجلٌّ قديم يبقى مقروءاً "
+                "بالقائمة التي كانت سارية يومه."
+            ),
         )
 
     @transaction.atomic
@@ -342,6 +373,9 @@ class Command(BaseCommand):
             shown = "NULL (غير محدَّدة بعد)" if value is None else value
             self.stdout.write(self.style.SUCCESS(f"  + {key:<40} {shown}"))
 
+        if options["refresh_lists"]:
+            created += self._refresh_lists()
+
         for key in RETIRED_KEYS:
             if EffectiveSetting.objects.filter(key=key).exists():
                 self.stdout.write(
@@ -355,3 +389,45 @@ class Command(BaseCommand):
         self.stdout.write(
             "ملاحظة: default_tax_rate = NULL تعني «غير محدَّدة بعد» لا «لا ضريبة» (Q-25)."
         )
+
+    def _refresh_lists(self) -> int:
+        """
+        Re-issue the Q-31 reference lists as a NEW effective period.
+
+        A seeded setting is skipped when it already exists, and that guarantee
+        is what makes this command safe — but it also meant a corrected list
+        never reached a database that had been seeded once. The qualification
+        list is the case in point: requirements.md §2.2 enumerates six levels
+        and «أقل من الثانوية» was missing from the seeded value, so a clerk had
+        no level to give a participant who had not finished secondary school.
+
+        The correction is issued the way this system issues every setting
+        change — the current period is closed and a new one opened from today,
+        through ``settings_service`` — so a row entered last month is still
+        read against the list that was in force when it was entered.
+        """
+        from apps.core.services.settings_service import close_setting, get_setting, set_setting
+
+        seeded = {key: (value, value_type, note) for key, value, value_type, note in SEED}
+        today = timezone.localdate()
+        issued = 0
+
+        for key in REFRESHABLE_KEYS:
+            value, value_type, note = seeded[key]
+            current = get_setting(key, as_of=today, default=None)
+            if current == value:
+                self.stdout.write(f"  = {key:<40} مطابق — لم يُمسّ")
+                continue
+
+            close_setting(key, effective_to=today - timedelta(days=1))
+            set_setting(
+                key,
+                value,
+                value_type=value_type,
+                effective_from=today,
+                note=note,
+            )
+            issued += 1
+            self.stdout.write(self.style.SUCCESS(f"  ↻ {key:<40} فترة جديدة من {today}"))
+
+        return issued

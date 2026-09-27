@@ -30,6 +30,9 @@ Takes one variable: ``statement``.
     The figure alone misleads: a negative balance is accounting-correct but a
     cashier reads «-30.000» as a debt. The chip names the direction outright.
     {% endcomment %}
+    {% if statement.pending_void_receipt %}
+      <div class="foot"><span class="chip warn dot">{% translate "السند" %} <span class="num" dir="ltr">{{ statement.pending_void_receipt }}</span> {% translate "بطلب إلغاء معلّق — الرصيد قد يتغيّر" %}</span></div>
+    {% endif %}
     {% if statement.state.participant_owes %}
       <div class="foot"><span class="chip danger dot">{% translate "ذمة على المشارك" %}</span></div>
     {% elif statement.state.centre_owes %}

@@ -1,290 +1,549 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n l10n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
   المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094)، بأيديه الأربع
   على صفحة واحدة عمداً: من يقترح ومن يراجع ومن يعتمد ثم الترحيل، جنباً إلى جنب
-  حتى يرى القارئ الفصل الذي وُجدت القاعدة لأجله.
+  حتى يرى القارئ الفصل الذي وُجدت القاعدة لأجله (D-24).
 
-  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس ولا معامل استعلام، ولا
-  عمود بدّل موضعه. النماذج السبعة على الصف هي نفسها خلف الرايات نفسها —
-  `can_review` و`can_decide` و`can_propose` — وكلها تُفحص ثانيةً في
-  `policy.require` عند الإرسال، وشروط الحالة على كلٍّ منها كما كانت.
+  الصفحة عمودان: السجل وبطاقاته على اليمين — والبطاقات هي مرشّح المرحلة (مسودات
+  تنتظر المراجعة / مُراجَعة تنتظر الاعتماد / معتمَدة تنتظر الترحيل / تنتظر
+  الصرف) — ونموذج الاقتراح على اليسار لاصقاً. الاقتراح من الأرشيف يصل بـ
+  `?row=` من صفّ مُربَّط في شاشة الربط فيُعرض الصف المصدر للقراءة (الاسم، الرقم
+  القديم، الرسوم، المقبوض) ويكتب المقترح رقماً يدافع عنه؛ أو من ملف ورقي
+  بالرقم القديم. الرمز تسلسل النظام (OB-… للرصيد، PO-… للصرف).
 
-  أربع كتل `.note` — اثنتان صفراوان فوق الصفحة، وثالثة داخل بطاقة الانتظار،
-  ورابعة زرقاء فوق نموذج الاقتراح — صارت `.hint`. النصوص نفسها حرفاً بحرف:
-  الأصفر للحظة يُرفض فيها شيء، وشرحُ قاعدةٍ ليس رفضاً (قواعد التحسين §6.5).
-  وكتلتان مؤطَّرتان فوق الصفحة كانتا تدفعان الجدول كلّه تحت الطيّة.
-
-  وذيول بطاقات العدّ كانت `.muted`، والنظام يعرّف `.kpi .foot` لهذا الموضع.
-  و«مُرحَّلة إلى الدفتر» صارت `.kpi primary`: هي وحدها الموجودة في الحسابات —
-  وهو ما يقوله ذيلها أصلاً — والنظام يعرّف إبرازاً واحداً لكل شاشة. والأرقام
-  الثمانية كلّها من `totals` كما هي.
-
-  عمود الإجراءات كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
-  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
-  أفقياً. وحقول الصف — وهي إحدى عشرة — كانت صناديق بلا أسماء يقرؤها قارئ
-  الشاشة، فأُعطيت `aria-label` بالصياغة المستقرّة في إقفال الصندوق. ولا حقل
-  تغيّر اسمه ولا صار إلزامياً وليس كذلك.
+  كل فعل على الصف حوارٌ بحقوله المعنونة: المراجعة تختار التسجيل من قائمة مرتّبة
+  بالأشبه ولا تكتبه نصاً؛ الاعتماد يُظهر المقترح والمراجع وملاحظتيهما؛ الترحيل
+  يقول «سيُنشأ بند X على EN-…»؛ الصرف يسأل الطريقة والسند والمستلم والتاريخ؛
+  والعكس سببه ومرجعه. D-24 مطبّق قبل الزر: لا يُعرض على المقترح زر مراجعة ولا
+  على المقترح/المراجع زر اعتماد ولا على المعلِن زر صرف — والخدمة ترفض مرة
+  ثانية. لا تنبيه متصفح.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "أرصدة الأرشيف التاريخي في طريقها إلى الدفتر: من اقترحها ومن راجعها ومن اعتمدها، وما بلغ الترحيل منها فعلاً." %}</p>
   </div>
 </div>
 
-{% guided_help "opening-balances" %}
-
-<div class="kpi-grid">
-  <div class="kpi">
-    <div class="label">{% translate "مسودات" %}</div>
-    <div class="value num">{{ totals.draft }}</div>
-    <div class="foot">{% translate "لا أثر مالي" %}</div>
-  </div>
-  <div class="kpi">
-    <div class="label">{% translate "مُراجَعة" %}</div>
-    <div class="value num">{{ totals.reviewed }}</div>
-    <div class="foot">{% translate "لا أثر مالي" %}</div>
-  </div>
-  <div class="kpi">
-    <div class="label">{% translate "معتمَدة بانتظار الترحيل" %}</div>
-    <div class="value num">{{ totals.approved_not_posted }}</div>
-    <div class="foot">{% translate "إذن بالترحيل لا ترحيل" %}</div>
-  </div>
-  <div class="kpi primary">
-    <div class="label">{% translate "مُرحَّلة إلى الدفتر" %}</div>
-    <div class="value num">{{ totals.posted }}</div>
-    <div class="foot">{% translate "هذه وحدها موجودة في الحسابات" %}</div>
-  </div>
-  <div class="kpi">
-    <div class="label">{% translate "أرصدة دائنة مُرحَّلة لتسجيل لاحق" %}</div>
-    <div class="value num">{{ totals.credit_applied }}</div>
-    <div class="foot">{% translate "تخفض ما على التسجيل — بلا سند قبض" %}</div>
-  </div>
-  <div class="kpi">
-    <div class="label">{% translate "مستحق الردّ نقداً" %}</div>
-    <div class="value num">{{ totals.refund_due }}</div>
-    <div class="foot">{% translate "التزام قائم لم يُصرف بعد" %}</div>
-  </div>
-  <div class="kpi">
-    <div class="label">{% translate "مصروف فعلاً" %}</div>
-    <div class="value num">{{ totals.refunded }}</div>
-    <div class="foot">{% translate "خرج النقد بسند صرف — بلا سند قبض" %}</div>
-  </div>
-  <div class="kpi">
-    <div class="label">{% translate "صرف معكوس" %}</div>
-    <div class="value num">{{ totals.refunds_reversed }}</div>
-    <div class="foot">{% translate "السجل الأصلي محفوظ — والرصيد عاد مستحقاً" %}</div>
-  </div>
+<div class="kpi-grid tiles ob-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+        <span class="foot{% if t.key == 'REFUND_DUE' %} num{% endif %}">{{ t.foot }}{% if t.key == 'REFUND_DUE' %} {% translate "د.أ" %}{% endif %}</span>
+      </span>
+    </a>
+  {% endfor %}
 </div>
 
-<form method="get" class="filterbar" role="search">
-  <div class="fld">
-    <label for="f_status">{% translate "الحالة" %}</label>
-    <select name="status" id="f_status">
-      <option value="">{% translate "كل الحالات" %}</option>
-      {% for code, label in statuses %}<option value="{{ code }}"{% if code == request.GET.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select>
-  </div>
-  <div class="fld">
-    <label for="f_direction">{% translate "الاتجاه" %}</label>
-    <select name="direction" id="f_direction">
-      <option value="">{% translate "كل الاتجاهات" %}</option>
-      {% for code, label in directions %}<option value="{{ code }}"{% if code == request.GET.direction %} selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select>
-  </div>
-  <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
-  <span class="count">{% blocktranslate count n=balances|length %}رصيد واحد{% plural %}{{ n }} أرصدة{% endblocktranslate %}</span>
-</form>
+<div class="dash-cols ob-cols">
+  <div class="dash-main">
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-swap"/></svg></span>
+        <h2>{% translate "الأرصدة الافتتاحية" %}</h2>
+        <div class="acts">
+          <span class="count">{{ balances|length|ar_count:"رصيد واحد|رصيدان|أرصدة|رصيداً" }}</span>
+        </div>
+      </div>
 
-{% if outstanding_refunds %}
-  <div class="card2">
-    <div class="card2-head">
-      <h2>{% translate "أرصدة تنتظر الصرف" %}</h2>
-      <div class="acts">
-        <span class="count">{% blocktranslate count n=outstanding_refunds|length %}رصيد واحد{% plural %}{{ n }} أرصدة{% endblocktranslate %}</span>
+      {# البحث فوري: كل تغيير يعيد رسم الجدول (htmx)؛ وبلا JS يعمل بمفتاح Enter. #}
+      <form method="get" class="filterbar ob-filters" role="search" id="ob-form"
+            hx-get="{% url 'billing:opening-balances' %}" hx-target="#ob-results" hx-select="#ob-results" hx-swap="outerHTML"
+            hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status, change from:#f_direction" hx-push-url="true" hx-indicator="#ob-busy">
+        <div class="fld grow">
+          <label for="f_q">{% translate "بحث" %}</label>
+          <input type="search" name="q" value="{{ query }}" id="f_q" spellcheck="false" placeholder="{% translate 'الرمز، البيان، الرقم الجامعي القديم، رمز التسجيل، اسم المشارك…' %}">
+        </div>
+        <div class="fld">
+          <label for="f_status">{% translate "الحالة" %}</label>
+          <select name="status" id="f_status">
+            <option value="">{% translate "كل الحالات" %}</option>
+            {% for code, label in statuses %}<option value="{{ code }}"{% if code == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="fld">
+          <label for="f_direction">{% translate "الاتجاه" %}</label>
+          <select name="direction" id="f_direction">
+            <option value="">{% translate "الكل" %}</option>
+            {% for code, label in directions %}<option value="{{ code }}"{% if code == direction %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <span class="busy" id="ob-busy" aria-hidden="true"></span>
+        {% if is_filtered %}<a class="btn2 ghost" href="{% url 'billing:opening-balances' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
+      </form>
+
+      <div id="ob-results">
+        <div class="tbl-wrap">
+          <table class="tbl ob-tbl">
+            <thead>
+              <tr>
+                <th>{% translate "الرمز" %}</th>
+                <th>{% translate "البيان" %}</th>
+                <th>{% translate "المشارك / التسجيل" %}</th>
+                <th class="num">{% translate "المبلغ" %}</th>
+                <th>{% translate "الحالة" %}</th>
+                <th aria-label="{% translate 'الإجراء' %}"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in balances %}
+                <tr>
+                  <td class="code-cell">
+                    <strong class="num" dir="ltr" translate="no">{{ b.code }}</strong>
+                    <small class="muted sub-line">{{ b.direction_display }} · <span dir="ltr">{{ b.as_of|date:"Y/m/d" }}</span></small>
+                  </td>
+                  <td class="ob-desc">
+                    {{ b.description_ar }}
+                    <small class="muted sub-line">{% if b.source %}<span dir="ltr" translate="no">{{ b.source }}</span>{% else %}{% translate "ملف ورقي" %}{% endif %}{% if b.legacy_number %} · {% translate "رقم قديم" %} <span dir="ltr" translate="no">{{ b.legacy_number }}</span>{% endif %}</small>
+                  </td>
+                  <td>
+                    {% if b.enrollment_code %}<a class="row-link num" dir="ltr" translate="no" href="{% url 'operations:account' b.enrollment_code %}">{{ b.enrollment_code }}</a>{% else %}<span class="muted">{% translate "بلا تسجيل بعد" %}</span>{% endif %}
+                    {% if b.participant_name %}<small class="muted sub-line">{{ b.participant_name }}</small>{% endif %}
+                  </td>
+                  <td class="num amt">{{ b.amount }}</td>
+                  <td class="ob-state">
+                    <span class="chip {{ b.status|status_tone }} dot">{{ b.status_display }}</span>
+                    <small class="muted sub-line ob-hands">
+                      {% translate "اقترح" %} {{ b.created_by }}{% if b.reviewed_by %} · {% translate "راجع" %} {{ b.reviewed_by }}{% endif %}{% if b.approved_by %} · {% translate "اعتمد" %} {{ b.approved_by }}{% endif %}{% if b.posted_by %} · {% translate "رحّل" %} {{ b.posted_by }}{% endif %}
+                    </small>
+                    {% if b.decision_note_ar %}<small class="muted sub-line">{{ b.decision_note_ar }}</small>{% endif %}
+                    {% if b.resolution_note_ar %}<small class="muted sub-line">{{ b.resolved_by }} — {{ b.resolution_note_ar }}</small>{% endif %}
+                    {% if b.payout_reference %}
+                      <small class="muted sub-line">{% translate "سند صرف" %} <span dir="ltr" translate="no">{{ b.payout_reference }}</span> · <span dir="ltr">{{ b.payout_paid_on|date:"Y/m/d" }}</span> · {{ b.payout_paid_by }}</small>
+                      {% if b.payout_is_reversed %}<span class="chip danger dot">{% translate "معكوس" %}</span> <small class="muted sub-line"><span dir="ltr">{{ b.payout_reversed_on|date:"Y/m/d" }}</span> — {{ b.payout_reversal_reason }}</small>{% endif %}
+                    {% endif %}
+                  </td>
+                  <td class="acts ob-acts">
+                    {# --- 1 · المراجعة (EDIT · غير المقترح) --- #}
+                    {% if b.status == "DRAFT" and can_review %}
+                      {% if b.created_by_id == current_user_id %}
+                        <small class="muted">{% translate "اقترحته أنت؛ يراجعه غيرك (D-24)" %}</small>
+                      {% else %}
+                        <button class="btn2" type="button" @click="document.getElementById('rv-{{ b.code }}').showModal()">{% translate "مراجعة…" %}</button>
+                        <dialog class="modal confirm-modal" id="rv-{{ b.code }}" dir="rtl" aria-labelledby="rv-{{ b.code }}-t"{% if posted_action == "review" and posted_code == b.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                          <form method="post">{% csrf_token %}
+                            <input type="hidden" name="action" value="review">
+                            <input type="hidden" name="code" value="{{ b.code }}">
+                            <div class="modal-head">
+                              <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+                              <h2 id="rv-{{ b.code }}-t">{% translate "مراجعة الرصيد" %} <span class="num" dir="ltr">{{ b.code }}</span></h2>
+                            </div>
+                            <div class="modal-body">
+                              <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{{ b.direction_display }}</small></div>
+                              <dl class="dl">
+                                <dt>{% translate "البيان" %}</dt><dd>{{ b.description_ar }}</dd>
+                                <dt>{% translate "المصدر" %}</dt><dd>{% if b.source %}<span dir="ltr">{{ b.source }}</span>{% else %}{% translate "ملف ورقي" %}{% endif %}{% if b.legacy_number %} · <span dir="ltr">{{ b.legacy_number }}</span>{% endif %}</dd>
+                                <dt>{% translate "اقترحه" %}</dt><dd>{{ b.created_by }} · <span class="num" dir="ltr">{{ b.created_at|date:"Y/m/d" }}</span></dd>
+                              </dl>
+                              <div class="fld">
+                                <label for="rv-{{ b.code }}-en">{% translate "التسجيل الذي يستقرّ عليه الرصيد" %}</label>
+                                <select id="rv-{{ b.code }}-en" name="enrollment_code">
+                                  <option value="">{% translate "— لم يُحدَّد بعد —" %}</option>
+                                  {% for o in b.enrollment_options %}<option value="{{ o.code }}"{% if o.rank == 0 %} class="is-likely"{% endif %}>{% if o.rank == 0 %}★ {% elif o.rank == 1 %}☆ {% endif %}{{ o.label }}</option>{% endfor %}
+                                </select>
+                                <div class="help">{% translate "★ تسجيل المشارك المرتبط · ☆ رقم قديم مشابه. لا يُطابَق شيء آلياً: القرار قرارك، ولا اعتماد بلا تسجيل." %}</div>
+                              </div>
+                              <div class="fld">
+                                <label for="rv-{{ b.code }}-note">{% translate "ملاحظة المراجعة" %}<span class="req" aria-hidden="true">*</span></label>
+                                <input type="text" id="rv-{{ b.code }}-note" name="note_ar" maxlength="255" required placeholder="{% translate 'بماذا قابلتَ الرقم — الصف التاريخي، ملف ورقي، إقرار المشارك؟' %}">
+                              </div>
+                              <p class="hint">{% translate "المراجعة لا تُحرّك شيئاً في الدفتر؛ هي العين الثانية على الرقم ومكانه (D-24)." %}</p>
+                            </div>
+                            <div class="modal-acts">
+                              <button class="btn2 primary" type="submit">{% translate "تسجيل المراجعة" %}</button>
+                              <button class="btn2 ghost" type="button" @click="document.getElementById('rv-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                            </div>
+                          </form>
+                        </dialog>
+                      {% endif %}
+                    {% endif %}
+
+                    {# --- 2 · الاعتماد / الرفض (APPROVE · غير المقترح وغير المراجع) --- #}
+                    {% if b.status == "REVIEWED" and can_decide %}
+                      {% if b.created_by_id == current_user_id or b.reviewed_by_id == current_user_id %}
+                        <small class="muted">{% translate "ثلاثة أشخاص لا اثنان: الاعتماد لغيرك (D-24)" %}</small>
+                      {% else %}
+                        <button class="btn2" type="button" @click="document.getElementById('ap-{{ b.code }}').showModal()">{% translate "اعتماد…" %}</button>
+                        <button class="btn2 ghost danger-ghost" type="button" @click="document.getElementById('rj-{{ b.code }}').showModal()">{% translate "رفض…" %}</button>
+                        <dialog class="modal confirm-modal" id="ap-{{ b.code }}" dir="rtl" aria-labelledby="ap-{{ b.code }}-t">
+                          <form method="post">{% csrf_token %}
+                            <input type="hidden" name="action" value="approve">
+                            <input type="hidden" name="code" value="{{ b.code }}">
+                            <div class="modal-head">
+                              <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+                              <h2 id="ap-{{ b.code }}-t">{% translate "اعتماد الرصيد" %} <span class="num" dir="ltr">{{ b.code }}</span></h2>
+                            </div>
+                            <div class="modal-body">
+                              <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{{ b.direction_display }}</small></div>
+                              <dl class="dl">
+                                <dt>{% translate "البيان" %}</dt><dd>{{ b.description_ar }}</dd>
+                                <dt>{% translate "التسجيل" %}</dt><dd>{% if b.enrollment_code %}<span class="num" dir="ltr">{{ b.enrollment_code }}</span> — {{ b.participant_name }}{% else %}<span class="is-danger">{% translate "لم يُحدَّد — لا اعتماد بلا تسجيل" %}</span>{% endif %}</dd>
+                                <dt>{% translate "اقترحه" %}</dt><dd>{{ b.created_by }} · <span class="num" dir="ltr">{{ b.created_at|date:"Y/m/d" }}</span></dd>
+                                <dt>{% translate "راجعه" %}</dt><dd>{{ b.reviewed_by }} · <span class="num" dir="ltr">{{ b.reviewed_at|date:"Y/m/d" }}</span>{% if b.review_note_ar %} — {{ b.review_note_ar }}{% endif %}</dd>
+                              </dl>
+                              <div class="fld">
+                                <label for="ap-{{ b.code }}-note">{% translate "ملاحظة" %} <span class="muted">({% translate "اختيارية" %})</span></label>
+                                <input type="text" id="ap-{{ b.code }}-note" name="note_ar" maxlength="255">
+                              </div>
+                              <p class="hint">{% translate "الاعتماد إذن بالترحيل لا ترحيل: لا يُكتب بند في الدفتر حتى تضغط «ترحيل» بعده." %}</p>
+                            </div>
+                            <div class="modal-acts">
+                              <button class="btn2 primary" type="submit"{% if not b.enrollment_code %} disabled{% endif %}>{% translate "اعتماد" %}</button>
+                              <button class="btn2 ghost" type="button" @click="document.getElementById('ap-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                            </div>
+                          </form>
+                        </dialog>
+                        <dialog class="modal confirm-modal" id="rj-{{ b.code }}" dir="rtl" aria-labelledby="rj-{{ b.code }}-t"{% if posted_action == "reject" and posted_code == b.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                          <form method="post">{% csrf_token %}
+                            <input type="hidden" name="action" value="reject">
+                            <input type="hidden" name="code" value="{{ b.code }}">
+                            <div class="modal-head">
+                              <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+                              <h2 id="rj-{{ b.code }}-t">{% translate "رفض الرصيد" %} <span class="num" dir="ltr">{{ b.code }}</span></h2>
+                            </div>
+                            <div class="modal-body">
+                              <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{{ b.direction_display }}</small></div>
+                              <div class="fld">
+                                <label for="rj-{{ b.code }}-note">{% translate "سبب الرفض" %}<span class="req" aria-hidden="true">*</span></label>
+                                <textarea id="rj-{{ b.code }}-note" name="note_ar" rows="2" maxlength="255" required></textarea>
+                              </div>
+                              <p class="hint">{% translate "من اقترح الرصيد يحتاج أن يعرف ما العيب؛ يبقى الصف في السجل مرفوضاً." %}</p>
+                            </div>
+                            <div class="modal-acts">
+                              <button class="btn2 primary" type="submit">{% translate "تسجيل الرفض" %}</button>
+                              <button class="btn2 ghost" type="button" @click="document.getElementById('rj-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                            </div>
+                          </form>
+                        </dialog>
+                      {% endif %}
+                    {% endif %}
+
+                    {# --- 3 · الترحيل إلى الدفتر (APPROVE · ذمة معتمَدة) --- #}
+                    {% if b.is_postable and can_decide %}
+                      <button class="btn2 primary" type="button" @click="document.getElementById('po-{{ b.code }}').showModal()">{% translate "ترحيل…" %}</button>
+                      <dialog class="modal confirm-modal" id="po-{{ b.code }}" dir="rtl" aria-labelledby="po-{{ b.code }}-t">
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="post">
+                          <input type="hidden" name="code" value="{{ b.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-swap"/></svg></span>
+                            <h2 id="po-{{ b.code }}-t">{% translate "ترحيل إلى الدفتر" %} <span class="num" dir="ltr">{{ b.code }}</span></h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <p>{% translate "سيُنشأ بند رسم بهذا المبلغ على التسجيل" %} <b class="num" dir="ltr">{{ b.enrollment_code }}</b> — {{ b.participant_name }}{% translate "، ويظهر في كشف حسابه ديناً قائماً يمنع براءة الذمة والشهادة حتى يُسدَّد." %}</p>
+                            <p class="hint">{% translate "هذه الخطوة وحدها تكتب في الدفتر (BR-094)، ولا تُعاد." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "ترحيل إلى الدفتر" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('po-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                    {% endif %}
+
+                    {# --- 4 · مصير الرصيد الدائن (APPROVE) --- #}
+                    {% if b.is_resolvable_credit and can_decide %}
+                      <button class="btn2 primary" type="button" @click="document.getElementById('cf-{{ b.code }}').showModal()">{% translate "تسجيل لاحق…" %}</button>
+                      <button class="btn2" type="button" @click="document.getElementById('rd-{{ b.code }}').showModal()">{% translate "مستحق ردّ…" %}</button>
+                      <dialog class="modal confirm-modal" id="cf-{{ b.code }}" dir="rtl" aria-labelledby="cf-{{ b.code }}-t"{% if posted_action == "carry-forward" and posted_code == b.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="carry-forward">
+                          <input type="hidden" name="code" value="{{ b.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-swap"/></svg></span>
+                            <h2 id="cf-{{ b.code }}-t">{% translate "ترحيل الرصيد الدائن لتسجيل لاحق" %}</h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <div class="fld">
+                              <label for="cf-{{ b.code }}-en">{% translate "التسجيل اللاحق" %}<span class="req" aria-hidden="true">*</span></label>
+                              <select id="cf-{{ b.code }}-en" name="enrollment_code" required>
+                                <option value="">{% translate "— اختر —" %}</option>
+                                {% for o in b.enrollment_options %}<option value="{{ o.code }}">{% if o.rank == 0 %}★ {% elif o.rank == 1 %}☆ {% endif %}{{ o.label }}</option>{% endfor %}
+                              </select>
+                            </div>
+                            <div class="fld">
+                              <label for="cf-{{ b.code }}-note">{% translate "مسوّغ الترحيل" %}<span class="req" aria-hidden="true">*</span></label>
+                              <input type="text" id="cf-{{ b.code }}-note" name="note_ar" maxlength="255" required>
+                            </div>
+                            <p class="hint">{% translate "يخفض ما على التسجيل اللاحق بهذا المبلغ — بلا سند قبض عن مالٍ لم يستلمه النظام." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "ترحيل" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('cf-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                      <dialog class="modal confirm-modal" id="rd-{{ b.code }}" dir="rtl" aria-labelledby="rd-{{ b.code }}-t"{% if posted_action == "refund-due" and posted_code == b.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="refund-due">
+                          <input type="hidden" name="code" value="{{ b.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+                            <h2 id="rd-{{ b.code }}-t">{% translate "إعلان الرصيد مستحقّ الردّ نقداً" %}</h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <div class="fld">
+                              <label for="rd-{{ b.code }}-note">{% translate "المسوّغ" %}<span class="req" aria-hidden="true">*</span></label>
+                              <input type="text" id="rd-{{ b.code }}-note" name="note_ar" maxlength="255" required placeholder="{% translate 'لماذا لا يُرحَّل؟ لا تسجيل لاحق؟' %}">
+                            </div>
+                            <p class="hint">{% translate "الإعلان لا يُخرج نقداً: الصرف على الموظف المالي بسند صرف واسم مستلم، ومن أعلن لا يصرف بنفسه." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "إعلان الاستحقاق" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('rd-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                    {% endif %}
+
+                    {# --- 5 · الصرف نقداً (EDIT · غير المعلِن) --- #}
+                    {% if b.is_refund_payable and can_review %}
+                      {% if b.resolved_by_id == current_user_id %}
+                        <small class="muted">{% translate "أعلنته أنت؛ يصرفه غيرك (D-24)" %}</small>
+                      {% else %}
+                        <button class="btn2 primary" type="button" @click="document.getElementById('py-{{ b.code }}').showModal()">{% translate "صرف…" %}</button>
+                        <dialog class="modal confirm-modal" id="py-{{ b.code }}" dir="rtl" aria-labelledby="py-{{ b.code }}-t"{% if posted_action == "pay-refund" and posted_code == b.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                          <form method="post">{% csrf_token %}
+                            <input type="hidden" name="action" value="pay-refund">
+                            <input type="hidden" name="code" value="{{ b.code }}">
+                            <div class="modal-head">
+                              <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+                              <h2 id="py-{{ b.code }}-t">{% translate "صرف الرصيد نقداً" %} <span class="num" dir="ltr">{{ b.code }}</span></h2>
+                            </div>
+                            <div class="modal-body">
+                              <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                              <dl class="dl">
+                                <dt>{% translate "المستفيد" %}</dt><dd>{{ b.participant_name|default:b.legacy_number }}</dd>
+                                <dt>{% translate "أعلنه" %}</dt><dd>{{ b.resolved_by }}{% if b.resolution_note_ar %} — {{ b.resolution_note_ar }}{% endif %}</dd>
+                              </dl>
+                              <div class="grid2">
+                                <div class="fld">
+                                  <label for="py-{{ b.code }}-m">{% translate "طريقة الصرف" %}<span class="req" aria-hidden="true">*</span></label>
+                                  <select id="py-{{ b.code }}-m" name="payment_method" required>{% for code, label in payment_methods %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select>
+                                </div>
+                                <div class="fld">
+                                  <label for="py-{{ b.code }}-d">{% translate "تاريخ الصرف" %}<span class="req" aria-hidden="true">*</span></label>
+                                  <input type="date" id="py-{{ b.code }}-d" name="paid_on" value="{{ today|date:'Y-m-d' }}" max="{{ today|date:'Y-m-d' }}" required>
+                                </div>
+                                <div class="fld">
+                                  <label for="py-{{ b.code }}-r">{% translate "رقم سند الصرف" %}<span class="req" aria-hidden="true">*</span></label>
+                                  <input type="text" id="py-{{ b.code }}-r" name="external_reference" maxlength="64" dir="ltr" autocomplete="off" required>
+                                </div>
+                                <div class="fld">
+                                  <label for="py-{{ b.code }}-p">{% translate "اسم المستلم" %}<span class="req" aria-hidden="true">*</span></label>
+                                  <input type="text" id="py-{{ b.code }}-p" name="payee_name_ar" maxlength="150" required value="{{ b.participant_name }}">
+                                </div>
+                              </div>
+                              <div class="fld">
+                                <label for="py-{{ b.code }}-n">{% translate "ملاحظة" %} <span class="muted">({% translate "اختيارية" %})</span></label>
+                                <input type="text" id="py-{{ b.code }}-n" name="note_ar" maxlength="255">
+                              </div>
+                              <p class="hint">{% translate "يخرج النقد كاملاً بسند صرف حقيقي — بلا سند قبض. رمز الصرف يصدر آلياً. لا يُقبل تاريخ في المستقبل ولا في فترة مقفلة." %}</p>
+                            </div>
+                            <div class="modal-acts">
+                              <button class="btn2 primary" type="submit">{% translate "صرف نقداً" %}</button>
+                              <button class="btn2 ghost" type="button" @click="document.getElementById('py-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                            </div>
+                          </form>
+                        </dialog>
+                      {% endif %}
+                    {% endif %}
+
+                    {# --- 6 · عكس الصرف (EDIT) --- #}
+                    {% if b.is_reversible and can_review %}
+                      <button class="btn2 ghost danger-ghost" type="button" @click="document.getElementById('rx-{{ b.code }}').showModal()">{% translate "عكس الصرف…" %}</button>
+                      <dialog class="modal confirm-modal" id="rx-{{ b.code }}" dir="rtl" aria-labelledby="rx-{{ b.code }}-t"{% if posted_action == "reverse-refund" and posted_code == b.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="reverse-refund">
+                          <input type="hidden" name="code" value="{{ b.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+                            <h2 id="rx-{{ b.code }}-t">{% translate "عكس صرف السند" %} <span class="num" dir="ltr">{{ b.payout_reference }}</span></h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ b.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <div class="fld">
+                              <label for="rx-{{ b.code }}-s">{% translate "سبب العكس" %}<span class="req" aria-hidden="true">*</span></label>
+                              <textarea id="rx-{{ b.code }}-s" name="reason_ar" rows="2" maxlength="255" required></textarea>
+                            </div>
+                            <div class="grid2">
+                              <div class="fld">
+                                <label for="rx-{{ b.code }}-ref">{% translate "مرجع التصحيح" %}</label>
+                                <input type="text" id="rx-{{ b.code }}-ref" name="reversal_reference" maxlength="64" dir="ltr" autocomplete="off">
+                              </div>
+                              <div class="fld">
+                                <label for="rx-{{ b.code }}-d">{% translate "تاريخ العكس" %}<span class="req" aria-hidden="true">*</span></label>
+                                <input type="date" id="rx-{{ b.code }}-d" name="reversed_on" value="{{ today|date:'Y-m-d' }}" max="{{ today|date:'Y-m-d' }}" required>
+                              </div>
+                            </div>
+                            <p class="hint">{% translate "الصرف يُصحَّح ولا يُمحى: يُضاف قيد بجانب الأصلي ويعود الرصيد مستحقاً للردّ." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "عكس الصرف" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('rx-{{ b.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6" class="empty">
+                  <span class="empty-title">{% if is_filtered %}{% translate "لا أرصدة تطابق التصفية" %}{% else %}{% translate "لا أرصدة افتتاحية" %}{% endif %}</span>
+                  <span class="empty-body">{% if is_filtered %}{% translate "وسّع البحث أو ألغِ التصفية." %}{% else %}{% translate "الرصيد الافتتاحي يُقترح من صفّ في الأرشيف التاريخي، ثم يُراجَع ويُعتمَد ويُرحَّل — والترحيل وحده هو ما ينشئ بند الرسم في الدفتر (BR-094)." %}{% endif %}</span>
+                  {% if is_filtered %}<a class="btn2 ghost empty-act" href="{% url 'billing:opening-balances' %}">{% translate "كل الأرصدة" %}</a>{% endif %}
+                </td></tr>
+              {% endfor %}
+            </tbody>
+            {% if balances %}
+              <tfoot>
+                <tr>
+                  <td colspan="6" class="ob-foot">
+                    <span>{% translate "مُرحَّل إلى الدفتر" %} <b class="num">{{ summary.posted_total }}</b> ({{ summary.posted }})</span>
+                    <span>{% translate "دائن مُرحَّل لتسجيل لاحق" %} <b class="num">{{ summary.applied_total }}</b> ({{ summary.applied }})</span>
+                    <span>{% translate "مصروف نقداً" %} <b class="num">{{ summary.refunded_total }}</b> ({{ summary.refunded }})</span>
+                    <span>{% translate "مرفوض" %} <b class="num">{{ summary.rejected }}</b></span>
+                  </td>
+                </tr>
+              </tfoot>
+            {% endif %}
+          </table>
+        </div>
+      </div>
+      <div class="card2-body">
+        <p class="hint">{% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً. والرصيد الدائن يُرحَّل لتسجيل لاحق إن وُجد، وإلا فهو مستحق الردّ نقداً — وفي الحالتين بلا سند قبض عن مالٍ لم يستلمه النظام. والذمة القديمة غير المسدَّدة تمنع براءة الذمة والشهادة." %}</p>
+        <p class="hint">{% translate "الصرف يُصحَّح ولا يُمحى: عكس الصرف يضيف قيداً بجانب الأصلي ويعيد الرصيد مستحقاً للردّ، ولا يُقبل صرف ولا عكس بتاريخ في فترة مالية مقفلة ولا في المستقبل." %}</p>
       </div>
     </div>
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>{% translate "الرمز" %}</th>
-            <th class="num">{% translate "المبلغ" %}</th>
-            <th>{% translate "المشارك" %}</th>
-            <th>{% translate "أعلنه" %}</th>
-            <th>{% translate "المسوّغ" %}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in outstanding_refunds %}
-            <tr>
-              <td dir="ltr" translate="no"><strong class="num">{{ r.code }}</strong></td>
-              <td class="num">{{ r.amount }}</td>
-              <td>{{ r.participant_name|default:r.legacy_number }}</td>
-              <td>{{ r.declared_by }}</td>
-              <td><small class="muted">{{ r.note_ar }}</small></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="card2-body">
-      <p class="hint">{% translate "أعلن المدير استحقاقها، ولم يخرج النقد بعد. من أعلن الاستحقاق لا يصرفه بنفسه — الصرف على الموظف المالي بسند صرف واسم مستلم." %}</p>
-    </div>
   </div>
-{% endif %}
 
-<div class="card2">
-  <div class="card2-head"><h2>{% translate "الأرصدة الافتتاحية" %}</h2></div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "الرمز" %}</th>
-          <th>{% translate "الاتجاه" %}</th>
-          <th class="num">{% translate "المبلغ" %}</th>
-          <th class="num">{% translate "كما في" %}</th>
-          <th>{% translate "البيان" %}</th>
-          <th>{% translate "المصدر" %}</th>
-          <th>{% translate "التسجيل" %}</th>
-          <th>{% translate "الأيدي" %}</th>
-          <th>{% translate "الحالة" %}</th>
-          <th aria-label="{% translate 'الإجراء' %}"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for b in balances %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ b.code }}</strong></td>
-            <td>{{ b.direction_display }}</td>
-            <td class="num">{{ b.amount }}</td>
-            <td class="num"><span dir="ltr">{{ b.as_of|date:"Y/m/d" }}</span></td>
-            <td>{{ b.description_ar }}</td>
-            <td>
-              {% if b.source %}<small class="muted" dir="ltr" translate="no">{{ b.source }}</small>{% else %}<small class="muted">{% translate "ملف ورقي" %}</small>{% endif %}
-              {% if b.legacy_number %}<br><small class="muted" dir="ltr" translate="no">{{ b.legacy_number }}</small>{% endif %}
-            </td>
-            <td dir="ltr" translate="no">{{ b.enrollment_code|default:"—" }}</td>
-            <td>
-              <small class="muted">
-                {% translate "اقترح" %}: {{ b.created_by }}<br>
-                {% translate "راجع" %}: {{ b.reviewed_by|default:"—" }}<br>
-                {% translate "اعتمد" %}: {{ b.approved_by|default:"—" }}<br>
-                {% translate "رحّل" %}: {{ b.posted_by|default:"—" }}
-              </small>
-            </td>
-            <td>
-              <span class="chip {{ b.status|status_tone }} dot">{{ b.status_display }}</span>
-              {% if b.resolution_note_ar %}<br><small class="muted">{{ b.resolved_by }} · {{ b.resolution_note_ar }}</small>{% endif %}
-              {% if b.decision_note_ar %}<br><small class="muted">{{ b.decision_note_ar }}</small>{% endif %}
-            </td>
-            <td class="acts">
-              {% if can_review and b.status == "DRAFT" %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="review">
-                  <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="enrollment_code" aria-label="{% translate 'رمز التسجيل' %}" placeholder="{% translate 'رمز التسجيل…' %}">
-                  <input name="note_ar" aria-label="{% translate 'ملاحظة المراجعة' %}" placeholder="{% translate 'ملاحظة المراجعة…' %}" required>
-                  <button class="btn2" type="submit">{% translate "مراجعة" %}</button>
-                </form>
-              {% endif %}
-              {% if can_decide and b.status == "REVIEWED" %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="note_ar" aria-label="{% translate 'ملاحظة القرار' %}" placeholder="{% translate 'ملاحظة القرار…' %}">
-                  <button class="btn2 primary" type="submit" name="action" value="approve">{% translate "اعتماد" %}</button>
-                  <button class="btn2" type="submit" name="action" value="reject">{% translate "رفض" %}</button>
-                </form>
-              {% endif %}
-              {% if can_decide and b.is_resolvable_credit %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="enrollment_code" aria-label="{% translate 'تسجيل لاحق' %}" placeholder="{% translate 'تسجيل لاحق…' %}">
-                  <input name="note_ar" aria-label="{% translate 'مسوّغ التسوية' %}" placeholder="{% translate 'مسوّغ التسوية…' %}" required>
-                  <button class="btn2 primary" type="submit" name="action" value="carry-forward">{% translate "ترحيل لتسجيل لاحق" %}</button>
-                  <button class="btn2" type="submit" name="action" value="refund-due">{% translate "مستحق ردّ نقداً" %}</button>
-                </form>
-              {% endif %}
-              {% if can_review and b.is_refund_payable %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="pay-refund">
-                  <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="payout_code" aria-label="{% translate 'رمز الصرف' %}" placeholder="{% translate 'رمز الصرف…' %}" required>
-                  <select name="payment_method" aria-label="{% translate 'طريقة الصرف' %}" required>
-                    {% for code, label in payment_methods %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
-                  </select>
-                  <input name="external_reference" aria-label="{% translate 'رقم سند الصرف' %}" placeholder="{% translate 'رقم سند الصرف…' %}" required>
-                  <input name="payee_name_ar" aria-label="{% translate 'اسم المستلم' %}" placeholder="{% translate 'اسم المستلم…' %}" required>
-                  <label>{% translate "تاريخ الصرف" %}
-                    <input type="date" name="paid_on" value="{{ today }}" required>
-                  </label>
-                  <button class="btn2 primary" type="submit">{% translate "صرف نقداً" %}</button>
-                </form>
-              {% endif %}
-              {% if b.payout_reference %}
-                <small class="muted">{% translate "سند الصرف" %} <span dir="ltr" translate="no">{{ b.payout_reference }}</span>
-                  · <span dir="ltr">{{ b.payout_paid_on|date:"Y/m/d" }}</span> · {{ b.payout_paid_by }}</small>
-                {% if b.payout_is_reversed %}
-                  <br><span class="chip danger dot">{% translate "معكوس" %}</span>
-                  <small class="muted"><span dir="ltr">{{ b.payout_reversed_on|date:"Y/m/d" }}</span> — {{ b.payout_reversal_reason }}</small>
-                {% endif %}
-              {% endif %}
-              {% if can_review and b.is_reversible %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="reverse-refund">
-                  <input type="hidden" name="code" value="{{ b.code }}">
-                  <input name="reason_ar" aria-label="{% translate 'سبب عكس الصرف' %}" placeholder="{% translate 'سبب عكس الصرف…' %}" required>
-                  <input name="reversal_reference" aria-label="{% translate 'مرجع التصحيح' %}" placeholder="{% translate 'مرجع التصحيح…' %}">
-                  <label>{% translate "تاريخ العكس" %}
-                    <input type="date" name="reversed_on" value="{{ today }}" required>
-                  </label>
-                  <button class="btn2" type="submit">{% translate "عكس الصرف" %}</button>
-                </form>
-              {% endif %}
-              {% if can_decide and b.is_postable %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="post">
-                  <input type="hidden" name="code" value="{{ b.code }}">
-                  <button class="btn2 primary" type="submit">{% translate "ترحيل إلى الدفتر" %}</button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="10" class="empty">
-            <span class="empty-title">{% translate "لا أرصدة افتتاحية" %}</span>
-            <span class="empty-body">{% translate "الرصيد الافتتاحي يُقترح من صفّ في الأرشيف التاريخي، ثم يُراجَع ويُعتمَد ويُرحَّل — والترحيل وحده هو ما ينشئ بند الرسم في الدفتر (BR-094)." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card2-body">
-    <p class="hint">{% translate "المعبر الوحيد من الأرشيف التاريخي إلى الدفتر المالي (BR-094). أربعة أيدٍ: من يقترح، ومن يراجع، ومن يعتمد، ثم الترحيل — ولا يجوز أن يجمع شخص واحد دورين. ولا يُنشَأ بند رسم إلا بالترحيل: الاقتراح والمراجعة والاعتماد لا تُحرّك في الدفتر شيئاً. والرصيد الدائن يُرحَّل لتسجيل لاحق إن وُجد، وإلا فهو مستحق الردّ نقداً — وفي الحالتين بلا سند قبض عن مالٍ لم يستلمه النظام. والذمة القديمة غير المسدَّدة تمنع براءة الذمة والشهادة." %}</p>
-    <p class="hint">{% translate "الصرف يُصحَّح ولا يُمحى: عكس الصرف يضيف قيداً بجانب الأصلي ويعيد الرصيد مستحقاً للردّ، ولا يُقبل صرف ولا عكس بتاريخ في فترة مالية مقفلة ولا في المستقبل." %}</p>
+  <div class="dash-side">
+    {% if can_propose %}
+      <div class="card2 next-card tone-violet ob-side" id="propose"
+           x-data="{ dir: '{{ form.direction.value|default:'RECEIVABLE'|escapejs }}', amt: '{{ form.amount.value|default:''|escapejs }}', desc: '{{ form.description_ar.value|default:''|escapejs }}', on: '{{ form.as_of.value|date:'Y-m-d'|default:form.as_of.value|default:''|escapejs }}', legacy: '{{ form.legacy_number.value|default:''|escapejs }}', confirmed: false,
+                     num(v) { return Number(String(v).replace(',', '.')) || 0 },
+                     ready() { return this.dir && this.num(this.amt) > 0 && this.desc.trim() && this.on },
+                     fmt(v) { return Number(v).toFixed(3) } }">
+        <div class="card2-head">
+          <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc"/></svg></span>
+          <h2>{% translate "اقتراح رصيد افتتاحي" %}</h2>
+        </div>
+        <div class="card2-body">
+          <form method="post" id="propose-form" x-ref="form" @submit="if (!confirmed) { $event.preventDefault(); $refs.confirm.showModal() }">
+{% csrf_token %}
+            <input type="hidden" name="action" value="propose">
+            <input type="hidden" name="source_row_id" value="{{ form.source_row_id.value|default:'' }}">
+            {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+
+            <div class="step-lbl"><span class="n">1</span>{% translate "المصدر" %}</div>
+            {% if archive_row %}
+              <div class="ob-source">
+                <span class="lbl">{% translate "من الأرشيف التاريخي" %} · <span dir="ltr" translate="no">{{ archive_row.sheet }} #{{ archive_row.row_number }}</span></span>
+                <b>{{ archive_row.name|default:"—" }}</b> <span class="num" dir="ltr" translate="no">{{ archive_row.legacy_number }}</span>
+                <span class="line">{{ archive_row.program }}</span>
+                <span class="line">{% translate "رسوم" %} <span class="num">{{ archive_row.tuition }}</span> + {% translate "تسجيل" %} <span class="num">{{ archive_row.registration_fee }}</span> · {% translate "مقبوض" %} <span class="num">{{ archive_row.collected }}</span></span>
+                {% if archive_row.note %}<span class="line muted">{{ archive_row.note }}</span>{% endif %}
+                {% if archive_row.already_proposed %}<span class="err">{% translate "لهذا الصف رصيد افتتاحي سلفاً:" %} <span class="num" dir="ltr">{{ archive_row.already_proposed }}</span></span>{% endif %}
+                <a class="row-link" href="{% url 'billing:opening-balances' %}#propose">{% translate "بدلاً من ذلك: من ملف ورقي" %}</a>
+              </div>
+              <div class="help">{% translate "المبلغ يُكتب ولا يُشتق: أعمدة الأرشيف لا تتطابق في معظم صفوفه، فاقرأ الصف وقرّر واكتب رقماً تدافع عنه (D-25)." %}</div>
+            {% else %}
+              <div class="fld{% if form.legacy_number.errors %} has-error{% endif %}">
+                <label for="id_legacy_number">{{ form.legacy_number.label }}</label>
+                <input type="text" id="id_legacy_number" name="legacy_number" maxlength="32" dir="ltr" autocomplete="off" x-model="legacy" value="{{ form.legacy_number.value|default:'' }}">
+                {% for e in form.legacy_number.errors %}<div class="err">{{ e }}</div>{% endfor %}
+                <div class="help">{% translate "من ملف ورقي. وللاقتراح من صفّ في الأرشيف: افتح شاشة الربط واضغط «رصيد افتتاحي» على الصف المُربَّط." %} <a class="row-link" href="{% url 'datamigration:links' %}?show=all">{% translate "شاشة الربط" %}</a></div>
+              </div>
+            {% endif %}
+
+            <div class="step-lbl"><span class="n">2</span>{% translate "الاتجاه والمبلغ" %}</div>
+            <div class="fld{% if form.direction.errors %} has-error{% endif %}">
+              <div class="seg-cards two" role="radiogroup" aria-label="{{ form.direction.label }}">
+                <label class="seg-card tone-danger" :class="{ 'is-on': dir === 'RECEIVABLE' }">
+                  <input type="radio" name="direction" value="RECEIVABLE" class="seg-radio" required x-model="dir">
+                  <span class="t">{% translate "ذمة على المشارك" %}</span>
+                  <span class="c">{% translate "يدين للمركز" %}</span>
+                </label>
+                <label class="seg-card tone-teal" :class="{ 'is-on': dir === 'CREDIT' }">
+                  <input type="radio" name="direction" value="CREDIT" class="seg-radio" required x-model="dir">
+                  <span class="t">{% translate "رصيد دائن له" %}</span>
+                  <span class="c">{% translate "المركز يدين له" %}</span>
+                </label>
+              </div>
+              {% for e in form.direction.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="grid2">
+              <div class="fld{% if form.amount.errors %} has-error{% endif %}">
+                <label for="id_amount">{{ form.amount.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="number" step="0.001" min="0" inputmode="decimal" id="id_amount" name="amount" dir="ltr" required x-model="amt" value="{{ form.amount.value|default:'' }}" placeholder="0.000">
+                {% for e in form.amount.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+              <div class="fld{% if form.as_of.errors %} has-error{% endif %}">
+                <label for="id_as_of">{{ form.as_of.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="date" id="id_as_of" name="as_of" required x-model="on" value="{{ form.as_of.value|date:'Y-m-d'|default:form.as_of.value|default:'' }}">
+                {% for e in form.as_of.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+            </div>
+
+            <div class="step-lbl"><span class="n">3</span>{% translate "البيان" %}</div>
+            <div class="fld{% if form.description_ar.errors %} has-error{% endif %}">
+              <label for="id_description_ar">{{ form.description_ar.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="id_description_ar" name="description_ar" maxlength="255" required x-model="desc" value="{{ form.description_ar.value|default:'' }}" placeholder="{% translate 'مثال: رصيد رسوم دبلوم 2024 غير مسدَّد' %}">
+              {% for e in form.description_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="ob-preview" x-cloak x-show="num(amt) > 0">
+              <span x-show="dir === 'RECEIVABLE'">{% translate "ذمة" %}</span><span x-show="dir === 'CREDIT'">{% translate "رصيد دائن" %}</span> <b class="num" x-text="fmt(num(amt))"></b> — {% translate "مسودة بلا أثر في الدفتر: تُراجَع ثم تُعتمَد ثم تُرحَّل (أربعة أيدٍ)." %}
+            </div>
+
+            <div class="form-acts">
+              <button class="btn2 primary" type="submit"{% if archive_row.already_proposed %} disabled{% else %} :disabled="!ready()"{% endif %}>{% translate "اقتراح" %}</button>
+            </div>
+          </form>
+
+          <dialog class="modal confirm-modal" x-ref="confirm" dir="rtl" aria-labelledby="ob-confirm-t" @close="confirmed = false">
+            <div class="modal-head">
+              <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc"/></svg></span>
+              <h2 id="ob-confirm-t">{% translate "تأكيد اقتراح الرصيد" %}</h2>
+            </div>
+            <div class="modal-body">
+              <div class="confirm-amt"><b class="num" x-text="fmt(num(amt))"></b> <small>{% translate "د.أ" %}</small></div>
+              <dl class="dl">
+                <dt>{% translate "الاتجاه" %}</dt><dd><span x-show="dir === 'RECEIVABLE'">{% translate "ذمة على المشارك" %}</span><span x-show="dir === 'CREDIT'">{% translate "رصيد دائن للمشارك" %}</span></dd>
+                <dt>{% translate "المصدر" %}</dt><dd>{% if archive_row %}{{ archive_row.name }} · <span class="num" dir="ltr">{{ archive_row.legacy_number }}</span>{% else %}{% translate "ملف ورقي" %} <span class="num" dir="ltr" x-text="legacy"></span>{% endif %}</dd>
+                <dt>{% translate "كما في" %}</dt><dd><span class="num" dir="ltr" x-text="on"></span></dd>
+                <dt>{% translate "البيان" %}</dt><dd x-text="desc"></dd>
+              </dl>
+              <p class="hint">{% translate "الاقتراح لا يُنشئ بنداً ولا سنداً؛ يراجعه غيرك ويعتمده ثالث، والترحيل وحده يكتب في الدفتر. الرمز يصدر آلياً." %}</p>
+            </div>
+            <div class="modal-acts">
+              <button class="btn2 primary" type="button" @click="confirmed = true; $refs.confirm.close(); $refs.form.requestSubmit()">{% translate "اقتراح" %}</button>
+              <button class="btn2 ghost" type="button" @click="$refs.confirm.close()">{% translate "رجوع" %}</button>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    {% else %}
+      <div class="card2">
+        <div class="card2-head"><h2>{% translate "اقتراح رصيد افتتاحي" %}</h2></div>
+        <div class="card2-body">
+          <p class="hint">{% translate "الاقتراح والمراجعة والصرف للموظف المالي، والاعتماد والترحيل ومصير الرصيد الدائن لمدير المركز (§3.7/36أ)." %}</p>
+        </div>
+      </div>
+    {% endif %}
   </div>
 </div>
-
-{% if can_propose %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "اقتراح رصيد افتتاحي" %}</h2></div>
-    <div class="card2-body">
-      <p class="hint boxed">{% translate "واحد في كل مرة (D-25). والمبلغ يُكتب ولا يُشتق: مجموع أعمدة المواد لا يطابق رسوم الدورة في معظم صفوف الأرشيف، واشتقاق ذمة منها يحوّل خطأ جدول إلى مطالبة بمال. اقرأ الصف، وقرّر، واكتب رقماً تستطيع الدفاع عنه." %}</p>
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="propose">
-        {% include "partials/_form.html" %}
-        <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "اقتراح" %}</button>
-        </div>
-      </form>
-    </div>
-  </div>
-{% endif %}
 {% endblock %}

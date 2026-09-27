@@ -26,6 +26,7 @@ agreements in the client file.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
@@ -36,6 +37,8 @@ from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.core.exceptions import ImmutableRecordError
+from apps.core.pagination import PAGE_SIZE as _PAGE_SIZE
+from apps.core.pagination import page_of
 from apps.partners.forms import AgreementForm, PartnerForm
 from apps.partners.services import partner_service
 from apps.people.constants import Action, Screen
@@ -49,18 +52,74 @@ def _apply_errors(form: PartnerForm | AgreementForm, exc: DjangoValidationError)
             form.add_error(field if field in form.fields else None, message)
 
 
+#: The register is read fifty rows at a time, the same slice the participants
+#: and payments registers use. A register that draws every partner it holds is
+#: one page that grows without limit and a table nobody can reach the end of.
+#: مُعاد تصديره من `core.pagination` — الاختبارات تستورده من هنا، والقيمة لها بيتٌ واحد.
+PAGE_SIZE = _PAGE_SIZE
+
+
 def partners_view(request: HttpRequest) -> HttpResponse:
+    """
+    The register, searched and filtered.
+
+    ``query`` is trimmed ONCE and the trimmed value is what both the service
+    and the box get back — they used to disagree, so a search typed with a
+    trailing space narrowed by the word and echoed the space.
+
+    ``is_filtered`` is what lets the empty state tell the truth: a register
+    with partners in it and a search that matched none of them is not an
+    empty register, and saying «لا شركاء مسجّلون بعد» to someone who mistyped
+    a code tells them their data is gone.
+    """
+    vocabularies = partner_service.partner_filter_choices()
+    # The chips name the filter in the reader's words, not its stored code —
+    # a register that says «الحالة: FORMER» is not a register. And the same
+    # lookup decides whether the value is a filter AT ALL: a status this
+    # vocabulary does not contain — a stale link, a renamed value — used to
+    # empty the register while both selects still read «الكل» and no chip
+    # explained it, so the screen contradicted its own controls. An unknown
+    # value is not a filter; it is dropped, and the register is whole.
+    status_labels = dict(vocabularies["statuses"])
+    type_labels = dict(vocabularies["types"])
+
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    partner_type = request.GET.get("type", "").strip()
+    status = status if status in status_labels else ""
+    partner_type = partner_type if partner_type in type_labels else ""
+
     rows = partner_service.list_partners(
-        actor=request.user, query=request.GET.get("q", "").strip(), request=request
+        actor=request.user,
+        query=query,
+        status=status,
+        partner_type=partner_type,
+        request=request,
     )
+    page = page_of(rows, request.GET.get("page", ""))
+    params = {k: v for k, v in (("q", query), ("status", status), ("type", partner_type)) if v}
+    labels = {
+        "status": status_labels.get(status, ""),
+        "type": type_labels.get(partner_type, ""),
+    }
+
     return render(
         request,
         "partners/partners.html",
         {
             "title": _("الشركاء المتعاقدون"),
             "active_screen": Screen.PARTNERS,
-            "partners": rows,
-            "query": request.GET.get("q", ""),
+            "partners": page["rows"],
+            "page": page,
+            "query": query,
+            "status": status,
+            "partner_type": partner_type,
+            "statuses": vocabularies["statuses"],
+            "types": vocabularies["types"],
+            "status_label": labels["status"],
+            "type_label": labels["type"],
+            "is_filtered": bool(params),
+            "params_qs": urlencode(params),
             "can_create": policy.is_allowed(request.user, Screen.PARTNERS, Action.CREATE),
         },
     )
@@ -73,16 +132,48 @@ def partner_detail_view(request: HttpRequest, code: str) -> HttpResponse:
     return render(
         request,
         "partners/partner_detail.html",
-        {"title": _("الشريك"), "active_screen": Screen.PARTNERS, "partner": partner},
+        {
+            "title": _("الشريك"),
+            "active_screen": Screen.PARTNERS,
+            "partner": partner,
+            # The editor OPENS on VIEW (§3.5/25 is ``V C E`` for the manager
+            # and ``V`` for the audit account), so the link that reaches it is
+            # offered on VIEW too — the same flag the agreements register
+            # uses for the same link.
+            "can_record_agreement": policy.is_allowed(
+                request.user, Screen.AGREEMENT_NEW, Action.VIEW
+            ),
+        },
     )
 
 
 def agreements_view(request: HttpRequest) -> HttpResponse:
+    """
+    The register of signed agreements, optionally narrowed to one partner.
+
+    ``?partner=`` was always accepted here and no screen ever sent it. The
+    partners register now links its agreement count into this page, so the
+    filter needs to SAY that it is on and offer the way out of it — the name
+    comes off the rows themselves, and off the code alone when the filter
+    matched nothing.
+    """
+    partner_code = request.GET.get("partner", "").strip()
     rows = partner_service.list_agreements(
-        actor=request.user,
-        partner_code=request.GET.get("partner", "").strip(),
-        request=request,
+        actor=request.user, partner_code=partner_code, request=request
     )
+    # The name comes off the rows when there are rows, and off the register
+    # when the filter matched none — «الشريك: PRT-QA-1» is the code, and a
+    # chip that prints a code is the defect the partners register just had.
+    # Asked only of a reader the partners screen would let in, so nobody is
+    # sent into a refusal to render a label (BR-085).
+    partner_name = rows[0]["partner_name"] if partner_code and rows else partner_code
+    if partner_code and not rows and policy.is_allowed(request.user, Screen.PARTNERS, Action.VIEW):
+        partner_name = (
+            partner_service.get_partner(actor=request.user, code=partner_code, request=request).get(
+                "name_ar"
+            )
+            or partner_code
+        )
     return render(
         request,
         "partners/agreements.html",
@@ -90,6 +181,9 @@ def agreements_view(request: HttpRequest) -> HttpResponse:
             "title": _("الاتفاقيات"),
             "active_screen": Screen.AGREEMENTS,
             "agreements": rows,
+            "partner_code": partner_code,
+            "partner_name": partner_name,
+            "is_filtered": bool(partner_code),
             "can_create": policy.is_allowed(request.user, Screen.AGREEMENT_NEW, Action.VIEW),
         },
     )
@@ -163,10 +257,19 @@ def agreement_new_view(request: HttpRequest) -> HttpResponse:
     """
     policy.require(request.user, Screen.AGREEMENT_NEW, Action.VIEW, request=request)
 
+    choices = partner_service.partner_choices(actor=request.user, request=request)
+    # Arrived from a partner's card — the partner is already decided, so the
+    # editor opens on it rather than making the user find the name they just
+    # came from. Only a code the choices actually offer is honoured; an
+    # unknown or a former partner leaves the select where it was.
+    offered = {code for code, _label in choices}
+    asked = request.GET.get("partner", "").strip()
+
     form = AgreementForm(
         request.POST or None,
-        partner_choices=partner_service.partner_choices(actor=request.user, request=request),
+        partner_choices=choices,
         agreement_choices=partner_service.agreement_choices(actor=request.user, request=request),
+        initial={"partner_code": asked} if asked in offered else None,
     )
 
     if request.method == "POST":

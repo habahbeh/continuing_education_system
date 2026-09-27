@@ -375,36 +375,46 @@ LIST_SERVICE_CONTRACT: dict[str, tuple[tuple[str, ...], str, str]] = {
         "enrollment_code is on the row it filters.",
     ),
     "apps.billing.services.discount_service.list_discounts": (
-        ("enrollment_code",),
+        ("enrollment_code", "query", "status"),
         NO_PROJECTION,
-        "enrollment_code is on the row it filters.",
+        "enrollment_code, the searched fields and the approval state are all on the row.",
     ),
     "apps.billing.services.extra_fee_service.list_extra_fees": (
-        ("enrollment_code",),
+        ("enrollment_code", "fee_type", "query"),
         NO_PROJECTION,
-        "enrollment_code is on the row it filters.",
+        "all three match fields that are on the row.",
     ),
     "apps.billing.services.opening_balance_service.list_balances": (
-        ("status", "direction"),
+        ("status", "direction", "query"),
         NO_PROJECTION,
-        "status and direction are both on the row.",
+        "status, direction and the searched fields are all on the row.",
     ),
     "apps.billing.services.refund_service.list_refunds": (
-        ("enrollment_code", "status"),
+        ("enrollment_code", "status", "query"),
         NO_PROJECTION,
-        "both are on the row.",
+        "all three match fields that are on the row.",
     ),
     "apps.cashbox.services.closing_service.list_closings": (
-        ("on_date",),
+        ("on_date", "since", "until"),
         NO_PROJECTION,
         "closing_date is on the row. Whether the cashier should see another "
         "cashier's day is a scope question (footnote 14), not an oracle.",
     ),
     "apps.cashbox.services.payment_service.list_receipts": (
-        ("query", "on_date", "cashier_id"),
+        (
+            "query",
+            "on_date",
+            "cashier_id",
+            "participant_number",
+            "since",
+            "until",
+            "status",
+            "method",
+        ),
         NO_PROJECTION,
-        "received_on and cashier are on the row. cashier_id is not passed by "
-        "any view, but that is not what makes it safe.",
+        "received_on, cashier, participant, status and method are all on the "
+        "row. cashier_id is not passed by any view, but that is not what "
+        "makes it safe.",
     ),
     "apps.catalog.services.catalog_service.list_programs": (
         ("program_type",),
@@ -422,9 +432,9 @@ LIST_SERVICE_CONTRACT: dict[str, tuple[tuple[str, ...], str, str]] = {
         "takes no filter at all, so there is nothing to narrow by.",
     ),
     "apps.expenses.services.expense_service.list_expenses": (
-        ("category", "status", "cohort_code", "date_from", "date_to"),
+        ("category", "status", "cohort_code", "date_from", "date_to", "query"),
         NO_PROJECTION,
-        "category, status and cohort_code are all on the row.",
+        "category, status, cohort_code and the searched fields are all on the row.",
     ),
     "apps.operations.services.certificate_service.list_certificates": (
         ("query",),
@@ -458,9 +468,10 @@ LIST_SERVICE_CONTRACT: dict[str, tuple[tuple[str, ...], str, str]] = {
         "status is on the row.",
     ),
     "apps.partners.services.partner_service.list_partners": (
-        ("query",),
+        ("query", "status", "partner_type"),
         NO_PROJECTION,
-        "search runs over fields the row carries.",
+        "search runs over fields the row carries, and both filters narrow by "
+        "a column the register already prints.",
     ),
     "apps.partners.services.partner_service.list_agreements": (
         ("partner_code",),

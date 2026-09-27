@@ -32,10 +32,10 @@ def signed_in(client):
     return _in
 
 
-def _record(client, *, code: str = "EXP-UI-1", amount: str = "120.000", **extra):
+def _record(client, *, code: str = "", amount: str = "120.000", **extra):
+    """Post one entry; the code is the system's sequence and is never sent."""
     payload = {
         "action": "record",
-        "code": code,
         "category": "MARKETING",
         "amount": amount,
         "incurred_on": TERM_START.isoformat(),
@@ -47,8 +47,16 @@ def _record(client, *, code: str = "EXP-UI-1", amount: str = "120.000", **extra)
     return client.post(reverse(SCREEN), payload, follow=True)
 
 
-def _row(response, code: str) -> dict:
-    return next(e for e in response.context["expenses"] if e["code"] == code)
+def _row(response, code: str = "") -> dict:
+    """The row with the given code — or the newest one when the code was generated."""
+    rows = response.context["expenses"]
+    if code and not code.startswith("EXP-UI"):
+        return next(e for e in rows if e["code"] == code)
+    return rows[0]
+
+
+def _code(response) -> str:
+    return response.context["expenses"][0]["code"]
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +80,9 @@ def test_a_recorded_expense_is_not_yet_in_the_approved_total(signed_in, finance)
     """
     response = _record(signed_in(finance))
 
-    assert response.context["approved_total"] == Decimal("0.000")
-    assert response.context["totals"] == []
+    assert response.context["summary"]["approved_total"] == Decimal("0.000")
+    # The category chips show the approved total per category — nothing yet.
+    assert all(chip["total"] == 0 for chip in response.context["chips"])
     assert _row(response, "EXP-UI-1")["amount"] == Decimal("120.000")
 
 
@@ -86,13 +95,13 @@ def test_the_recorder_is_offered_no_way_to_approve(signed_in, finance) -> None:
     honest as the route behind it.
     """
     client = signed_in(finance)
-    _record(client)
+    recorded = _record(client)
 
     page = client.get(reverse(SCREEN))
     assert page.context["can_create"] is True
     assert page.context["can_approve"] is False
 
-    forced = client.post(reverse(SCREEN), {"action": "approve", "code": "EXP-UI-1"})
+    forced = client.post(reverse(SCREEN), {"action": "approve", "code": _code(recorded)})
     assert forced.status_code == 403
 
 
@@ -108,15 +117,15 @@ def test_the_centre_manager_is_offered_no_way_to_record(signed_in, manager) -> N
 
 
 def test_the_manager_approves_and_the_total_moves(signed_in, finance, manager) -> None:
-    _record(signed_in(finance), code="EXP-UI-2", amount="80.000")
+    recorded = _record(signed_in(finance), amount="80.000")
 
     response = signed_in(manager).post(
         reverse(SCREEN),
-        {"action": "approve", "code": "EXP-UI-2", "note_ar": "مطابق للفاتورة"},
+        {"action": "approve", "code": _code(recorded), "note_ar": "مطابق للفاتورة"},
         follow=True,
     )
 
-    assert response.context["approved_total"] == Decimal("80.000")
+    assert response.context["summary"]["approved_total"] == Decimal("80.000")
     assert _row(response, "EXP-UI-2")["status"] == "APPROVED"
 
 
@@ -128,10 +137,10 @@ def test_a_rejection_needs_a_reason_and_says_so_on_the_page(signed_in, finance, 
     The rule arrives as a message rather than a 403: the manager is entitled
     to reject, they simply have not finished doing it.
     """
-    _record(signed_in(finance), code="EXP-UI-3")
+    recorded = _record(signed_in(finance))
 
     response = signed_in(manager).post(
-        reverse(SCREEN), {"action": "reject", "code": "EXP-UI-3", "note_ar": ""}, follow=True
+        reverse(SCREEN), {"action": "reject", "code": _code(recorded), "note_ar": ""}, follow=True
     )
 
     assert response.status_code == 200
@@ -146,18 +155,18 @@ def test_a_rejected_expense_stays_on_the_record(signed_in, finance, manager) -> 
     The entry and its reason both stay visible, which is what makes the
     decision auditable later.
     """
-    _record(signed_in(finance), code="EXP-UI-4")
+    recorded = _record(signed_in(finance))
 
     response = signed_in(manager).post(
         reverse(SCREEN),
-        {"action": "reject", "code": "EXP-UI-4", "note_ar": "فاتورة غير مرفقة"},
+        {"action": "reject", "code": _code(recorded), "note_ar": "فاتورة غير مرفقة"},
         follow=True,
     )
 
     row = _row(response, "EXP-UI-4")
     assert row["status"] == "REJECTED"
     assert row["decision_note_ar"] == "فاتورة غير مرفقة"
-    assert response.context["approved_total"] == Decimal("0.000")
+    assert response.context["summary"]["approved_total"] == Decimal("0.000")
 
 
 # ---------------------------------------------------------------------------

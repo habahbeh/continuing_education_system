@@ -1,91 +1,157 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n l10n arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  قالب واحد يخدم ثلاث شاشات (§3.3/9–11): الدبلومات والدورات القصيرة
-  والأونلاين صفوف مختلفة في المصفوفة لا أشياء مختلفة، فالعرض واحد
-  و`screen` هو ما يفرّق الصلاحية والعنوان والإرشاد.
+  قالب واحد يخدم ثلاث شاشات (§3.3/9–11): الدبلومات والدورات القصيرة والأونلاين
+  صفوف مختلفة في المصفوفة لا أشياء مختلفة، فالعرض واحد و`screen` هو ما يفرّق
+  الصلاحية والعنوان والإرشاد.
 
-  الشاشة للقراءة: لا خدمة إدخال خلف الكتالوج، والعرض لا يقبل POST. لذلك لا
-  يُرسم زرّ إنشاء ولا تعديل ولا اعتماد — ولو كانت الرايات في السياق. زرٌّ بلا
-  مسار أسوأ من غياب الزرّ.
+  الصف يجيب عن أسئلة القارئ الأولى: كم سعره على قائمة الأسعار السارية (قراءة
+  من القائمة المعتمدة، بمصدرها)، هل له دفعات جارية، وللدبلوم هل تطابق مواده
+  رسومه (BR-006). البطاقات مرشّح الحالة، والبحث فوري، والمجال قائمة.
 
-  ولا سعر هنا ولا حصة شريك. الديمو يعرض في صفحة الأونلاين «حصة الجامعة»
-  و«حصة الشريك» و«قسمة 50/50»: شرطٌ تجاري مع طرف ثالث لا محلّ له في كتالوج،
-  والسعر نفسه يُقرأ من قائمة الأسعار المؤرّخة حيث يخصّه.
-
-  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
-  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
+  المدير — وحده من يملك C في §3.3/9 — يُنشئ برنامجاً من حوار هنا (النوع مثبّت
+  بالشاشة)، ويعدّله ويضيف مواده ويعتمده ويوقفه من صفحة التفاصيل. لا مسار عبر
+  لوحة الإدارة. لا تنبيه متصفح.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{{ subtitle }}</p>
   </div>
+  {% if can_create %}
+    <div class="acts">
+      <button class="btn2 primary" type="button" @click="document.getElementById('program-new').showModal()">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+        {% translate "برنامج جديد" %}
+      </button>
+    </div>
+  {% endif %}
 </div>
 
-{% guided_help screen %}
+<div class="kpi-grid tiles pg-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
 
 <div class="card2">
   <div class="card2-head">
+    <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-cap"/></svg></span>
     <h2>{{ title }}</h2>
     <div class="acts">
-      {% if counts %}
-        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
-        {% for c in counts %}
-          <span class="chip {% if c.active %}ok{% endif %}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
-        {% endfor %}
-      {% endif %}
-      <span class="count">{% blocktranslate count n=programs|length %}برنامج واحد{% plural %}{{ n }} برامج{% endblocktranslate %}</span>
+      <span class="count">{{ programs|length|ar_count:"برنامج واحد|برنامجان|برامج|برنامجاً" }}</span>
     </div>
   </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "الرمز" %}</th>
-          <th>{% translate "الاسم" %}</th>
-          <th>{% translate "المجال" %}</th>
-          <th class="num">{% translate "الساعات" %}</th>
-          <th class="num">{% translate "المستويات" %}</th>
-          <th>{% translate "الحالة" %}</th>
-          <th aria-label="{% translate 'إجراءات' %}"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in programs %}
+
+  {# البحث فوري: كل تغيير يعيد رسم الجدول (htmx)؛ وبلا JS يعمل بمفتاح Enter. #}
+{# `hx-get` فارغاً تعني «العنوان الحالي بمعاملاته»، فيضيف htmx حقول النموذج فوق ما #}
+          {# في العنوان: ?q=ت ثم ?q=ت&q=تص مع كل حرف، فينمو الرابط ويحشو تاريخ المتصفح. #}
+          {# المسار وحده يجعل معاملات النموذج هي الاستعلام كلَّه. #}
+  <form method="get" class="filterbar pg-filters" role="search" id="pg-form"
+        hx-get="{{ request.path }}" hx-target="#pg-results" hx-select="#pg-results" hx-swap="outerHTML"
+        hx-trigger="input changed delay:350ms from:#f_q, change from:#f_category" hx-push-url="true" hx-indicator="#pg-busy">
+    {% if active %}<input type="hidden" name="active" value="{{ active }}">{% endif %}
+    <div class="fld grow">
+      <label for="f_q">{% translate "بحث" %}</label>
+      <input type="search" name="q" value="{{ query }}" id="f_q" spellcheck="false" placeholder="{% translate 'الرمز، الاسم بالعربية أو الإنجليزية، التخصص، المجال…' %}">
+    </div>
+    {% if shows_category %}
+      <div class="fld">
+        <label for="f_category">{% translate "المجال" %}</label>
+        <select name="category" id="f_category">
+          <option value="">{% translate "الكل" %}</option>
+          {% for code, label in categories %}<option value="{{ code }}"{% if category == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+    {% endif %}
+    <span class="busy" id="pg-busy" aria-hidden="true"></span>
+    {% if is_filtered %}<a class="btn2 ghost" href="?">{% translate "إلغاء التصفية" %}</a>{% endif %}
+  </form>
+
+  <div id="pg-results">
+    <div class="tbl-wrap">
+      <table class="tbl pg-tbl">
+        <thead>
           <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ p.code }}</strong></td>
-            <td>{{ p.name_ar }}
-              {% if p.name_en %}<br><small class="muted" dir="ltr">{{ p.name_en }}</small>{% endif %}
-            </td>
-            <td>
-              {% if p.course_category %}<span class="chip">{{ p.course_category.name_ar }}</span>
-              {% else %}<span class="muted">—</span>{% endif %}
-            </td>
-            <td class="num">{{ p.training_hours }}</td>
-            <td class="num">{% if p.is_leveled %}{{ p.levels_count|default:"—" }}{% else %}—{% endif %}</td>
-            <td>
-              {% if p.is_active %}<span class="chip ok dot">{% translate "نشط" %}</span>
-              {% else %}<span class="chip dot">{% translate "غير نشط" %}</span>{% endif %}
-            </td>
-            <td class="acts">
-              <a class="btn2 ghost" href="{% url 'catalog:program-detail' p.code %}">{% translate "عرض التفاصيل" %}</a>
-            </td>
+            <th>{% translate "الرمز" %}</th>
+            <th>{% translate "الاسم" %}</th>
+            <th>{% if shows_category %}{% translate "المجال" %}{% else %}{% translate "المجال المعرفي" %}{% endif %}</th>
+            <th class="num">{% translate "الساعات" %}</th>
+            <th class="num">{% translate "السعر الساري" %}</th>
+            <th class="num">{% translate "الدفعات" %}</th>
+            <th>{% translate "الحالة" %}</th>
           </tr>
-        {% empty %}
-          <tr><td colspan="7" class="empty">
-            <span class="empty-title">{% translate "لا برامج معرَّفة في هذه الفئة بعد" %}</span>
-            <span class="empty-body">{% translate "الكتالوج يُعرَّف خارج هذه الشاشة، وما يظهر هنا هو ما عُرِّف فعلاً. الأسعار تُقرأ من قوائم الأسعار المؤرّخة، والتشغيل يبدأ بدفعة على برنامج معرَّف." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for p in programs %}
+            <tr>
+              <td class="code-cell"><a class="row-link num" dir="ltr" translate="no" href="{% url 'catalog:program-detail' p.code %}">{{ p.code }}</a></td>
+              <td class="pg-name">
+                <a class="row-link" href="{% url 'catalog:program-detail' p.code %}">{{ p.name_ar }}</a>
+                {% if p.name_en %}<small class="muted sub-line" dir="ltr">{{ p.name_en }}</small>{% endif %}
+                {% if is_diploma %}
+                  <small class="sub-line">
+                    {% if p.subject_count %}{{ p.subject_count|ar_count:"مادة واحدة|مادتان|مواد|مادة" }} = <span class="num">{{ p.subject_total }}</span>
+                      {% if p.variance == 0 %}<span class="chip ok">{% translate "مطابق BR-006" %}</span>{% elif p.variance is not None %}<span class="chip danger">{% translate "فرق" %} <span class="num" dir="ltr">{{ p.variance|unlocalize }}</span></span>{% endif %}
+                    {% else %}<span class="muted">{% translate "بلا مواد بعد" %}</span>{% endif %}
+                  </small>
+                {% elif p.is_leveled or p.deposit or p.fee_note %}
+                  <small class="muted sub-line">{% if p.is_leveled %}{{ p.levels_count|ar_count:"مستوى واحد|مستويان|مستويات|مستوى" }}{% if p.levels_priced and p.levels_priced != p.levels_count %} ({{ p.levels_priced }} {% translate "مسعَّرة" %}){% endif %}{% endif %}{% if p.deposit %}{% if p.is_leveled %} · {% endif %}{% translate "عربون" %} <span class="num">{{ p.deposit }}</span>{% endif %}{% if p.fee_note %}{% if p.is_leveled or p.deposit %} · {% endif %}{{ p.fee_note }}{% endif %}</small>
+                {% endif %}
+              </td>
+              <td>{% if shows_category %}{% if p.category %}<a class="chip chip-link" href="?category={{ p.category_code|urlencode }}" title="{% translate 'تصفية بهذا المجال' %}">{{ p.category }}</a>{% else %}<span class="muted">—</span>{% endif %}{% if p.field %}<small class="muted sub-line">{{ p.field }}</small>{% endif %}{% else %}{% if p.field %}{{ p.field }}{% else %}<span class="muted">—</span>{% endif %}{% endif %}</td>
+              <td class="num">{{ p.training_hours }}</td>
+              <td class="num">{% if p.price is not None %}<span class="amt">{{ p.price }}</span><small class="muted sub-line" dir="ltr">{% if p.is_leveled %}{% translate "المستوى 1" %} · {% endif %}{{ p.price_list_code }}</small>{% else %}<span class="chip warn">{% translate "بلا سعر ساري" %}</span>{% endif %}</td>
+              <td class="num">{% if p.cohort_count %}<a class="row-link" href="{% url 'operations:cohorts' %}?q={{ p.code|urlencode }}">{{ p.cohort_count }}</a>{% if p.live_cohorts %}<small class="muted sub-line">{{ p.live_cohorts }} {% translate "جارية" %}</small>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td>{% if p.is_active %}<span class="chip ok dot">{% translate "نشط" %}</span>{% else %}<span class="chip dot">{% translate "غير نشط" %}</span>{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty">
+              <span class="empty-title">{% if is_filtered %}{% translate "لا برامج تطابق التصفية" %}{% else %}{% translate "لا برامج معرَّفة في هذه الفئة بعد" %}{% endif %}</span>
+              <span class="empty-body">{% if is_filtered %}{% translate "وسّع البحث أو ألغِ التصفية." %}{% else %}{% translate "الأسعار تُقرأ من قوائم الأسعار المؤرّخة، والتشغيل يبدأ بدفعة على برنامج معرَّف." %}{% endif %}</span>
+              {% if is_filtered %}<a class="btn2 ghost empty-act" href="?">{% translate "كل البرامج" %}</a>{% elif can_create %}<button class="btn2 primary empty-act" type="button" @click="document.getElementById('program-new').showModal()">{% translate "برنامج جديد" %}</button>{% endif %}
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card2-body">
+    <p class="hint">{% translate "السعر الساري من قائمة الأسعار المعتمدة بتاريخ اليوم (المستوى الأول للبرامج ذات المستويات)؛ التسعير نفسه من شاشة قوائم الأسعار." %}{% if is_diploma %} {% translate "BR-006: مجموع أسعار مواد الدبلوم = رسومه − المستهلكات؛ الفرق يظهر تحت الاسم." %}{% elif is_short_course %} {% translate "المجال شريحة قابلة للنقر للتصفية؛ العربون واستثناءات رسم التسجيل تحت الاسم، وتفصيلها في صفحة الدورة." %}{% elif is_online %} {% translate "الدورة الأونلاين بلا رسوم تسجيل (BR-010)؛ قسمة إيرادها تحكمها اتفاقية الشريك لا الكتالوج." %}{% endif %}</p>
   </div>
 </div>
+
+{% if can_create %}
+  <dialog class="modal confirm-modal pg-modal" id="program-new" dir="rtl" aria-labelledby="program-new-t"{% if form.errors and posted_action == "create" %} x-init="$nextTick(() => $el.showModal())"{% endif %}
+          x-data="{ lv: {% if form.is_leveled.value %}true{% else %}false{% endif %} }">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <div class="modal-head">
+        <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-cap"/></svg></span>
+        <h2 id="program-new-t">{% translate "برنامج جديد" %} — {{ title }}</h2>
+      </div>
+      <div class="modal-body">
+        {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "catalog/_program_fields.html" with form=form %}
+        <p class="hint">{% translate "النوع مثبّت بهذه الشاشة. السعر يُحدَّد لاحقاً على قائمة الأسعار، والمواد (للدبلوم) من صفحة البرنامج." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "إنشاء البرنامج" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('program-new').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
 {% endblock %}

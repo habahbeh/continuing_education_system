@@ -1,131 +1,347 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n l10n status_ui arabic_ui %}
 
 {% block title %}{{ program.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  صفحة قراءة كباقي الكتالوج: لا خدمة إدخال خلفها ولا فرع POST في العرض،
-  فلا يُرسم زرّ تعديل ولو كانت `can_edit` في السياق. زرٌّ بلا مسار أسوأ من
-  غياب الزرّ.
+  بطاقة البرنامج (§2.2) وموادّه (§2.3) ودفعاته، والمطابقة BR-006 بطرفيها:
+  مجموع أسعار المواد من هنا، ورسوم الدورة من قائمة الأسعار السارية — فيُطبع
+  الحكم «مطابق» أو «فرق كذا» لأن الصفحة صارت تملك الطرفين، ويُقال من أين جاء
+  كلٌّ منهما.
 
-  «مجموع أسعار المواد» هو الطرف الأيسر من BR-006 وحده. الطرف الآخر — رسوم
-  الدورة ناقص المستهلكات — يأتي من قائمة الأسعار السارية، وهذه الشاشة لا
-  تقرأها. فيُعرض المجموع ويُقال من أين يأتي ما يُقارَن به، ولا يُطبع حكم
-  «مطابق» أو «فرق» لا تملك الصفحة طرفيه. الديمو يطبع الحكم؛ نحن لا نخمّنه.
-
-  ولا سعر برنامج هنا ولا حصة شريك: الديمو يعرض «حصة الجامعة» و«حصة الشريك»
-  و«قسمة 50/50» في شاشة الأونلاين، وهو شرط تجاري مع طرف ثالث لا محلّ له في
-  كتالوج.
+  المدير (E · A في §3.3/9) يعدّل البطاقة ويضيف المواد ويعدّلها ويحذفها (قبل
+  أن تكون للبرنامج دفعات) ويعتمد البرنامج ويوقفه — كلٌّ في حواره؛ باقي
+  الأدوار تقرأ. لا حصة شريك هنا: شرط تجاري لا محلّ له في كتالوج.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
-    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ program.name_ar }}</h1>
-    <p class="sub">
-      <span dir="ltr" translate="no">{{ program.code }}</span> ·
-      {{ program.get_program_type_display }} —
-      {% translate "بطاقة تعريف البرنامج في الكتالوج. الأسعار تُقرأ من قوائم الأسعار المؤرّخة، ولا تعديل من هذه الشاشة." %}
-    </p>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %} › <a class="row-link" href="{{ list_url }}">{{ list_label }}</a></span>
+    <h1>{% include "partials/_title_icon.html" %}{{ program.name_ar }} <span class="chip">{{ program.get_program_type_display }}</span>{% if program.is_active %}<span class="chip ok dot">{% translate "نشط" %}</span>{% else %}<span class="chip dot">{% translate "غير نشط" %}</span>{% endif %}</h1>
+    <p class="sub"><span class="num" dir="ltr" translate="no">{{ program.code }}</span>{% if program.name_en %} · <span dir="ltr">{{ program.name_en }}</span>{% endif %}</p>
   </div>
   <div class="acts">
-    <a class="btn2 ghost" href="{{ list_url }}">{% blocktranslate %}عودة إلى {{ list_label }}{% endblocktranslate %}</a>
+    {% if can_edit %}
+      <button class="btn2" type="button" @click="document.getElementById('program-edit').showModal()">{% translate "تعديل…" %}</button>
+      <button class="btn2 ghost{% if program.is_active %} danger-ghost{% endif %}" type="button" @click="document.getElementById('program-toggle').showModal()">{% if program.is_active %}{% translate "إيقاف…" %}{% else %}{% translate "تفعيل…" %}{% endif %}</button>
+    {% endif %}
+    {% if can_approve and expects_subjects %}
+      <button class="btn2 primary" type="button" @click="document.getElementById('program-approve').showModal()">{% translate "اعتماد…" %}</button>
+    {% endif %}
   </div>
 </div>
 
-{% guided_help "program-detail" %}
-
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "بيانات البرنامج" %}</h2>
-    <div class="acts">
-      {% if program.is_active %}<span class="chip ok dot">{% translate "نشط" %}</span>
-      {% else %}<span class="chip dot">{% translate "غير نشط" %}</span>{% endif %}
-    </div>
-  </div>
-  <div class="card2-body">
-    <dl class="dl">
-      <dt>{% translate "الرمز" %}</dt>
-      <dd dir="ltr" translate="no"><strong class="num">{{ program.code }}</strong></dd>
-      {% if program.name_en %}
-        <dt>{% translate "الاسم بالإنجليزية" %}</dt>
-        <dd dir="ltr">{{ program.name_en }}</dd>
-      {% endif %}
-      <dt>{% translate "النوع" %}</dt>
-      <dd><span class="chip">{{ program.get_program_type_display }}</span></dd>
-      <dt>{% translate "المجال" %}</dt>
-      <dd>
-        {% if program.course_category %}<span class="chip">{{ program.course_category.name_ar }}</span>
-        {% else %}<span class="muted">—</span>{% endif %}
-      </dd>
-      <dt>{% translate "المجال المعرفي" %}</dt>
-      <dd>{{ program.knowledge_field.name_ar|default:"—" }}</dd>
-      {% if program.specialization %}
-        <dt>{% translate "التخصص" %}</dt>
-        <dd>{{ program.specialization }}</dd>
-      {% endif %}
-      <dt>{% translate "الساعات التدريبية" %}</dt>
-      <dd class="num">{{ program.training_hours }}</dd>
-      <dt>{% translate "المستهلكات لكل مشارك" %}</dt>
-      <dd class="num">{{ program.consumables_per_student }}</dd>
-      <dt>{% translate "المستويات" %}</dt>
-      <dd>
-        {% if program.is_leveled %}<span class="num">{{ program.levels_count|default:"—" }}</span>
-        {% else %}<span class="muted">{% translate "بلا مستويات" %}</span>{% endif %}
-      </dd>
-    </dl>
-  </div>
-</div>
-
-{% if subjects or expects_subjects %}
-  <div class="card2">
-    <div class="card2-head">
-      <h2>{% translate "المواد" %}</h2>
-      {% if subjects %}
-        <div class="acts">
-          <span class="chip">{% blocktranslate count n=subjects|length %}مادة واحدة{% plural %}{{ n }} مواد{% endblocktranslate %}</span>
+<div class="dash-cols pg-cols">
+  <div class="dash-main">
+    {% if expects_subjects %}
+      <div class="card2">
+        <div class="card2-head">
+          <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-book"/></svg></span>
+          <h2>{% translate "المواد" %}</h2>
+          <div class="acts">
+            {% if subjects %}<span class="count">{{ subjects|length|ar_count:"مادة واحدة|مادتان|مواد|مادة" }}</span>{% endif %}
+            {% if can_edit %}<button class="btn2" type="button" @click="document.getElementById('subject-new').showModal()">{% translate "مادة جديدة…" %}</button>{% endif %}
+          </div>
         </div>
+        <div class="tbl-wrap">
+          <table class="tbl pg-subjects">
+            <thead>
+              <tr>
+                <th class="num">#</th><th>{% translate "المادة" %}</th>
+                <th class="num">{% translate "الساعات" %}</th><th class="num">{% translate "السعر" %}</th>
+                {% if can_edit %}<th aria-label="{% translate 'الإجراء' %}"></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in subjects %}
+                <tr>
+                  <td class="num">{{ s.sequence }}</td>
+                  <td>{{ s.name_ar }}</td>
+                  <td class="num">{{ s.training_hours }}</td>
+                  <td class="num amt">{{ s.price }}</td>
+                  {% if can_edit %}
+                    <td class="acts pg-subject-acts">
+                      <button class="btn2 ghost" type="button" @click="document.getElementById('subject-{{ s.pk }}').showModal()">{% translate "تعديل…" %}</button>
+                      {% if not cohorts %}<button class="btn2 ghost danger-ghost" type="button" @click="document.getElementById('subject-rm-{{ s.pk }}').showModal()">{% translate "حذف…" %}</button>{% endif %}
+                      <dialog class="modal confirm-modal" id="subject-{{ s.pk }}" dir="rtl" aria-labelledby="subject-{{ s.pk }}-t"{% if subject_form.errors and posted_action == "update-subject" and posted_subject == s.pk|stringformat:"s" %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="update-subject">
+                          <input type="hidden" name="subject_id" value="{{ s.pk }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-book"/></svg></span>
+                            <h2 id="subject-{{ s.pk }}-t">{% translate "تعديل المادة" %} {{ s.sequence }}</h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="fld"><label for="s{{ s.pk }}-n">{% translate "اسم المادة" %}<span class="req" aria-hidden="true">*</span></label><input type="text" id="s{{ s.pk }}-n" name="name_ar" maxlength="150" required value="{{ s.name_ar }}"></div>
+                            <div class="grid2">
+                              <div class="fld"><label for="s{{ s.pk }}-h">{% translate "الساعات" %}</label><input type="number" min="0" step="1" id="s{{ s.pk }}-h" name="training_hours" dir="ltr" value="{{ s.training_hours }}"></div>
+                              <div class="fld"><label for="s{{ s.pk }}-p">{% translate "السعر" %}</label><input type="number" min="0" step="0.001" inputmode="decimal" id="s{{ s.pk }}-p" name="price" dir="ltr" value="{{ s.price|unlocalize }}"></div>
+                            </div>
+                            <p class="hint">{% translate "سعر صفر مقبول (BR-007). تغيير السعر يغيّر مجموع المواد الذي يزنه BR-006." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "حفظ" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('subject-{{ s.pk }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                      {% if not cohorts %}
+                        <dialog class="modal confirm-modal" id="subject-rm-{{ s.pk }}" dir="rtl" aria-labelledby="subject-rm-{{ s.pk }}-t">
+                          <form method="post">{% csrf_token %}
+                            <input type="hidden" name="action" value="remove-subject">
+                            <input type="hidden" name="subject_id" value="{{ s.pk }}">
+                            <div class="modal-head">
+                              <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+                              <h2 id="subject-rm-{{ s.pk }}-t">{% translate "حذف المادة" %} «{{ s.name_ar }}»</h2>
+                            </div>
+                            <div class="modal-body"><p class="hint">{% translate "يُحذف لأن البرنامج بلا دفعات بعد؛ ومتى وُجدت دفعة لا تُحذف مادة بل يُعدَّل سعرها." %}</p></div>
+                            <div class="modal-acts">
+                              <button class="btn2 primary" type="submit">{% translate "حذف" %}</button>
+                              <button class="btn2 ghost" type="button" @click="document.getElementById('subject-rm-{{ s.pk }}').close()">{% translate "رجوع" %}</button>
+                            </div>
+                          </form>
+                        </dialog>
+                      {% endif %}
+                    </td>
+                  {% endif %}
+                </tr>
+              {% empty %}
+                <tr><td colspan="{% if can_edit %}5{% else %}4{% endif %}" class="empty">
+                  <span class="empty-title">{% translate "لا مواد معرَّفة لهذا الدبلوم بعد" %}</span>
+                  <span class="empty-body">{% translate "الدبلوم يتكوّن من مواد لكلٍّ منها ساعاتها وسعرها، وBR-006 يزن مجموع أسعارها. سعر المادة قد يكون صفراً وهذا مقبول (BR-007)." %}</span>
+                  {% if can_edit %}<button class="btn2 primary empty-act" type="button" @click="document.getElementById('subject-new').showModal()">{% translate "مادة جديدة" %}</button>{% endif %}
+                </td></tr>
+              {% endfor %}
+            </tbody>
+            {% if subjects %}
+              <tfoot>
+                <tr>
+                  <th colspan="3">{% translate "مجموع أسعار المواد" %}</th>
+                  <th class="num">{{ subject_total }}</th>
+                  {% if can_edit %}<th></th>{% endif %}
+                </tr>
+              </tfoot>
+            {% endif %}
+          </table>
+        </div>
+        <div class="card2-body">
+          {# BR-006 بطرفيه: هذه الصفحة تملك المجموع، والقائمة السارية تملك الرسوم. #}
+          <div class="pg-recon{% if reconciliation.ok %} is-ok{% elif reconciliation.ok is False %} is-off{% endif %}">
+            {% if reconciliation.fee is None %}
+              <span class="chip warn">{% translate "بلا سعر ساري" %}</span> {% translate "لا قائمة أسعار معتمدة تُسعّر هذا البرنامج اليوم؛ لا مطابقة ولا اعتماد قبل التسعير (BR-008)." %}
+            {% else %}
+              <span class="num">{{ reconciliation.subject_total }}</span> {% translate "مجموع المواد" %}
+              · {% translate "رسوم القائمة" %} <span class="num">{{ reconciliation.fee }}</span> <small class="muted num" dir="ltr">({{ reconciliation.price_list_code }})</small>
+              − {% translate "مستهلكات" %} <span class="num">{{ reconciliation.consumables }}</span>
+              = <span class="num">{{ reconciliation.expected }}</span>
+              {% if reconciliation.ok %}<span class="chip ok dot">{% translate "مطابق BR-006" %}</span>{% else %}<span class="chip danger dot">{% translate "فرق" %} <span class="num" dir="ltr">{{ reconciliation.variance|unlocalize }}</span></span>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-users"/></svg></span>
+        <h2>{% translate "الدفعات" %}</h2>
+        <div class="acts"><span class="count">{{ cohorts|length|ar_count:"دفعة واحدة|دفعتان|دفعات|دفعة" }}</span> <a class="btn2 ghost" href="{% url 'operations:cohorts' %}?q={{ program.code|urlencode }}">{% translate "كل الدفعات" %}</a></div>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl pg-cohorts">
+          <thead><tr><th>{% translate "الدفعة" %}</th><th class="num">{% translate "تبدأ" %}</th><th class="num">{% translate "المسجَّلون" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+          <tbody>
+            {% for c in cohorts %}
+              <tr>
+                <td><a class="row-link num" dir="ltr" translate="no" href="{% url 'operations:enrollments' %}?cohort={{ c.code }}">{{ c.code }}</a><small class="muted sub-line">{{ c.name_ar }}</small></td>
+                <td class="num"><span dir="ltr">{{ c.starts_on|date:"Y/m/d" }}</span></td>
+                <td class="num">{{ c.enrollment_count }}</td>
+                <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="empty"><span class="empty-title">{% translate "لا دفعات على هذا البرنامج بعد" %}</span><span class="empty-body">{% translate "التشغيل يبدأ بدفعة من شاشة الدفعات المُشغَّلة." %}</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# التسعير الساري كما يقرأه المسجّل قبل التسجيل: كل مستوى مسعَّر بعربونه (BR-096) ورسم التسجيل لكل فئة — استثناء البرنامج (T-096..T-099) أو القاعدة العامة. #}
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-amber" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-tag"/></svg></span>
+        <h2>{% translate "التسعير الساري" %}</h2>
+        <div class="acts">{% if pricing.price_list_code %}<span class="count num" dir="ltr">{{ pricing.price_list_code }}</span>{% endif %} <a class="btn2 ghost" href="{% url 'catalog:pricelists' %}">{% translate "قوائم الأسعار" %}</a></div>
+      </div>
+      {% if pricing.levels %}
+        <div class="pg-pricing">
+          <div class="tbl-wrap">
+            <table class="tbl pg-levels">
+              <thead><tr><th>{% if program.is_leveled %}{% translate "المستوى" %}{% else %}{% translate "البند" %}{% endif %}</th><th class="num">{% translate "الرسوم" %}</th><th class="num">{% translate "العربون" %}</th></tr></thead>
+              <tbody>
+                {% for lv in pricing.levels %}
+                  <tr>
+                    <td>{% if program.is_leveled %}{% translate "المستوى" %} <span class="num">{{ lv.level_key }}</span>{% else %}{% translate "رسوم الدورة" %}{% endif %}</td>
+                    <td class="num amt">{{ lv.course_fee }}</td>
+                    <td class="num">{% if lv.deposit is not None %}{{ lv.deposit }}{% else %}<span class="muted">{% translate "بلا عربون" %}</span>{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if pricing.no_registration_fee %}
+            {# BR-010 بنيوي لا استثناء: الأونلاين لا تحمل رسم تسجيل مهما حملت القائمة. #}
+            <ul class="pg-fees">
+              <li class="is-exc"><span class="chip ok">{% translate "بلا رسوم تسجيل" %}</span> <small class="muted">{% translate "دورة أونلاين — BR-010" %}</small></li>
+            </ul>
+            <p class="hint">{% translate "قسمة إيراد الدورة تحكمها اتفاقية الشريك، لا الكتالوج." %}</p>
+          {% elif pricing.registration_fees %}
+            <ul class="pg-fees">
+              {% for f in pricing.registration_fees %}
+                <li{% if f.is_exception %} class="is-exc"{% endif %}>
+                  <span class="lbl">{{ f.category_display }}</span>
+                  {% if f.fee is None %}<span class="chip{% if f.is_exception %} ok{% endif %}">{% translate "بلا رسم تسجيل" %}</span>{% else %}<span class="num amt">{{ f.fee }}</span>{% endif %}
+                  {% if f.note %}<small class="muted">{{ f.note }}</small>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+            <p class="hint">{% translate "رسم التسجيل بحسب فئة المشارك (BR-009)؛ الصف المميَّز استثناء موثَّق لهذا البرنامج." %}</p>
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="card2-body"><p class="empty-inline">{% if pricing.price_list_code %}{% translate "هذا البرنامج غير مسعَّر على القائمة السارية — يُضاف من شاشة قوائم الأسعار قبل فتح دفعة (BR-008)." %}{% else %}{% translate "لا قائمة أسعار معتمدة سارية اليوم." %}{% endif %}</p></div>
       {% endif %}
     </div>
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th class="num">#</th><th>{% translate "المادة" %}</th>
-            <th class="num">{% translate "الساعات" %}</th><th class="num">{% translate "السعر" %}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in subjects %}
-            <tr>
-              <td class="num">{{ s.sequence }}</td>
-              <td>{{ s.name_ar }}</td>
-              <td class="num">{{ s.training_hours }}</td>
-              <td class="num">{{ s.price }}</td>
-            </tr>
-          {% empty %}
-            <tr><td colspan="4" class="empty">
-              <span class="empty-title">{% translate "لا مواد معرَّفة لهذا الدبلوم بعد" %}</span>
-              <span class="empty-body">{% translate "الدبلوم يتكوّن من مواد لكلٍّ منها ساعاتها وسعرها، وBR-006 يزن مجموع أسعارها. سعر المادة قد يكون صفراً وهذا مقبول (BR-007)." %}</span>
-            </td></tr>
-          {% endfor %}
-        </tbody>
-        {% if subjects %}
-          <tfoot>
-            <tr>
-              <th colspan="3">{% translate "مجموع أسعار المواد" %}</th>
-              <th class="num">{{ subject_total }}</th>
-            </tr>
-          </tfoot>
-        {% endif %}
-      </table>
-    </div>
-    <div class="card2-body">
-      <p class="hint boxed">
-        {% translate "BR-006: مجموع أسعار المواد يجب أن يساوي رسوم الدورة ناقص المستهلكات قبل الاعتماد. رسوم الدورة تأتي من قائمة الأسعار السارية ولا تُقرأ في هذه الشاشة، فالمجموع أعلاه هو طرف المقارنة الذي تملكه هذه الصفحة لا نتيجتها." %}
-      </p>
-    </div>
   </div>
+
+  <div class="dash-side">
+    <div class="card2">
+      <div class="card2-head"><h2>{% translate "بيانات البرنامج" %}</h2></div>
+      <div class="card2-body">
+        <dl class="dl pg-facts">
+          {% if shows_category %}<dt>{% translate "المجال" %}</dt><dd>{% if program.course_category %}<span class="chip">{{ program.course_category.name_ar }}</span>{% else %}<span class="muted">—</span>{% endif %}</dd>{% endif %}
+          <dt>{% translate "المجال المعرفي" %}</dt><dd>{{ program.knowledge_field.name_ar|default:"—" }}</dd>
+          {% if program.specialization %}<dt>{% translate "التخصص" %}</dt><dd>{{ program.specialization }}</dd>{% endif %}
+          <dt>{% translate "الساعات التدريبية" %}</dt><dd class="num">{{ program.training_hours }}</dd>
+          <dt>{% translate "المستويات" %}</dt><dd>{% if program.is_leveled %}<span class="num">{{ program.levels_count|default:"—" }}</span>{% else %}<span class="muted">{% translate "بلا مستويات" %}</span>{% endif %}</dd>
+          <dt>{% translate "المستهلكات لكل مشارك" %}</dt><dd class="num">{{ program.consumables_per_student }}</dd>
+          <dt>{% translate "حد أدنى خاص للدفعة الأولى" %}</dt><dd>{% if program.minimum_first_payment_override is not None %}<span class="num">{{ program.minimum_first_payment_override }}</span>{% else %}<span class="muted">{% translate "الإعداد العام" %}</span>{% endif %}</dd>
+          <dt>{% translate "السعر الساري" %}</dt><dd>{% if reconciliation.fee is not None %}<span class="num amt">{{ reconciliation.fee }}</span> <small class="muted num" dir="ltr">{% if program.is_leveled %}{% translate "المستوى 1" %} · {% endif %}{{ reconciliation.price_list_code }}</small>{% else %}<span class="chip warn">{% translate "بلا سعر ساري" %}</span>{% endif %}</dd>
+        </dl>
+        <p class="hint">{% translate "السعر يُحدَّد من شاشة قوائم الأسعار لا من هنا." %} <a class="row-link" href="{% url 'catalog:pricelists' %}">{% translate "قوائم الأسعار" %}</a></p>
+      </div>
+    </div>
+
+    {% if is_short_course %}
+      {# BR-061 مرئياً: الدورات التي يجوز النقل بينها وبين هذه هي دورات المجال نفسه. #}
+      <div class="card2">
+        <div class="card2-head">
+          <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-swap"/></svg></span>
+          <h2>{% translate "دورات المجال نفسه" %}</h2>
+          {% if can_transfer %}<div class="acts"><a class="btn2 ghost" href="{% url 'operations:transfers' %}">{% translate "النقل بين الدورات" %}</a></div>{% endif %}
+        </div>
+        <div class="card2-body">
+          {% if siblings %}
+            <ul class="pg-siblings">
+              {% for sb in siblings %}<li><a class="row-link" href="{% url 'catalog:program-detail' sb.code %}">{{ sb.name_ar }}</a> <small class="muted num" dir="ltr">{{ sb.code }}</small></li>{% endfor %}
+            </ul>
+            <p class="hint">{% translate "النقل مسموح بين دورتين في المجال نفسه فقط (BR-061)." %}</p>
+          {% else %}
+            <p class="empty-inline">{% if program.course_category %}{% translate "لا دورات نشطة أخرى في هذا المجال — لا نقل ممكن منها أو إليها الآن (BR-061)." %}{% else %}{% translate "بلا مجال — تُصحَّح من «تعديل…» أولاً." %}{% endif %}</p>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if can_edit %}
+  <dialog class="modal confirm-modal pg-modal" id="program-edit" dir="rtl" aria-labelledby="program-edit-t"{% if edit_form.errors and posted_action == "update" %} x-init="$nextTick(() => $el.showModal())"{% endif %}
+          x-data="{ lv: {% if edit_form.is_leveled.value %}true{% else %}false{% endif %} }">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="update">
+      <div class="modal-head">
+        <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-cap"/></svg></span>
+        <h2 id="program-edit-t">{% translate "تعديل البرنامج" %} <span class="num" dir="ltr">{{ program.code }}</span></h2>
+      </div>
+      <div class="modal-body">
+        {% for e in edit_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "catalog/_program_fields.html" with form=edit_form %}
+        <p class="hint">{% translate "الرمز لا يُغيَّر: هو هوية البرنامج في الدفعات وقوائم الأسعار والأرشيف. كل تعديل يُسجَّل في سجل التدقيق." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "حفظ" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('program-edit').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal confirm-modal" id="program-toggle" dir="rtl" aria-labelledby="program-toggle-t">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="toggle-active">
+      <div class="modal-head">
+        <span class="head-ico tone-{% if program.is_active %}danger{% else %}ok{% endif %}" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{% if program.is_active %}user-off{% else %}checks{% endif %}"/></svg></span>
+        <h2 id="program-toggle-t">{% if program.is_active %}{% translate "إيقاف البرنامج" %}{% else %}{% translate "تفعيل البرنامج" %}{% endif %} — {{ program.name_ar }}</h2>
+      </div>
+      <div class="modal-body">
+        <p class="hint">{% if program.is_active %}{% translate "البرنامج الموقوف لا تُفتح عليه دفعات جديدة ولا يظهر للتسجيل؛ دفعاته الجارية — إن وُجدت — تمنع إيقافه حتى تكتمل." %}{% else %}{% translate "يعود البرنامج للظهور وتُفتح عليه الدفعات." %}{% endif %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% if program.is_active %}{% translate "إيقاف" %}{% else %}{% translate "تفعيل" %}{% endif %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('program-toggle').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  {% if expects_subjects %}
+    <dialog class="modal confirm-modal" id="subject-new" dir="rtl" aria-labelledby="subject-new-t"{% if subject_form.errors and posted_action == "add-subject" %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="add-subject">
+        <div class="modal-head">
+          <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-book"/></svg></span>
+          <h2 id="subject-new-t">{% translate "مادة جديدة" %} — {{ program.name_ar }}</h2>
+        </div>
+        <div class="modal-body">
+          <div class="fld{% if subject_form.name_ar.errors %} has-error{% endif %}"><label for="sn-n">{% translate "اسم المادة" %}<span class="req" aria-hidden="true">*</span></label><input type="text" id="sn-n" name="name_ar" maxlength="150" required value="{% if posted_action == 'add-subject' %}{{ subject_form.name_ar.value|default:'' }}{% endif %}">{% for e in subject_form.name_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}</div>
+          <div class="grid2">
+            <div class="fld"><label for="sn-h">{% translate "الساعات" %}</label><input type="number" min="0" step="1" id="sn-h" name="training_hours" dir="ltr" value="0"></div>
+            <div class="fld"><label for="sn-p">{% translate "السعر" %}</label><input type="number" min="0" step="0.001" inputmode="decimal" id="sn-p" name="price" dir="ltr" value="0"></div>
+          </div>
+          <p class="hint">{% translate "تُضاف في آخر التسلسل. سعر صفر مقبول لمواد كاللغة الإنجليزية والتدريب العملي (BR-007)." %}</p>
+        </div>
+        <div class="modal-acts">
+          <button class="btn2 primary" type="submit">{% translate "إضافة" %}</button>
+          <button class="btn2 ghost" type="button" @click="document.getElementById('subject-new').close()">{% translate "رجوع" %}</button>
+        </div>
+      </form>
+    </dialog>
+  {% endif %}
+{% endif %}
+
+{% if can_approve and expects_subjects %}
+  <dialog class="modal confirm-modal" id="program-approve" dir="rtl" aria-labelledby="program-approve-t">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="approve">
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+        <h2 id="program-approve-t">{% translate "اعتماد البرنامج" %} — {{ program.name_ar }}</h2>
+      </div>
+      <div class="modal-body">
+        {% if reconciliation.fee is None %}
+          <div class="err">{% translate "لا سعر سارياً — يُسعَّر على قائمة معتمدة أولاً (BR-008)." %}</div>
+        {% elif reconciliation.ok %}
+          <p>{% translate "مجموع المواد" %} <b class="num">{{ reconciliation.subject_total }}</b> = {% translate "رسوم القائمة" %} <b class="num">{{ reconciliation.fee }}</b> − {% translate "مستهلكات" %} <b class="num">{{ reconciliation.consumables }}</b> <span class="chip ok">{% translate "مطابق" %}</span></p>
+        {% else %}
+          <div class="err">{% translate "الفرق" %} <span class="num" dir="ltr">{{ reconciliation.variance|unlocalize }}</span> — {% translate "سيرفضه الاعتماد (BR-006). عدّل أسعار المواد أو سعر القائمة أولاً." %}</div>
+        {% endif %}
+        <p class="hint">{% translate "الاعتماد يثبّت أن مواد الدبلوم تساوي رسومه ويفعّل البرنامج؛ يُسجَّل باسمك." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit"{% if not reconciliation.ok %} disabled{% endif %}>{% translate "اعتماد" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('program-approve').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
 {% endif %}
 {% endblock %}

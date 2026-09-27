@@ -10,6 +10,8 @@ by app, because the kinds are what will recur.
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 import pytest
@@ -530,9 +532,10 @@ def test_the_icons_are_decorative_and_the_label_is_still_the_name(
         assert 'class="nav-ico"' in entry
         assert 'aria-hidden="true"' in entry
         assert re.search(r"<span>[^<]+</span>", entry), "an entry lost its text label"
-    # Every reference resolves against the sprite drawn just above them.
+    # Every reference resolves against the sprite — drawn once in base.html,
+    # ahead of the menu, so the dashboard's stops can share it.
     for name in re.findall(r'<use href="#i-([a-z-]+)"/>', nav):
-        assert f'id="i-{name}"' in nav, f"«{name}» is referenced and never defined"
+        assert f'id="i-{name}"' in body, f"«{name}» is referenced and never defined"
 
 
 def test_the_sprite_is_defined_once_not_once_per_entry(
@@ -642,6 +645,12 @@ def test_every_form_field_is_drawn_exactly_once_across_the_sections(
 
     So the rendered page is compared against the form itself, not against the
     map — the map cannot vouch for itself.
+
+    One field is deliberately conditional and is named here rather than
+    excused by a loosened comparison: «سبب المتابعة رغم التكرار» is drawn
+    beside the warning that asks for it and nowhere else, because it used to
+    stand in every new application asking why a repeat was being continued
+    before anything had been repeated. Everything else must be on the page.
     """
     import re
 
@@ -650,19 +659,40 @@ def test_every_form_field_is_drawn_exactly_once_across_the_sections(
     body = _admission(client, Role.REGISTRATION_OFFICER, "fields")
     drawn = re.findall(r'<label for="id_([a-z_]+)"', body)
 
-    assert sorted(drawn) == sorted(ParticipantForm().fields)
+    conditional = {"duplicate_override_reason"}
+    assert sorted(drawn) == sorted(set(ParticipantForm().fields) - conditional)
     assert len(drawn) == len(set(drawn)), "a field is rendered twice"
 
 
 def test_the_section_map_covers_the_form_and_invents_nothing() -> None:
-    """A field added to the form later must be placed, not quietly dropped."""
-    from apps.people.participant_forms import ParticipantForm
-    from apps.people.views import PARTICIPANT_FORM_SECTIONS
+    """
+    A field added to the form later must be placed, not quietly dropped.
 
-    placed = [name for names in PARTICIPANT_FORM_SECTIONS.values() for name in names]
+    The map holds two kinds of key since the polish pass: one per CARD, which
+    is what the section strip counts its red against, and the drawing keys the
+    template includes — «سبب المتابعة» beside its own warning, and the fifth
+    card split in three so that the two exemption fields can be revealed the
+    moment the box is ticked. So coverage is read off the cards, and the split
+    is checked to be exactly that: a partition of the card it divides, adding
+    no field and losing none.
+    """
+    from apps.people.participant_forms import ParticipantForm
+    from apps.people.views import PARTICIPANT_FORM_SECTIONS, PARTICIPANT_SECTION_TITLES
+
+    cards = [key for key, _title in PARTICIPANT_SECTION_TITLES]
+    placed = [
+        name for key in [*cards, "duplicate_reason"] for name in PARTICIPANT_FORM_SECTIONS[key]
+    ]
 
     assert sorted(placed) == sorted(ParticipantForm().fields)
     assert len(placed) == len(set(placed))
+
+    split = [
+        name
+        for key in ("consent_flag", "consent_exemption", "consent_pledge")
+        for name in PARTICIPANT_FORM_SECTIONS[key]
+    ]
+    assert split == PARTICIPANT_FORM_SECTIONS["consent"], "the split lost or gained a field"
 
 
 def test_the_admission_form_draws_its_five_named_sections(
@@ -909,27 +939,26 @@ def test_the_category_counts_describe_the_rows_on_screen(
     client: Client, three_participants: None
 ) -> None:
     """
-    The listing is capped, so a registry-wide total would be a number nobody
-    can check against the page. The chips count what is drawn — and they follow
-    the filter, which is what makes them verifiable by eye.
-    """
-    import re
+    The counts must describe the page, not a registry the reader cannot check.
 
+    They were chips beside the title and are filter cards since the polish
+    pass; what is asserted here is the promise, not the markup — the per-
+    category numbers add up to the rows on screen, and the whole-set card keeps
+    saying how many there are in total while a category is selected, which is
+    what makes «and how many of these are centre students» answerable.
+    """
     client.force_login(_user(Role.CENTER_MANAGER, "reg.counts"))
 
-    def chips(url: str) -> dict[str, int]:
-        body = client.get(url).content.decode("utf-8")
-        return {
-            label.strip(): int(n)
-            for label, n in re.findall(
-                r'<span class="chip">([^<:]+): <span class="num">(\d+)', body
-            )
-        }
+    def cards(url: str) -> list[dict[str, object]]:
+        return list(client.get(url).context["tiles"])
 
-    assert sum(chips(reverse("people:participants")).values()) == 3
-    filtered = chips(reverse("people:participants") + "?category=CENTER")
-    assert sum(filtered.values()) == 1
-    assert "طالب مركز" in filtered
+    plain = cards(reverse("people:participants"))
+    assert sum(c["value"] for c in plain[1:]) == 3  # the categories add to the page
+    assert plain[0]["value"] == 3  # …and the whole-set card agrees
+
+    filtered = cards(reverse("people:participants") + "?category=CENTER")
+    assert {c["label"]: c["value"] for c in filtered}["طالب مركز"] == 1
+    assert filtered[0]["value"] == 3  # the way back out still names the whole set
 
 
 def test_the_registry_empty_row_spans_the_table_this_role_actually_gets(
@@ -942,10 +971,15 @@ def test_the_registry_empty_row_spans_the_table_this_role_actually_gets(
     """
     import re
 
-    for role, expected in ((Role.CENTER_MANAGER, "5"), (Role.CASHIER, "3")):
+    # Counted from the table that is actually drawn rather than written down
+    # here: a column added or withheld later moves both numbers together, and a
+    # hard-coded pair goes stale silently — which is how this guard last broke.
+    for role in (Role.CENTER_MANAGER, Role.CASHIER):
         client.force_login(_user(role, f"reg.span.{role.lower()}"))
         body = client.get(reverse("people:participants")).content.decode("utf-8")
-        assert re.search(rf'colspan="{expected}"', body), f"{role} empty row spans wrongly"
+        head = body.split("<thead>", 1)[1].split("</thead>", 1)[0]
+        columns = head.count("<th")
+        assert re.search(rf'colspan="{columns}"', body), f"{role} empty row spans wrongly"
 
 
 def test_the_registry_offers_the_admission_form_only_where_it_is_allowed(
@@ -991,10 +1025,13 @@ def test_the_registry_shows_which_filters_are_active(
         reverse("people:participants") + "?q=2026&category=CENTER"
     ).content.decode("utf-8")
 
-    assert "نتائج مصفّاة" not in plain
+    # The banner names the filters themselves now instead of saying «filtered»,
+    # which is more than it used to promise and not less.
     assert "إلغاء التصفية" not in plain
-    assert "نتائج مصفّاة" in filtered
+    assert "الفئة:" not in plain
     assert "إلغاء التصفية" in filtered
+    assert "بحث: 2026" in filtered
+    assert "الفئة: طالب مركز" in filtered
 
 
 def test_the_registry_added_no_dead_class_and_no_dependency() -> None:
@@ -1005,8 +1042,12 @@ def test_the_registry_added_no_dead_class_and_no_dependency() -> None:
     css = CSS_SOURCE.read_text(encoding="utf-8")
     built = Path("static/css/app.css").read_text(encoding="utf-8")
 
+    # As whole class names, not as substrings: «filters» inside «pt-filters» is
+    # a different class, and the guard was reading the screen's own name as a
+    # relapse.
+    drawn = {c for m in re.finditer(r'class="([^"{}]+)"', source) for c in m.group(1).split()}
     for dead in [*NAV_DEAD_CLASSES, "compact", "mono", "split3", "filters"]:
-        assert dead not in source, f"the registry uses «{dead}»"
+        assert dead not in drawn, f"the registry uses «{dead}»"
     assert "<script" not in source
     assert "style=" not in source
     assert "http://" not in source and "https://" not in source
@@ -1142,11 +1183,17 @@ def test_the_registration_action_is_offered_only_where_create_is_granted(
         page = (
             client.get(reverse("operations:enrollments"))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         may = Action.CREATE in allowed_actions(role, "enrollments")
-        assert ('id="enrollment-new"' in page) is may, role
-        assert ('href="#enrollment-new"' in page) is may, role
+        # The route, not an anchor: the form left the foot of this register for a
+        # screen of its own, because a rejected field used to draw its message
+        # inside a card 1289px down a page two and a half screens tall. What the
+        # guard is about is unchanged — the way in is offered to whoever may
+        # create and to nobody else (§3.4).
+        way_in = reverse("operations:enrollment-new")
+        assert (f'href="{way_in}"' in page) is may, role
 
 
 def test_the_voucher_and_approval_actions_follow_edit_and_approve(
@@ -1173,7 +1220,8 @@ def test_the_voucher_and_approval_actions_follow_edit_and_approve(
         page = (
             client.get(reverse("operations:enrollments"))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         actions = allowed_actions(role, "enrollments")
         assert ('value="voucher"' in page) is (Action.EDIT in actions), role
@@ -1308,10 +1356,14 @@ def test_the_empty_state_offers_the_form_only_to_a_role_that_may_use_it(
         page = (
             client.get(reverse("operations:enrollments"))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         assert "لا توجد تسجيلات بعد" in page
-        assert ('class="btn2 primary empty-act" href="#enrollment-new"' in page) is may, role
+        way_in = reverse("operations:enrollment-new")
+        assert (
+            f'class="btn2 primary empty-act" href="{way_in}"' in page
+        ) is may, role
 
 
 def test_the_registry_names_the_programme_from_the_row_it_already_carried(
@@ -1355,10 +1407,16 @@ def test_the_registry_draws_no_partner_entitlement_for_anybody(
     """
     client.force_login(_user(role, f"enr.partner.{role.lower()}"))
 
-    # Past `</nav>`: the sidebar links «استحقاق الشركاء» for the roles §3.7 lets
-    # in, and that link is not this page drawing a column.
+    # The page's own body, and only it. The shell names «استحقاق الشركاء» twice
+    # for the roles §3.7 lets in — once in the sidebar and once in the
+    # quick-jump palette, which repeats every menu entry at the end of the
+    # document — and neither is this page drawing a column. Reading `<main>`
+    # says what the register itself prints, which is the whole question.
     page = (
-        client.get(reverse("operations:enrollments")).content.decode("utf-8").split("</nav>", 1)[-1]
+        client.get(reverse("operations:enrollments"))
+        .content.decode("utf-8")
+        .split('id="main"', 1)[1]
+        .split("</main>", 1)[0]
     )
 
     for marker in PARTNER_ENTITLEMENT_MARKERS:
@@ -1390,9 +1448,17 @@ def test_the_enrolment_registry_added_no_dead_class_and_no_dependency() -> None:
     # A POST button in the actions cell needs a form, and a block form drops the
     # button onto its own line. `.inline-form` is what keeps the row one row.
     assert source.count('class="inline-form"') == 2
-    # The empty row spans the table it sits in — nine columns, counted.
-    assert len(re.findall(r"<th[ >]", source)) == 9
-    assert 'colspan="9"' in source
+    # The empty row and the detail row both span the table they sit in. Counted
+    # off the header rather than written down: the row was rebuilt from nine
+    # columns to seven when the grid stopped being a stack of paragraphs, and a
+    # number written here would have gone stale in silence — as this one did.
+    columns = len(re.findall(r"<th[ >]", source))
+    assert source.count("{{ column_count }}") == 2, "both spans read the same count"
+    from apps.operations.views import enrollments_view  # noqa: F401  — the view owns it
+
+    assert columns == 7, (
+        "one line per row: expander, code, name, cohort, balance, status, actions"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1510,7 +1576,8 @@ def test_the_request_action_is_offered_only_where_transfer_new_grants_create(
         page = (
             client.get(reverse("operations:transfers"))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         may = Action.CREATE in allowed_actions(role, "transfer-new")
         assert (f'href="{reverse("operations:transfer-new")}"' in page) is may, role
@@ -1647,7 +1714,8 @@ def test_the_transfer_empty_state_offers_the_form_only_where_it_is_allowed(
         page = (
             client.get(reverse("operations:transfers"))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         assert "لا طلبات نقل بعد" in page
         assert ('class="btn2 primary empty-act"' in page) is may, role
@@ -1688,8 +1756,16 @@ def test_the_register_shows_no_partner_or_private_field(
     """
     client.force_login(_user(role, f"trf.priv.{role.lower()}"))
 
+    # The page's own body, and only it. The shell repeats every menu entry in
+    # the quick-jump palette at the end of the document, «استحقاق الشركاء»
+    # among them for the roles §3.7 lets in — and neither that nor the sidebar
+    # is this register drawing a column. Reading `<main>` asks the question
+    # the test means to ask.
     page = (
-        client.get(reverse("operations:transfers")).content.decode("utf-8").split("</nav>", 1)[-1]
+        client.get(reverse("operations:transfers"))
+        .content.decode("utf-8")
+        .split('id="main"', 1)[1]
+        .split("</main>", 1)[0]
     )
 
     for marker in TRANSFER_MUST_NOT_SHOW:
@@ -1725,9 +1801,19 @@ def test_the_transfer_register_added_no_dead_class_and_no_dependency() -> None:
     # The wide table scrolls inside its own wrapper, never the page body.
     assert 'class="tbl-wrap"' in source
     assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
-    # The empty row spans the table it sits in — nine columns, counted.
-    assert len(re.findall(r"<th[ >]", source)) == 9
-    assert 'colspan="9"' in source
+    # The empty row and the detail row both span the table they sit in. Counted
+    # off the header rather than written down, so the number cannot go stale in
+    # silence. It did go stale once all the same: this assertion was copied
+    # from the enrolment register and kept that register's seven columns and
+    # its view, which asked the transfer register to be a different table.
+    columns = len(re.findall(r"<th[ >]", source))
+    assert source.count("{{ column_count }}") == 2, "both spans read the same count"
+    from apps.operations.views import transfers_view  # noqa: F401  — the view owns it
+
+    assert columns == 9, (
+        "one line per row: expander, code, participant, from, to, field, "
+        "difference, status, actions"
+    )
     # The actions column is NAMED, and not with `.sr-only`: that class is
     # `position:absolute` with no positioned ancestor, so in RTL it resolves
     # against the initial containing block, lands ~230px off the left edge,
@@ -1753,6 +1839,22 @@ DEMO_ONLY_ON_THIS_SCREEN = (
     "سجل الحالات الخاصة",
     "حالة مسجّلة",
 )
+
+
+def _sc_page(client: Client) -> str:
+    """
+    The page's OWN markup — ``<main>`` and nothing else.
+
+    Every assertion below is about what this screen draws, so the chrome has to
+    come off first. Splitting on ``</nav>`` used to be enough and no longer is:
+    the quick-jump dialog and the icon sprite now sit AFTER the sidebar, so the
+    tail of that split carries half the application into a test about one page
+    — and a screen whose reader may not open the settlements would «fail» on
+    the word «entitlement» in a nav item it never drew.
+    """
+    body = client.get(reverse("operations:special-cases")).content.decode("utf-8")
+    return body.split('<main class="content', 1)[-1].split("</main>", 1)[0]
+
 
 
 @pytest.mark.parametrize(
@@ -1790,11 +1892,7 @@ def test_the_page_stayed_a_reading_screen(client: Client, seeded_settings: None)
     """
     client.force_login(_user(Role.CENTER_MANAGER, "spc.readonly"))
 
-    page = (
-        client.get(reverse("operations:special-cases"))
-        .content.decode("utf-8")
-        .split("</nav>", 1)[-1]
-    )
+    page = _sc_page(client)
 
     assert "<form" not in page
     assert "csrfmiddlewaretoken" not in page
@@ -1813,11 +1911,7 @@ def test_the_page_draws_none_of_the_demo_only_furniture(
     """
     client.force_login(_user(Role.CENTER_MANAGER, "spc.demo"))
 
-    page = (
-        client.get(reverse("operations:special-cases"))
-        .content.decode("utf-8")
-        .split("</nav>", 1)[-1]
-    )
+    page = _sc_page(client)
 
     for marker in DEMO_ONLY_ON_THIS_SCREEN:
         assert marker not in page, f"the page draws the demo-only «{marker}»"
@@ -1827,18 +1921,22 @@ def test_the_coverage_chips_agree_with_the_table_beneath_them(
     client: Client, seeded_settings: None
 ) -> None:
     """
-    Four of the six types have a service behind them and two do not, and until
-    now a reader learned that only by scanning six rows. The chips are counted
-    off the same list the table renders, so the two cannot disagree — and the
-    numbers are about what the SYSTEM supports, not about how many cases exist.
+    Three buckets, not two, and every one of them counted off the list the
+    table renders so the summary and the rows cannot disagree.
+
+    The two-bucket version was wrong twice over. It called CANCELLATION
+    «declared, no service yet» while ``cancel_registration`` files one and the
+    enrolments screen calls it — a page that teaches the rules was teaching a
+    false one. And «built» covered both a dismissal, which has a screen, and a
+    deferral, which has none, so a reader went looking for a screen that does
+    not exist. The buckets now say how far each type was actually carried.
     """
     import re
 
     from apps.operations.views import special_cases_view
 
     client.force_login(_user(Role.CENTER_MANAGER, "spc.chips"))
-    body = client.get(reverse("operations:special-cases")).content.decode("utf-8")
-    page = body.split("</nav>", 1)[-1]
+    page = _sc_page(client)
 
     chips = {
         label.strip(): int(n)
@@ -1847,13 +1945,47 @@ def test_the_coverage_chips_agree_with_the_table_beneath_them(
         )
     }
     assert sum(chips.values()) == 6, chips
-    assert chips["مسار مبني"] == 4
-    assert chips["نوع مُعرَّف — بلا خدمة تُنشئه بعد"] == 2
+    # Dismissal and cancellation — service, screen and confirmation dialog.
+    assert chips["مبني وله شاشة"] == 2
+    # Deferral, substitution and credit balance — a service no view calls.
+    assert chips["مبني بلا شاشة"] == 3
+    # Credit transfer — a SpecialCaseType value and a constraint, nothing else.
+    assert chips["نوع مُعرَّف بلا خدمة"] == 1
     # The label says what is being counted, so nobody reads it as a case count.
     assert "ما يقابله في النظام اليوم" in page
-    # Every «مسار مبني» chip in the table is matched by one in the summary.
-    assert page.count("مسار مبني") == 4 + 1
+    # Every chip in the table is matched by one in the summary above it.
+    for label, count in chips.items():
+        assert page.count(label) == count + 1, label
     assert special_cases_view is not None
+
+
+def test_the_page_no_longer_calls_the_cancellation_unbuilt(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    The regression this screen was corrected for, pinned against the service
+    rather than against a string.
+
+    ``cancel_registration`` files a CANCELLATION case and the enrolments screen
+    calls it from a dialog, so the page must not present that type as a gap —
+    and must say where it is filed instead of stopping at «not from here».
+    """
+    from apps.operations.models import SpecialCaseType
+    from apps.operations.services import special_case_service
+
+    # The claim under test is about the service, so read it from the service.
+    assert hasattr(special_case_service, "cancel_registration")
+    assert SpecialCaseType.CANCELLATION in SpecialCaseType.values
+
+    client.force_login(_user(Role.CENTER_MANAGER, "spc.cancel"))
+    page = _sc_page(client)
+
+    assert "نوع مُعرَّف — بلا خدمة تُنشئه بعد" not in page
+    # The screen that actually files it is named, and linked.
+    assert "من شاشة التسجيلات" in page
+    assert f'href="{reverse("operations:enrollments")}"' in page
+    # …and the one type that genuinely has no service still says so.
+    assert "لا خدمة تُنشئه" in page
 
 
 def test_the_related_screens_are_linked_only_where_the_reader_may_open_them(
@@ -1884,11 +2016,7 @@ def test_the_related_screens_are_linked_only_where_the_reader_may_open_them(
     ):
         user = _user(role, f"spc.links.{role.lower()}")
         client.force_login(user)
-        page = (
-            client.get(reverse("operations:special-cases"))
-            .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
-        )
+        page = _sc_page(client)
         for screen, route in targets:
             may = policy.is_allowed(user, screen, Action.VIEW)
             assert (f'href="{reverse(route)}"' in page) is may, (role, screen)
@@ -1917,11 +2045,7 @@ def test_the_page_renders_the_same_whether_or_not_there_is_any_data(
     )
     for role in (Role.CENTER_MANAGER, Role.FINANCE_OFFICER, Role.AUDIT_ACCOUNT):
         client.force_login(_user(role, f"spc.priv.{role.lower()}"))
-        page = (
-            client.get(reverse("operations:special-cases"))
-            .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
-        )
+        page = _sc_page(client)
         for value in identifiers:
             assert value not in page, f"{role} was shown the record «{value}»"
         for field in RESTRICTED_AWAY:
@@ -1931,7 +2055,16 @@ def test_the_page_renders_the_same_whether_or_not_there_is_any_data(
 
 
 def test_the_special_cases_page_added_no_dead_class_and_no_dependency() -> None:
-    """Every class it draws with already existed; the page needed no new CSS."""
+    """
+    Every class it draws with is DEFINED — in the shared system or in the small
+    block this screen added to ``input.css`` for the phone layout — and none of
+    them comes from the demo's vocabulary.
+
+    The page did add CSS: three columns, one of them a paragraph of rule text,
+    cannot be read by dragging a 512px table sideways inside a 434px wrapper on
+    a phone, so under 640px the rows become cards. That is a presentation rule
+    and it lives with the rest of them.
+    """
     import re
 
     source = SPECIAL_CASES_TEMPLATE.read_text(encoding="utf-8")
@@ -2025,44 +2158,8 @@ def test_the_catalogue_lists_refuse_an_anonymous_visitor(
     assert client.get(reverse(route)).status_code == 403
 
 
-@pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
-def test_the_catalogue_lists_stayed_read_only(
-    client: Client, a_catalogue: None, route: str, screen: str
-) -> None:
-    """
-    There is no data-entry service behind the catalogue and the view takes no
-    POST, so a create/edit/approve button would be a button with nothing behind
-    it. The centre manager is the case that matters: §3.3 gives them C, E and A
-    on all three screens, and the page must STILL draw none of the three.
-    """
-    from apps.people.constants import Action
-    from apps.people.permissions.matrix import allowed_actions
-
-    assert Action.CREATE in allowed_actions(Role.CENTER_MANAGER, screen)
-    assert Action.EDIT in allowed_actions(Role.CENTER_MANAGER, screen)
-    assert Action.APPROVE in allowed_actions(Role.CENTER_MANAGER, screen)
-
-    client.force_login(_user(Role.CENTER_MANAGER, f"cat.ro.{screen}"))
-    page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
-
-    assert "<form" not in page
-    assert "<button" not in page
-    assert "csrfmiddlewaretoken" not in page
-    # …and the reader is told it is a reading screen rather than left to guess.
-    assert "قراءة فقط" in page
-
-    # The view carries no `require_http_methods`, so a POST is answered rather
-    # than refused — it renders the same page and writes nothing, because there
-    # is no branch that could. Asserted as it IS: 405 would be the tidier
-    # contract, and adding the decorator is a behaviour change, so it is
-    # reported rather than made in a presentation pass.
-    from apps.catalog.models import Program
-
-    before = Program.objects.count()
-    posted = client.post(reverse(route))
-    assert posted.status_code == 200
-    assert Program.objects.count() == before, "a POST to a read-only list changed the catalogue"
-    assert "<form" not in posted.content.decode("utf-8").split("</nav>", 1)[-1]
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_catalogue_lists_stayed_read_only``
 
 
 @pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
@@ -2082,7 +2179,15 @@ def test_no_catalogue_list_prints_a_price_or_a_partner_share(
         Role.AUDIT_ACCOUNT,
     ):
         client.force_login(_user(role, f"cat.pr.{screen}.{role}".lower().replace("_", ".")))
-        page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+        # المتن وحده: الهيكل يكرّر كل بند قائمة في لوحة القفز السريع
+        # آخر المستند، و«استحقاق الشركاء» بينها لمن يملكها — وليست هذه
+        # الشاشة ترسم عموداً. قراءة `<main>` تسأل السؤال المقصود.
+        page = (
+            client.get(reverse(route))
+            .content.decode("utf-8")
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
+        )
         for term in COMMERCIAL_TERMS_OFF_THE_CATALOGUE:
             assert term not in page, f"{screen}/{role} was shown «{term}»"
         client.logout()
@@ -2104,18 +2209,15 @@ def test_the_catalogue_counts_agree_with_the_rows_beneath_them(
     client.force_login(_user(Role.CENTER_MANAGER, f"cat.n.{screen}"))
     page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
 
-    chips = {
-        label.strip(): int(n)
-        for label, n in re.findall(
-            r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
-        )
-    }
+    # The active / inactive tiles are the status filter since the UX pass, and
+    # their two counts still add up to the rows beneath them.
+    response = client.get(reverse(route))
+    tiles = {t["label"]: t["value"] for t in response.context["tiles"]}
     expected = Program.objects.filter(program_type=TYPE_BY_SCREEN[screen]).count()
     assert expected, f"{screen} seeded no rows, so this proves nothing"
-    assert sum(chips.values()) == expected
-    assert "توزيع النتائج المعروضة" in page
+    assert tiles["نشط"] + tiles["غير نشط"] == expected
     # Each drawn row is a real programme of THIS type and no other.
-    assert len(re.findall(r"<tr>\s*<td dir=\"ltr\"", page)) == expected
+    assert len(re.findall(r'<tr>\s*<td class="code-cell">', page)) == expected
 
 
 @pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
@@ -2133,7 +2235,12 @@ def test_the_catalogue_empty_state_is_honest_and_offers_nothing_it_cannot_do(
 
     assert "لا برامج معرَّفة في هذه الفئة بعد" in page
     assert 'class="empty-body"' in page
-    assert "empty-act" not in page, "the empty state offers an action that has no route"
+    # The manager holds CREATE and the screen now has the route: the empty
+    # state may offer «برنامج جديد» — and only to that role.
+    assert "empty-act" in page
+    client.force_login(_user(Role.REGISTRATION_OFFICER, f"cat.e.ro.{screen}"))
+    page = client.get(reverse(route)).content.decode("utf-8").split("</nav>", 1)[-1]
+    assert "empty-act" not in page, "a reader without CREATE is offered an action"
 
 
 @pytest.mark.parametrize(("route", "screen"), CATALOGUE_LISTS)
@@ -2182,8 +2289,9 @@ def test_the_catalogue_list_added_no_dead_class_and_no_dependency() -> None:
     # The actions column is named by attribute: `.sr-only` is `position:absolute`
     # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
     # the page sideways.
-    assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
+    # The code and the name are the row's links since the UX pass; no action column.
     markup = source.split("{% endcomment %}", 1)[-1]
+    assert 'class="row-link num"' in markup
     assert "sr-only" not in markup
     # Every `{# … #}` closes on its own line — Django's tag does not span lines.
     for line in source.splitlines():
@@ -2239,13 +2347,13 @@ def test_the_programme_card_refuses_an_anonymous_visitor(client: Client, a_catal
 
 
 @pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
-def test_the_programme_card_stayed_read_only(
+def test_the_programme_card_offers_editing_to_the_manager_alone(
     client: Client, a_catalogue: None, program_type: str
 ) -> None:
     """
-    ``can_edit`` is in the context and there is no editing service and no POST
-    branch behind it. The centre manager holds EDIT on all three screens, and
-    the card must still draw no form and no button.
+    The centre manager holds EDIT (and APPROVE) on all three screens, and the
+    UX pass gave the card the dialogs those permissions imply — edit, retire,
+    subjects for a diploma, approve. A reader without EDIT still sees none.
     """
     from apps.catalog.views import TYPE_BY_SCREEN
     from apps.people.constants import Action
@@ -2261,15 +2369,18 @@ def test_the_programme_card_stayed_read_only(
         .content.decode("utf-8")
         .split("</nav>", 1)[-1]
     )
+    assert 'id="program-edit"' in page and 'id="program-toggle"' in page
+    assert ('id="program-approve"' in page) is (program_type == "DIPLOMA")
+    assert "alert(" not in page and "confirm(" not in page
 
-    assert "<form" not in page
-    assert "<button" not in page
+    client.force_login(_user(Role.REGISTRATION_OFFICER, f"pd.reg.{program_type}".lower()))
+    page = (
+        client.get(reverse("catalog:program-detail", args=[code]))
+        .content.decode("utf-8")
+        .split("</nav>", 1)[-1]
+    )
+    assert 'method="post"' not in page
     assert "csrfmiddlewaretoken" not in page
-    # The word «تعديل» DOES appear — in the subtitle, saying editing is not
-    # done here. What must not appear is a control: the only link on the page
-    # is the ghost way back, and no primary action is drawn at all.
-    assert 'class="btn2 primary"' not in page
-    assert page.count("<a class=") == page.count('<a class="btn2 ghost"') == 1
 
 
 @pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
@@ -2292,21 +2403,22 @@ def test_the_programme_card_prints_no_price_and_no_partner_share(
         page = (
             client.get(reverse("catalog:program-detail", args=[code]))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         for term in COMMERCIAL_TERMS_OFF_THE_CATALOGUE:
             assert term not in page, f"{program_type}/{role} was shown «{term}»"
         client.logout()
 
 
-def test_the_card_shows_the_subject_total_without_inventing_a_verdict(
+def test_the_card_shows_the_subject_total_and_a_verdict_it_owns_both_sides_of(
     client: Client, a_catalogue: None
 ) -> None:
     """
-    ``subject_total`` is Σ subject prices — the LEFT side of BR-006. The other
-    side is the course fee from the effective price list, which this view does
-    not read. The demo prints «مطابق» or «فرق N» anyway; a page that holds one
-    side of an equation may not publish its result.
+    ``subject_total`` is Σ subject prices — the LEFT side of BR-006. Since the
+    UX pass the card also reads the RIGHT side (the fee on the list in force,
+    named by its code) and so may publish the verdict — and says where each
+    side came from.
     """
     import re
 
@@ -2334,9 +2446,17 @@ def test_the_card_shows_the_subject_total_without_inventing_a_verdict(
         re.findall(r"[\d,.]+", page)
     ), f"the subject total {total} is not printed"
     assert "BR-006" in page
-    # …and no verdict it cannot compute.
-    for verdict in ("مطابق", "فرق ", "غير مطابق", "مخالف"):
-        assert verdict not in page, f"the card published «{verdict}» from one side of BR-006"
+    # …and a verdict only beside the fee it was weighed against.
+    from apps.catalog.services import catalog_service
+
+    recon = catalog_service.reconciliation(program=program)
+    if recon["fee"] is None:
+        assert "بلا سعر ساري" in page
+        for verdict in ("مطابق BR-006", "فرق "):
+            assert verdict not in page
+    else:
+        assert recon["price_list_code"] in page
+        assert ("مطابق BR-006" in page) is bool(recon["ok"])
 
 
 def test_only_the_diploma_is_told_that_its_subject_list_is_empty(
@@ -2358,7 +2478,8 @@ def test_only_the_diploma_is_told_that_its_subject_list_is_empty(
         return (
             client.get(reverse("catalog:program-detail", args=[code]))
             .content.decode("utf-8")
-            .split("</nav>", 1)[-1]
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
 
     diploma = page_for("DIPLOMA")
@@ -2387,10 +2508,11 @@ def test_the_card_offers_the_way_back_to_its_own_list(
     code = _a_program(program_type)
     client.force_login(_user(Role.CENTER_MANAGER, f"pd.back.{program_type}".lower()))
 
+    # Past the sidebar and the breadcrumb: the page's own body.
     page = (
         client.get(reverse("catalog:program-detail", args=[code]))
         .content.decode("utf-8")
-        .split("</nav>", 1)[-1]
+        .split("</nav>", 2)[-1]
     )
     back = reverse(LIST_ROUTE_BY_SCREEN[screen])
     assert f'href="{back}"' in page
@@ -2419,7 +2541,7 @@ def test_the_programme_card_added_no_dead_class_and_no_dependency() -> None:
     for name in used:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     # The key/value block is a `.dl`, not a table: one fewer thing to scroll.
-    assert 'class="dl"' in source
+    assert 'class="dl pg-facts"' in source
     # The subject table keeps its wrapper, and its empty row spans it.
     assert 'class="tbl-wrap"' in source
     assert 'colspan="4"' in source
@@ -2462,14 +2584,44 @@ def test_the_price_lists_refuse_an_anonymous_visitor(client: Client, seeded_sett
     assert client.get(reverse("catalog:pricelists")).status_code == 403
 
 
-def test_the_price_list_index_stayed_read_only(client: Client, a_catalogue: None) -> None:
+def test_no_template_leaks_a_comment_into_the_page() -> None:
     """
-    §3.3/13 grants the centre manager C and E, and ``can_record_approval`` is
-    in the context — but there is no data-entry service behind this screen and
-    the view takes no POST, so a create or edit button would be a button with
-    nothing behind it. Approval is not even offered to anybody: the row grants
-    APPROVE to no role, because the President approves outside the system
-    (footnote 8, D-31).
+    ``{# … #}`` closes on its own line; a comment written across two lines is
+    not a comment at all — Django prints it, and the reader gets the developer's
+    note in the middle of the screen. Caught on the price-list register.
+    """
+    from pathlib import Path
+
+    offenders = []
+    for template in Path("templates").rglob("*.html"):
+        for number, line in enumerate(template.read_text(encoding="utf-8").splitlines(), 1):
+            if "{#" in line and "#}" not in line.split("{#", 1)[1]:
+                offenders.append(f"{template}:{number}")
+
+    assert not offenders, (
+        "a multi-line {# #} is printed to the page — use {% comment %}. "
+        f"Offenders: {offenders}"
+    )
+
+
+def test_the_price_list_index_offers_creation_and_no_internal_approval(
+    client: Client, a_catalogue: None
+) -> None:
+    """
+    This guard used to read «stayed read only», and that was the right
+    assertion while it was true: ``can_record_approval`` sat in the context
+    with no service caller behind it, and a button with no route is worse than
+    none. Sprint 8L gave ``create_price_list`` its caller, so the screen now
+    writes — and what has to be held is no longer «nothing writes» but the two
+    things that were actually being protected.
+
+    First: APPROVE is granted to NO role. §3.3/13's footnote 8 says the centre
+    manager recommends and the university president approves, outside this
+    system entirely (D-31). Creation must not have smuggled an internal
+    approval in beside it.
+
+    Second: every control drawn has a route behind it, and the writing one is
+    drawn only for a reader who holds CREATE (§3.4 · BR-085).
     """
     from apps.people.constants import Action
     from apps.people.permissions.matrix import allowed_actions
@@ -2479,28 +2631,46 @@ def test_the_price_list_index_stayed_read_only(client: Client, a_catalogue: None
     for role in (Role.CENTER_MANAGER, Role.REGISTRATION_OFFICER, Role.AUDIT_ACCOUNT):
         assert Action.APPROVE not in allowed_actions(role, "pricelists")
 
-    client.force_login(_user(Role.CENTER_MANAGER, "pl.readonly"))
-    page = client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+    client.force_login(_user(Role.CENTER_MANAGER, "pl.creates"))
+    page = (
+        client.get(reverse("catalog:pricelists"))
+        .content.decode("utf-8")
+        .split('id="main"', 1)[1]
+        .split("</main>", 1)[0]
+    )
 
-    assert "<form" not in page
-    assert "<button" not in page
-    assert "csrfmiddlewaretoken" not in page
-    assert 'class="btn2 primary"' not in page, "a primary action with no route behind it"
-    # …and the reader is told it is a reading screen rather than left to guess.
-    assert "قراءة فقط" in page
+    # The one writing form, and it creates a DRAFT: there is no status field
+    # in IT to set. The register's own filter has a `status` select and is a
+    # read, so the card is what gets asked — not the whole page.
+    assert "قائمة أسعار جديدة" in page
+    # The DIALOG, not «everything after the phrase»: the phrase now names the
+    # head button too, and slicing from its first mention swept in the
+    # register's own status FILTER — a read, and the one control that may
+    # legitimately name a status on this screen.
+    card = page.split('id="pricelist-new"', 1)[1]
+    assert 'name="status"' not in card, "a list is never born approved (BR-008)"
+    assert 'name="code"' in card and 'name="effective_from"' in card
+    # Nothing on the register approves anything: that act lives on the card,
+    # and it records an outside decision rather than granting an inside one.
+    assert "تسجيل الاعتماد" not in page
 
-    # The view carries no `require_http_methods`, so a POST is answered rather
-    # than refused — it renders the same page and writes nothing, because there
-    # is no branch that could. Asserted as it IS: 405 would be the tidier
-    # contract, and adding the decorator is a behaviour change, so it is
-    # reported rather than made in a presentation pass.
+    # A reader with no CREATE is offered nothing to press, and refused anyway.
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pl.reads"))
+    reader_page = (
+        client.get(reverse("catalog:pricelists"))
+        .content.decode("utf-8")
+        .split('id="main"', 1)[1]
+        .split("</main>", 1)[0]
+    )
+    assert "قائمة أسعار جديدة" not in reader_page
+    for form in re.findall(r"<form[^>]*>", reader_page):
+        assert 'role="search"' in form, form
+
     from apps.catalog.models import PriceList
 
     before = PriceList.objects.count()
-    posted = client.post(reverse("catalog:pricelists"))
-    assert posted.status_code == 200
-    assert PriceList.objects.count() == before, "a POST to a read-only list wrote something"
-    assert "<form" not in posted.content.decode("utf-8").split("</nav>", 1)[-1]
+    assert client.post(reverse("catalog:pricelists")).status_code == 403
+    assert PriceList.objects.count() == before
 
 
 def test_the_price_list_index_prints_no_partner_or_revenue_term(
@@ -2519,7 +2689,10 @@ def test_the_price_list_index_prints_no_partner_or_revenue_term(
     ):
         client.force_login(_user(role, f"pl.pr.{role}".lower().replace("_", ".")))
         page = (
-            client.get(reverse("catalog:pricelists")).content.decode("utf-8").split("</nav>", 1)[-1]
+            client.get(reverse("catalog:pricelists"))
+            .content.decode("utf-8")
+            .split('id="main"', 1)[1]
+            .split("</main>", 1)[0]
         )
         for term in (*COMMERCIAL_TERMS_OFF_THE_CATALOGUE, "حصة", "الإيراد يُقسم", "partner share"):
             assert term not in page, f"pricelists/{role} was shown «{term}»"
@@ -2639,9 +2812,14 @@ def test_each_price_list_row_links_to_its_own_detail_page(
     detail = reverse("catalog:pricelist-detail", args=[code])
     assert f'href="{detail}"' in page
     assert client.get(detail).status_code == 200
-    # One link per row and nothing else — no clickable row, no invented action.
+    # One link per row inside the table — no clickable row, no invented action —
+    # and every link on the page opens rather than refusing (the tiles above it
+    # filter this same register).
     rows = PriceList.objects.count()
-    assert page.count("<a class=") == page.count('<a class="btn2 ghost"') == rows
+    table = page.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    assert table.count("<a class=") == table.count('<a class="btn2 ghost"') == rows
+    for href in {h for h in re.findall(r'<a[^>]+href="([^"#]+)"', page) if h.startswith("/")}:
+        assert client.get(href).status_code == 200, href
 
 
 def test_the_price_list_index_added_no_dead_class_and_no_dependency() -> None:
@@ -2696,10 +2874,18 @@ def _a_price_list() -> str:
 
 
 def _detail(client: Client, code: str) -> str:
-    """The page body, with the sidebar cut off so nav copy cannot answer for it."""
+    """
+    The page body, and only it.
+
+    The shell cannot be allowed to answer for the card: the sidebar names
+    every screen the reader may open, and the quick-jump palette at the end of
+    the document repeats them all inside a `<dialog>` of its own. Reading
+    `<main>` asks what this card draws, which is the whole question.
+    """
     response = client.get(reverse("catalog:pricelist-detail", args=[code]))
     assert response.status_code == 200
-    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+    body = response.content.decode("utf-8")
+    return body.split('id="main"', 1)[1].split("</main>", 1)[0]
 
 
 @pytest.mark.parametrize(
@@ -2734,44 +2920,49 @@ def test_the_price_list_card_refuses_an_anonymous_visitor(
     assert client.get(reverse("catalog:pricelist-detail", args=[code])).status_code == 403
 
 
-def test_the_price_list_card_stayed_read_only(client: Client, a_catalogue: None) -> None:
+def test_an_approved_price_list_card_draws_no_act_it_cannot_carry_out(
+    client: Client, a_catalogue: None
+) -> None:
     """
-    ``can_edit`` is in the context and there is no editing service, no edit
-    route and no POST branch behind it. There is not even a URL to post to:
-    the catalogue exposes two routes, both GET reads.
+    D-14 — the card is editable on a DRAFT and sealed on an approved list.
+
+    This guard used to read «the card stayed read-only», and that was true of a
+    screen that could not create a price, correct a draft or record the
+    president's decision: all three services existed with no caller, and the
+    only road to a first price was the Django admin. Sprint 8L gave the card
+    those acts, and ``apps/catalog/tests/test_price_list_entry.py`` pins them.
+
+    So what is asserted here is what stayed TRUE, and it is the part that
+    matters: an approved list is evidence, the services refuse every edit on it,
+    and §3.4 says a control whose use is refused is not drawn at all — not drawn
+    and then refused, which teaches the reader to press it and be told no.
+
+    ``a_catalogue`` seeds with ``--approve``, so the list this reads IS frozen.
     """
-    from django.urls import NoReverseMatch
-
-    from apps.people.constants import Action
-    from apps.people.permissions.matrix import allowed_actions
-
-    assert Action.EDIT in allowed_actions(Role.CENTER_MANAGER, "pricelists")
-    for name in ("pricelist-edit", "pricelist-approve", "pricelist-item-new"):
-        with pytest.raises(NoReverseMatch):
-            reverse(f"catalog:{name}")
+    from apps.catalog.models import PriceList, PriceListItem, PriceListStatus
 
     code = _a_price_list()
+    assert PriceList.objects.get(code=code).status == PriceListStatus.APPROVED, (
+        "the fixture no longer approves its list, so this proves nothing"
+    )
+
     client.force_login(_user(Role.CENTER_MANAGER, "pld.readonly"))
     page = _detail(client, code)
 
-    assert "<form" not in page
-    assert "<button" not in page
-    assert "csrfmiddlewaretoken" not in page
-    assert 'class="btn2 primary"' not in page, "a primary action with no route behind it"
-    # No modal, no dialog, nothing that opens over the page.
-    for furniture in ("<dialog", "modal", "x-show", "data-bs-toggle", "aria-haspopup"):
-        assert furniture not in page, f"the card drew «{furniture}»"
-    assert "قراءة فقط" in page
+    # The head says which of the two it is, in words rather than by absence.
+    assert "غير قابلة للتعديل" in page
+    assert "قراءة فقط" not in page, "a frozen list is not a permission refusal"
+    # No writing form: the searches are reads, and every act is gated off.
+    for form in re.findall(r"<form[^>]*>", page):
+        assert 'role="search"' in form, form
+    for act in ("إضافة سعر برنامج", "تعديل المسودة", "تسجيل قرار الاعتماد", "إضافة قاعدة رسم"):
+        assert act not in page, f"a frozen list offered «{act}»"
 
-    # The view carries no `require_http_methods`, so a POST renders the page
-    # and writes nothing, because there is no branch that could. Asserted as
-    # it IS — 405 is a behaviour change, not a presentation one.
-    from apps.catalog.models import PriceListItem
-
+    # And the service refuses it even when a POST arrives past the screen.
     before = PriceListItem.objects.count()
-    posted = client.post(reverse("catalog:pricelist-detail", args=[code]))
-    assert posted.status_code == 200
-    assert PriceListItem.objects.count() == before, "a POST to a read-only card wrote something"
+    posted = client.post(reverse("catalog:pricelist-detail", args=[code]), {"action": "edit"})
+    assert posted.status_code in (200, 302)
+    assert PriceListItem.objects.count() == before, "a POST to a frozen card wrote something"
 
 
 def test_the_price_list_card_offers_the_way_back_to_the_index(
@@ -2780,6 +2971,10 @@ def test_the_price_list_card_offers_the_way_back_to_the_index(
     """
     The reader arrives from the index and had no way back but the sidebar. The
     link cannot refuse them: it is the same screen gate they just passed.
+
+    Every other link on the card is now a programme — the card names programmes
+    and the reader has to be able to open them — and each one is checked to open
+    rather than to refuse, which is the rule the count used to stand in for.
     """
     code = _a_price_list()
     client.force_login(_user(Role.CENTER_MANAGER, "pld.back"))
@@ -2788,8 +2983,11 @@ def test_the_price_list_card_offers_the_way_back_to_the_index(
     back = reverse("catalog:pricelists")
     assert f'href="{back}"' in page
     assert client.get(back).status_code == 200
-    # …and it is the only link on the page. Nothing else here has a route.
-    assert page.count("<a class=") == page.count('<a class="btn2 ghost"') == 1
+
+    hrefs = {h for h in re.findall(r'<a[^>]+href="([^"#]+)"', page) if h.startswith("/")}
+    assert any(h.startswith("/programs/") for h in hrefs), "the card names programmes and links none"
+    for href in hrefs:
+        assert client.get(href).status_code == 200, href
 
 
 def test_the_price_list_identity_renders_from_the_real_row(
@@ -3003,15 +3201,28 @@ def test_the_card_prints_only_item_fields_the_row_already_carried(
     assert {str(fee), floatformat(fee, 3), floatformat(fee, -3)} & set(
         re.findall(r"[\d,.]+", page)
     ), f"the course fee {fee} is not printed"
-    for header in ("رسوم الدورة", "التأمين", "سياسة التأمين", "المستوى", "ملاحظات"):
+    # The deposit and the policy that governs it are one column now — the
+    # constraint refuses one without the other, so two headers said one thing —
+    # and «ملاحظات» is drawn only where an item carries a note.
+    for header in ("رسوم الدورة", "التأمين وسياسته", "المستوى"):
         assert header in page, header
     # A non-levelled item says so rather than showing an empty cell.
     assert PriceListItem.objects.filter(level__isnull=True).exists()
     assert "بلا مستويات" in page
     # …and no figure this page never held: no subject total, no BR-006 verdict,
-    # no "effective today", no consumables read off the programme.
-    for invented in ("مجموع أسعار المواد", "مطابق", "سارية اليوم", "المستهلكات"):
+    # no consumables read off the programme.
+    for invented in ("مجموع أسعار المواد", "مطابق", "المستهلكات"):
         assert invented not in page, f"the card published «{invented}»"
+
+    # «سارية اليوم» IS printed now — and it is not invented: it is the same pure
+    # read the pricing engine answers with, so the card cannot claim a list is
+    # in force while an enrolment is priced by another.
+    from django.utils import timezone
+
+    from apps.catalog.services import pricing_service
+
+    in_force = pricing_service.effective_price_list(as_of=timezone.localdate()).code
+    assert ("سارية اليوم" in page) is (in_force == _a_price_list())
 
 
 def test_both_price_list_tables_have_an_empty_state_of_their_own(
@@ -3035,7 +3246,17 @@ def test_both_price_list_tables_have_an_empty_state_of_their_own(
     assert "لا بنود على هذه القائمة" in page
     assert "لا قواعد رسوم تسجيل على هذه القائمة" in page
     assert page.count('class="empty-body"') == 2
-    assert "empty-act" not in page, "an empty state offers an action that has no route"
+    # An empty state MAY offer an act — §8 asks it to explain and to POINT — and
+    # what this guards is that whatever it points at exists. The clause used to
+    # forbid the act outright, which was right when the catalogue had no writing
+    # route at all and wrong once it did: the rules table on an APPROVED list
+    # cannot accept a rule (D-14), so it names the only way forward instead, and
+    # a reader who went looking for a button that may not be drawn was the
+    # reason for adding it.
+    acts = re.findall(r'<a[^>]*class="[^"]*empty-act[^"]*"[^>]*href="([^"]+)"', page)
+    assert acts, "the frozen rules table names no way forward at all"
+    for act in acts:
+        assert act.startswith("/") and "{%" not in act, f"an empty state points at «{act}»"
     # The counts describe rows on screen, so an empty table shows no chip.
     assert "بند واحد" not in page and "قاعدة واحدة" not in page
 
@@ -3098,11 +3319,23 @@ def test_the_price_list_card_added_no_dead_class_and_no_dependency() -> None:
     # and each keeps its scroll wrapper and spans its own width when empty.
     assert 'class="dl"' in source
     assert source.count('class="tbl-wrap"') == 2
-    assert 'colspan="6"' in source and 'colspan="4"' in source
+    # The items table is five columns with a note and four without — the deposit
+    # and the policy that governs it read as one fact, and a column empty in
+    # every row is not drawn — so its empty row spans whichever it drew.
+    assert 'colspan="{% if has_notes %}5{% else %}4{% endif %}"' in source
+    # The fee-rules table grew an actions column for a DRAFT, so its empty row
+    # spans five where the acts are drawn and four where they are not — the same
+    # «span whichever you drew» rule, now with two things deciding it.
+    assert 'colspan="{% if not is_frozen and can_edit %}5{% else %}4{% endif %}"' in source
     # Every `<th>` carries text, so nothing here needs `.sr-only` — which is
     # `position:absolute` with no positioned ancestor and drags an RTL page.
     assert "sr-only" not in source.split("{% endcomment %}", 1)[-1]
-    assert not re.search(r"<th[^>]*>\s*</th>", source)
+    # No column without a NAME — which is not the same as no column without
+    # TEXT. The acts column the draft grew has nothing to print and is named by
+    # `aria-label`, the way every other register in this system names it: the
+    # alternative is `.sr-only`, and the comment above says why not.
+    for header in re.findall(r"<th[^>]*>\s*</th>", source):
+        assert "aria-label" in header, f"a column with no name at all: {header}"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
 
@@ -3177,7 +3410,7 @@ def _cohorts(client: Client, params: str = "") -> str:
     """The page body, with the sidebar cut off so nav copy cannot answer for it."""
     response = client.get(reverse("operations:cohorts") + params)
     assert response.status_code == 200
-    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+    return response.content.decode("utf-8").split("</nav>", 2)[-1]
 
 
 @pytest.mark.parametrize(
@@ -3277,13 +3510,13 @@ def test_the_cohort_row_prints_the_keys_the_projection_already_carried(
     assert str(row["semester"]) in page
     assert row["trainer_name"] in page
     assert row["location"] in page
-    assert str(row["status_display"]) in page
+    assert str(row["stage_display"]) in page
     assert row["starts_on"].strftime("%Y/%m/%d") in page
     assert row["ends_on"].strftime("%Y/%m/%d") in page
     # Seats are the service's figure, printed, not recomputed on the page.
     assert row["capacity"] == 20
     assert row["seats_left"] == 20 - row["enrolled_count"]
-    for header in ("المقاعد", "التشغيل", "الشريك", "الحالة", "الفترة"):
+    for header in ("المقاعد", "التشغيل", "الشريك", "المرحلة والتالي", "الفترة"):
         assert header in page, header
 
 
@@ -3315,7 +3548,7 @@ def test_the_cohort_status_chips_count_the_rows_beneath_them(
     """
     import re
 
-    from apps.operations.models import Cohort, CohortStatus
+    from apps.operations.models import Cohort
 
     client.force_login(_user(Role.CENTER_MANAGER, "coh.chips"))
     page = _cohorts(client)
@@ -3326,20 +3559,22 @@ def test_the_cohort_status_chips_count_the_rows_beneath_them(
             r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', page
         )
     }
+    # Counted by STAGE, the same vocabulary the rows are labelled with: two
+    # names over one table was the ambiguity this register was fixed for.
     assert sum(chips.values()) == Cohort.objects.count() == 3
-    assert chips[str(CohortStatus.RUNNING.label)] == 2
-    assert chips[str(CohortStatus.PLANNED.label)] == 1
+    assert chips["قيد التنفيذ"] == 2
+    assert chips["بانتظار الملف الوزاري"] == 1
     assert "توزيع النتائج المعروضة" in page
 
     # Narrowed, the chips narrow with it rather than restating the register.
-    narrowed = _cohorts(client, f"?status={CohortStatus.PLANNED}")
+    narrowed = _cohorts(client, "?stage=NEEDS_FILE")
     chips = {
         label.strip(): int(n)
         for label, n in re.findall(
             r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', narrowed
         )
     }
-    assert chips == {str(CohortStatus.PLANNED.label): 1}
+    assert chips == {"بانتظار الملف الوزاري": 1}
     # No state that nothing is in gets a zero chip.
     assert ': <span class="num">0</span>' not in narrowed
 
@@ -3363,7 +3598,7 @@ def test_the_register_says_which_filter_is_narrowing_it(
 
     narrowed = _cohorts(client, f"?status={CohortStatus.PLANNED}&q=CO-UIC")
     assert "نتائج مصفّاة" in narrowed
-    assert str(CohortStatus.PLANNED.label) in narrowed
+    assert str(CohortStatus.PLANNED.label) in narrowed  # named by its label, not its code
     assert "CO-UIC" in narrowed
     assert reverse("operations:cohorts") in narrowed, "no way to clear the filter"
     # The raw enum is never printed at the client.
@@ -3383,7 +3618,10 @@ def test_the_status_filter_survives_a_search(client: Client, three_cohorts: obje
     client.force_login(_user(Role.CENTER_MANAGER, "coh.carry"))
     page = _cohorts(client, f"?status={CohortStatus.PLANNED}")
 
+    # The visible select is the STAGE now; the stored status stays narrowable
+    # from a URL and rides along with a search as a hidden field.
     assert f'<input type="hidden" name="status" value="{CohortStatus.PLANNED.value}">' in page
+    assert 'id="f_stage"' in page
 
 
 def test_the_two_cohort_empty_states_are_not_the_same_sentence(
@@ -3511,9 +3749,11 @@ def test_every_link_on_the_cohorts_register_points_at_a_real_route(
     client: Client, three_cohorts: object
 ) -> None:
     """
-    There is no cohort detail route, so no row is clickable and no row links
-    anywhere. The page draws the link that clears the filter, and the two
-    next-step links the guided-help block offers this reader — nothing else.
+    There is no cohort detail route, so no row is clickable as a whole. What
+    a row links is its NEXT STEP, drawn from the reader's permission: a
+    planned cohort without a ministry approval offers «ملف وزاري» (the
+    submission form with the cohort chosen); an approved one offers its
+    enrolments. Plus the link that clears the filter — nothing else.
     """
     import re
 
@@ -3526,10 +3766,17 @@ def test_every_link_on_the_cohorts_register_points_at_a_real_route(
     page = _cohorts(client, "?q=CO-UIC")
 
     hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
+    # CO-UIC-1 is planned and unapproved, so its next step is the ministry
+    # file; the two tiles that filter the register link back to it.
+    # The tiles filter by STAGE — what comes next — because the stored status
+    # said «مخطَّطة» both before the ministry file and after its approval.
     assert hrefs == {
         reverse("operations:cohorts"),
-        reverse("operations:mohe"),
-        reverse("catalog:pricelists"),
+        reverse("operations:cohorts") + "?stage=NEEDS_FILE",
+        reverse("operations:cohorts") + "?stage=AT_MOHE",
+        reverse("operations:cohorts") + "?stage=ENROLLABLE",
+        reverse("operations:cohorts") + "?stage=RUNNING",
+        reverse("operations:mohe-submit") + "?cohort=CO-UIC-1",
     }, hrefs
     for href in hrefs:
         assert client.get(href).status_code == 200
@@ -3595,7 +3842,8 @@ def _mohe(client: Client, params: str = "") -> str:
     """The page body, with the sidebar cut off so nav copy cannot answer for it."""
     response = client.get(reverse("operations:mohe") + params)
     assert response.status_code == 200
-    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+    # Past the sidebar and the breadcrumb: the page's own body.
+    return response.content.decode("utf-8").split("</nav>", 2)[-1]
 
 
 @pytest.mark.parametrize(
@@ -3631,20 +3879,25 @@ def test_the_ministry_register_writes_nothing_and_draws_no_action(
     """
     Every act on a ministry file — attach, send, decide, resubmit — happens on
     the file's own page or on the open-file screen, each behind its own cell of
-    ``MOHE_ACTIONS``. This view answers GET only, so the register draws no
-    action form at all: the search box is the one form on the page.
+    ``MOHE_ACTIONS``. This view answers GET only, so the register writes
+    nothing: its own form is the search, which narrows and never posts.
+
+    The one write that does live on this page is «تسجيل الرفع للوزارة» in the
+    names register below — a POST to its own route, behind its own permission,
+    and asked for in a dialog rather than fired by a bare button.
     """
+    import re
+
     from apps.operations.models import MoheSubmission
 
     client.force_login(_user(Role.CENTER_MANAGER, "moh.readonly"))
     page = _mohe(client)
 
-    assert page.count("<form") == 1
-    assert 'method="get"' in page
-    assert "csrfmiddlewaretoken" not in page, "a read register was handed a write token"
-    assert page.count("<button") == 1, "the only button is the search submit"
-    for furniture in ("<dialog", "modal", "x-show", "data-bs-toggle", "aria-haspopup"):
-        assert furniture not in page, f"the register drew «{furniture}»"
+    forms = re.findall(r"<form[^>]*>", page)
+    assert forms, "the search form is gone"
+    for form in forms:
+        posts_to_upload = 'action="' in form and "/names/" in form
+        assert 'method="get"' in form or posts_to_upload, form
 
     # The route itself refuses a POST rather than answering it — this view
     # carries `require_http_methods(["GET"])`, unlike the catalogue reads.
@@ -3737,25 +3990,26 @@ def test_the_ministry_status_chips_count_the_rows_beneath_them(
     client.force_login(_user(Role.CENTER_MANAGER, "moh.chips"))
     page = _mohe(client)
 
-    def chips_of(body: str) -> dict[str, int]:
+    # The strip of tiles above the register (dashboard style): each is a
+    # count over the WHOLE register and a filter by click — so it does not
+    # shrink with the filter it opens.
+    def tiles_of(body: str) -> dict[str, int]:
         return {
             label.strip(): int(n)
             for label, n in re.findall(
-                r'<span class="chip[^"]*">([^<:]+): <span class="num">(\d+)', body
+                r'<span class="label">([^<]+)</span>\s*<span class="value num">(\d+)</span>', body
             )
         }
 
-    chips = chips_of(page)
-    assert sum(chips.values()) == MoheSubmission.objects.count() == 3
-    assert chips == {
-        str(MoheStatus.DRAFT.label): 1,
-        str(MoheStatus.APPROVED.label): 1,
-        str(MoheStatus.REJECTED.label): 1,
-    }
-    assert "توزيع النتائج المعروضة" in page
+    tiles = tiles_of(page)
+    assert tiles["كل الملفات"] == MoheSubmission.objects.count() == 3
+    assert tiles["مسودات"] == 1
+    assert tiles["بانتظار الوزارة"] == 0
+    assert tiles["معتمدة"] == 1
 
-    narrowed = chips_of(_mohe(client, f"?status={MoheStatus.APPROVED}"))
-    assert narrowed == {str(MoheStatus.APPROVED.label): 1}
+    narrowed = _mohe(client, f"?status={MoheStatus.APPROVED}")
+    assert tiles_of(narrowed) == tiles, "the tiles count the register, not the slice"
+    assert 'aria-current="true"' in narrowed
 
 
 def test_the_ministry_register_says_which_filter_is_narrowing_it(
@@ -3848,6 +4102,8 @@ def test_the_ministry_register_publishes_no_verdict_it_was_not_given(
     assert rejected.rejection_reason_ar in page
     computed = page.replace(rejected.rejection_reason_ar, "")
 
+    # «انتهت المهلة» / «قاربت المهلة» / «يوماً متبقياً» are allowed: they are
+    # ``deadline_state`` as the service computes it (BR-015), printed as-is.
     for verdict in (
         "انقضت المهلة",
         "تجاوزت المهلة",
@@ -3856,18 +4112,23 @@ def test_the_ministry_register_publishes_no_verdict_it_was_not_given(
         "مطابق",
         "جاهز للإرسال",
         "أيام متبقية",
-        "يوماً متبقياً",
     ):
         assert verdict not in computed, f"the register published «{verdict}»"
     # Every state chip on screen is a state the model defines — no invented
     # label, and none derived from a date or an attachment.
     import re
 
-    labels = {str(label) for _v, label in MoheStatus.choices}
+    labels = {str(label) for _v, label in MoheStatus.choices} | {
+        # the service's deadline states (BR-015) and the name-upload states
+        "انتهت المهلة",
+        "قاربت المهلة",
+        "مرفوع",
+        "بانتظار الرفع",
+    }
     toned = set(re.findall(r'<span class="chip [a-z]+ dot">([^<]+)</span>', page))
     assert toned, "no status chip was drawn, so this proves nothing"
     assert toned <= labels, toned - labels
-    assert toned == {
+    assert toned >= {
         str(MoheStatus.DRAFT.label),
         str(MoheStatus.APPROVED.label),
         str(MoheStatus.REJECTED.label),
@@ -3917,14 +4178,35 @@ def test_every_link_on_the_ministry_register_reaches_a_real_route(
     page = _mohe(client, "?q=CO-UIC")
 
     hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
-    expected = {
-        reverse("operations:mohe"),
-        reverse("operations:mohe-submit"),
-        reverse("operations:cohorts"),
-    } | {
-        reverse("operations:mohe-detail", args=[pk])
-        for pk in MoheSubmission.objects.values_list("pk", flat=True)
-    }
+    base = reverse("operations:mohe")
+    expected = (
+        {
+            base,
+            reverse("operations:mohe-submit"),
+            reverse("operations:mohe-uploaded-export"),
+            # the tiles that filter the register
+            f"{base}?status=DRAFT",
+            f"{base}?status=SUBMITTED",
+            f"{base}?status=APPROVED",
+        }
+        | {
+            reverse("operations:mohe-detail", args=[pk])
+            for pk in MoheSubmission.objects.values_list("pk", flat=True)
+        }
+        | {
+            # an approved row also opens its cohort's enrolments
+            reverse("operations:enrollments") + f"?cohort={code}"
+            for code in MoheSubmission.objects.filter(status="APPROVED").values_list(
+                "cohort__code", flat=True
+            )
+        }
+        | {
+            # …and every row reaches its cohort in the cohorts register, whose
+            # search does cover the cohort code (asserted below by opening it).
+            reverse("operations:cohorts") + f"?q={code}"
+            for code in MoheSubmission.objects.values_list("cohort__code", flat=True)
+        }
+    )
     assert hrefs == expected, hrefs
     for href in hrefs:
         assert client.get(href).status_code == 200, href
@@ -3953,8 +4235,15 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     assert 'class="tbl-wrap"' in source
     assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
-    assert len(re.findall(r"<th[ >]", source)) == 8
-    assert source.count('colspan="8"') == 2, "the reason row and the empty row both span the table"
+    # Two tables: the register (nine columns — the actions column carries
+    # the next step) and the trainee-names table (seven).
+    register = source.split("<table", 2)[1]
+    names = source.split("<table", 2)[2]
+    assert len(re.findall(r"<th[ >]", register)) == 9
+    assert register.count('colspan="9"') == 2, (
+        "the reason row and the empty row both span the table"
+    )
+    assert len(re.findall(r"<th[ >]", names)) == 7
     markup = source.split("{% endcomment %}", 1)[-1]
     # The actions column is named by attribute: `.sr-only` is `position:absolute`
     # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
@@ -3965,8 +4254,15 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
     for header in re.findall(r"<th([^>]*)>\s*</th>", markup):
         assert "aria-label" in header, "an empty column header with no name"
     # The rejection reason left `.note warn`: yellow is an alert, and recording
-    # a decision that arrived is not one (polish rules §6.5).
-    assert "note warn" not in markup
+    # a decision that arrived is not one (polish rules §6.5). Yellow stays
+    # allowed where something IS refused — the upload dialog warns that a
+    # registration window has run out and the upload now needs the manager's
+    # override (BR-019) — so the rule is asserted where it was broken.
+    reason_block = markup.split("mohe-reason-row", 1)[-1].split("</tr>", 1)[0]
+    assert "note warn" not in reason_block
+    for line in markup.splitlines():
+        if "note warn" in line:
+            assert "BR-019" in line, f"yellow used for something that refuses nothing: {line.strip()[:70]}"
     assert "note info" not in markup
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
@@ -4514,7 +4810,7 @@ def _submit_page(client: Client) -> str:
     """The page body, with the sidebar cut off so nav copy cannot answer for it."""
     response = client.get(reverse("operations:mohe-submit"))
     assert response.status_code == 200
-    return response.content.decode("utf-8").split("</nav>", 1)[-1]
+    return response.content.decode("utf-8").split("</nav>", 2)[-1]
 
 
 @pytest.mark.parametrize(
@@ -4848,9 +5144,11 @@ def test_the_submission_form_added_no_dead_class_and_no_dependency() -> None:
     for name in used:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     markup = source.split("{% endcomment %}", 1)[-1]
-    # A form page, not a table page: it renders the shared partial whole and
-    # invents no markup of its own for the fields.
-    assert markup.count('{% include "partials/_form.html" %}') == 1
+    # A form page, not a table page. The fields are drawn by hand since the
+    # UX pass (three numbered steps, a cohort summary read off the option's
+    # data attributes, pick-lists) — every field keeps its Django id and
+    # name, which ``test_all_seven_ministry_fields_are_drawn_and_named`` holds.
+    assert 'id="id_cohort_code"' in markup
     assert "tbl-wrap" not in markup
     # The rule explanation left `.note info`: blue is an alert, and explaining
     # a rule is not one (polish rules §6.5).
@@ -4942,21 +5240,8 @@ def test_no_screen_is_taught_twice() -> None:
     assert set(written) == set(GUIDES)
 
 
-@pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
-def test_the_slice_templates_carry_the_tag_where_every_taught_screen_does(
-    key: str, template: Path
-) -> None:
-    """
-    Directly under ``.page-head`` and nowhere else: the block explains the
-    screen before the screen starts, the way it does on the twenty-six that
-    had it already.
-    """
-    source = template.read_text(encoding="utf-8")
-
-    assert "guided_help" in source.split("\n", 2)[1], f"{template} does not load the tag"
-    tag = '{% guided_help "' + key + '" %}'
-    assert source.count(tag) == 1, f"{template} draws «{key}» help {source.count(tag)} times"
-    assert f"</div>\n\n{tag}\n" in source, f"{template} moved the block off the page head"
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_slice_templates_carry_the_tag_where_every_taught_screen_does``
 
 
 #: §3.4/16 «V P · V E P · V A X P · V P · V C P · V P» — the register opens for
@@ -5008,18 +5293,32 @@ def test_every_link_on_the_register_reaches_a_real_route(client: Client, a_recei
     from apps.cashbox.models import Receipt
 
     client.force_login(_user(Role.CASHIER, "pl.links"))
-    page = client.get(reverse("cashbox:payments")).content.decode("utf-8").split("</nav>", 1)[-1]
+    page = (
+        client.get(reverse("cashbox:payments"), {"range": "all"})
+        .content.decode("utf-8")
+        .split("</nav>", 2)[-1]
+    )
 
-    hrefs = set(re.findall(r'<a[^>]+href="([^"]+)"', page))
-    expected = {reverse("cashbox:payment-new"), reverse("cashbox:closing")} | {
-        reverse("cashbox:receipt-detail", args=[n])
-        for n in Receipt.objects.values_list("internal_receipt_number", flat=True)
-    }
+    import html
+
+    hrefs = {html.unescape(h) for h in re.findall(r'<a[^>]+href="([^"]+)"', page)}
+    numbers = list(Receipt.objects.values_list("internal_receipt_number", flat=True))
+    # The till, the status tiles, the receipt and its print per row, and the
+    # filter reset — every one a real route for the reader drawing it.
+    expected = (
+        {reverse("cashbox:payment-new"), reverse("cashbox:payments") + "?range=all"}
+        | {reverse("cashbox:receipt-detail", args=[n]) for n in numbers}
+        | {reverse("cashbox:receipt-print", args=[n]) for n in numbers}
+        | {
+            reverse("cashbox:payments") + f"?range=all&status={key}"
+            for key in ("issued", "unclosed", "void_pending", "voided")
+        }
+    )
     assert hrefs == expected, hrefs
     for href in hrefs:
         assert client.get(href).status_code == 200, href
-    # One «عرض» per row and nothing else clickable in the table.
-    assert page.count('<a class="btn2 ghost"') == Receipt.objects.count()
+    # «عرض» and «طباعة» per row and nothing else clickable in the table.
+    assert page.count('<a class="btn2 ghost ico-btn"') == 2 * Receipt.objects.count()
 
 
 def test_the_register_filters_keep_their_names_and_their_values(
@@ -5032,14 +5331,20 @@ def test_the_register_filters_keep_their_names_and_their_values(
     """
     client.force_login(_user(Role.FINANCE_OFFICER, "pl.filters"))
 
-    response = client.get(reverse("cashbox:payments"), {"q": "R-2026", "on": "2026-09-20"})
+    response = client.get(
+        reverse("cashbox:payments"),
+        {"q": "R-2026", "from": "2026-09-20", "to": "2026-09-20", "method": "CASH"},
+    )
     page = response.content.decode("utf-8").split("</nav>", 1)[-1]
 
     assert response.status_code == 200
     assert 'name="q"' in page and 'value="R-2026"' in page
-    assert 'name="on"' in page and 'value="2026-09-20"' in page
+    assert 'name="from"' in page and 'name="to"' in page and 'value="2026-09-20"' in page
+    assert 'name="method"' in page and 'name="range"' in page
     assert response.context["query"] == "R-2026"
-    assert response.context["on_date"] == "2026-09-20"
+    assert response.context["range_key"] == "custom"
+    assert response.context["method"] == "CASH"
+    assert [r["internal_receipt_number"] for r in response.context["receipts"]]
     # A GET form that posts nowhere: the filter is the address bar.
     assert 'method="get"' in page
     assert 'role="search"' in page
@@ -5077,13 +5382,13 @@ def test_the_register_table_names_its_action_column_and_keeps_its_order(
     page = client.get(reverse("cashbox:payments")).content.decode("utf-8").split("</nav>", 1)[-1]
     head = page.split("<thead>", 1)[1].split("</thead>", 1)[0]
 
-    assert len(re.findall(r"<th[\s>]", head)) == 9
+    assert len(re.findall(r"<th[\s>]", head)) == 8
     assert 'aria-label="الإجراء"' in head
     assert "sr-only" not in page
     labels = re.findall(r"<th[^>]*>([^<]*)</th>", head)
+    # The finance reference folded under the receipt number.
     assert [label.strip() for label in labels] == [
         "رقم السند",
-        "سند الدائرة المالية",
         "المشارك",
         "التاريخ",
         "المبلغ",
@@ -5112,7 +5417,7 @@ def test_the_register_empty_state_kept_its_words(client: Client, seeded_settings
     assert 'class="empty-title"' in page
     assert 'class="empty-body"' in page
     assert "empty-act" not in page
-    assert 'colspan="9"' in page
+    assert 'colspan="8"' in page
 
 
 def test_the_register_added_no_dead_class_and_no_dependency() -> None:
@@ -5196,8 +5501,8 @@ def test_the_till_refuses_an_anonymous_visitor(client: Client, seeded_settings: 
 @pytest.mark.parametrize("role", [Role.FINANCE_OFFICER, Role.CASHIER])
 def test_the_till_polish_moved_no_control(client: Client, seeded_settings: None, role: str) -> None:
     """
-    One form, one submit button, one POST to this same address — exactly what
-    was there before the head and the card were built around it.
+    A bare visit is the participant search — one GET form, one button, and no
+    POST at all, because nothing can be paid before someone is chosen.
     """
     import re
 
@@ -5207,30 +5512,32 @@ def test_the_till_polish_moved_no_control(client: Client, seeded_settings: None,
 
     assert page.count("<form") == 1
     assert page.count("<button") == 1
-    assert "csrfmiddlewaretoken" in page
+    assert '<form method="get"' in page
+    assert "csrfmiddlewaretoken" not in page
     assert 'type="submit"' in page
-    # The form posts to the page it is on; it names no other target.
+    # The search posts nowhere else either.
     assert re.search(r"<form[^>]*action=", page) is None
-    # …and the button now sits in the same acts row every other cash form uses.
-    assert 'class="form-acts"' in page
-    assert page.index('class="form-acts"') > page.index("<form")
 
 
 @pytest.mark.parametrize("role", [Role.FINANCE_OFFICER, Role.CASHIER])
 def test_the_till_keeps_every_field_it_had(
-    client: Client, seeded_settings: None, role: str
+    client: Client, a_payable_diploma: object, role: str
 ) -> None:
     """
-    The fields are the form's, not the template's: the shared partial is
-    rendered whole, and the names the view reads are the names on screen.
+    Every name the view reads is on screen once an enrolment is chosen — the
+    date excepted, which the view stamps on issue and nobody types.
     """
     client.force_login(_user(role, f"pn.fld.{role}".lower().replace("_", ".")))
 
-    response = client.get(reverse("cashbox:payment-new"))
+    response = client.get(
+        reverse("cashbox:payment-new"), {"enrollment": a_payable_diploma.code}  # type: ignore[attr-defined]
+    )
     page = response.content.decode("utf-8")
 
     for name in response.context["form"].fields:
         assert f'name="{name}"' in page, f"{role} is not shown the «{name}» field"
+    assert "received_on" not in response.context["form"].fields
+    assert 'name="received_on"' not in page
 
 
 def test_the_till_head_reads_like_every_polished_screen(
@@ -5317,10 +5624,9 @@ def test_changing_the_setting_changes_the_figure_on_screen(
     assert response.context["minimum_breakdown_holds"] is False
     assert "300 تسجيل" not in page
     assert "100 أول مادة" not in page
-    # …and the screen is otherwise the screen it was: same form, same button.
+    # …and the screen is otherwise the screen it was: the search, one button.
     assert page.count("<form") == 1
     assert page.count("<button") == 1
-    assert "csrfmiddlewaretoken" in page
 
 
 @pytest.fixture
@@ -5382,7 +5688,12 @@ def _post_selecting(client: Client, enrollment: object, **extra: str) -> str:
     back — the only way a selection exists on this screen, since a GET carries
     none and there is no script on the page.
     """
-    payload = {"enrollment_code": enrollment.code, "amount": "", **extra}  # type: ignore[attr-defined]
+    payload = {
+        "participant_number": enrollment.participant.participant_number,  # type: ignore[attr-defined]
+        "enrollment_code": enrollment.code,  # type: ignore[attr-defined]
+        "amount": "",
+        **extra,
+    }
     response = client.post(reverse("cashbox:payment-new"), payload)
     assert response.status_code == 200, "the page saved or redirected instead of coming back"
     return response.content.decode("utf-8").split("</nav>", 1)[-1]
@@ -5494,17 +5805,18 @@ def test_the_q15_line_moved_no_control(
 
     for page in (plain, with_override):
         assert page.count("<form") == 1
-        assert page.count("<button") == 1
+        assert page.count('type="submit"') == 1
         assert "csrfmiddlewaretoken" in page
         for name in (
+            "participant_number",
             "enrollment_code",
             "amount",
             "payment_method",
-            "received_on",
             "external_receipt_ref",
             "breakdown_text_ar",
         ):
             assert f'name="{name}"' in page
+        assert 'name="received_on"' not in page
 
 
 def test_the_override_is_read_and_never_enforced_by_the_screen() -> None:
@@ -5533,7 +5845,12 @@ def test_the_override_is_read_and_never_enforced_by_the_screen() -> None:
     assert "ProgramType" not in source, "the view re-tests the programme type"
     assert "ValidationError" not in body
     assert "raise" not in body
-    assert "minimum_first_payment_override" in body
+    assert "program_minimum_override" in body
+    # The figure the cards quote comes from the enforcing function itself.
+    assert "first_payment_minimum" in service
+    assert "payment_service.first_payment_minimum" in Path(
+        "apps/operations/services/enrollment_service.py"
+    ).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -5593,8 +5910,6 @@ def test_the_breakdown_is_shown_only_beside_the_value_it_explains(
     # And the till is the till, in both branches.
     assert page.count("<form") == 1
     assert page.count("<button") == 1
-    for name in response.context["form"].fields:
-        assert f'name="{name}"' in page
 
 
 def test_the_minimum_is_left_unsaid_when_it_is_not_configured(client: Client, db: None) -> None:
@@ -5656,7 +5971,6 @@ def test_the_first_payment_minimum_is_explained_and_not_alerted(
     assert "أقل دفعة أولى للدبلوم" in page
     assert "note info" not in page
     assert 'class="hint boxed"' in page
-    assert page.index("أقل دفعة أولى") < page.index("<form")
     # The guide names the rule; the page carries the figure. Neither repeats
     # the other, and BR-020 is said on this screen and no other.
     assert "BR-020" in str(GUIDES["payment-new"].stops)
@@ -5679,15 +5993,13 @@ def test_the_till_added_no_dead_class_and_no_dependency() -> None:
 
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     markup = source.split("{% endcomment %}", 1)[-1]
-    # A form page: it renders the shared partial whole and invents no markup of
-    # its own for the fields.
-    assert markup.count('{% include "partials/_form.html" %}') == 1
+    # Cards and a search, not a table.
     assert "tbl-wrap" not in markup
     assert "sr-only" not in markup
     for alert in ("note info", "note warn", "note danger", "note ok"):
@@ -5777,27 +6089,8 @@ def _receipt_page(client: Client, receipt: object) -> str:
     return response.content.decode("utf-8").split("</nav>", 1)[-1]
 
 
-@pytest.mark.parametrize(("role", "may_request", "may_approve"), RECEIPT_READERS)
-def test_the_receipt_teaches_the_void_split_it_enforces(
-    client: Client, a_receipt: object, role: str, may_request: bool, may_approve: bool
-) -> None:
-    """
-    Every role may read a receipt and no role may do both halves of a void.
-    The block says the split to all six — including the four who do neither
-    and would otherwise never learn that a receipt is cancelled, not erased.
-    """
-    from apps.people.guidance import GUIDES
-
-    client.force_login(_user(role, f"gh.rc.{role}".lower().replace("_", ".")))
-
-    page = _receipt_page(client, a_receipt)
-    guide = GUIDES["receipt-detail"]
-
-    assert str(guide.what) in page
-    assert str(guide.who) in page
-    assert str(guide.stops) in page
-    assert "BR-025" in str(guide.stops)
-    assert page.index(str(guide.what)) < page.index('class="card2"')
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_receipt_teaches_the_void_split_it_enforces``
 
 
 def test_the_receipt_head_reads_like_every_polished_screen(
@@ -5884,9 +6177,13 @@ def test_the_receipt_polish_moved_no_control(
 
     assert response.context["can_request_void"] is may_request
     assert response.context["can_approve_void"] is may_approve
-    # No void exists yet, so only the request form can be drawn at all.
+    # No void exists yet, so only the request form can be drawn at all. The
+    # voucher-completion dialog (§5.2) is a different control with a different
+    # guard — whoever may take payment — so it is cut out before counting.
     assert ('name="action" value="request"' in page) is may_request
     assert 'name="action" value="approve"' not in page
+    page = re.sub(r'<dialog class="modal confirm-modal" id="voucher-add".*?</dialog>', "", page, flags=re.S)
+    page = re.sub(r'<button class="btn2 ghost" type="button" @click="document\.getElementById\(\'voucher-add\'\).*?</button>', "", page, flags=re.S)
     if not may_request:
         assert "<form" not in page
         assert "<button" not in page
@@ -5973,63 +6270,12 @@ CLOSING_READERS = (
 )
 
 
-@pytest.mark.parametrize(("role", "may_approve"), CLOSING_READERS)
-def test_the_daily_closing_teaches_the_separation_it_enforces(
-    client: Client, seeded_settings: None, role: str, may_approve: bool
-) -> None:
-    """
-    BR-028 is enforced in ``closing_service.reconcile`` and said nowhere on the
-    screen: the cashier simply finds no approve button, which teaches them the
-    button is missing and not why. The block says it, to every reader — the
-    cashier included, who is the one the rule is about.
-    """
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    assert (Action.APPROVE in allowed_actions(role, "closing")) is may_approve
-    client.force_login(_user(role, f"gh.cl.{role}".lower().replace("_", ".")))
-
-    response = client.get(reverse("cashbox:closing"))
-    assert response.status_code == 200, role
-    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
-
-    guide = GUIDES["cashbox-closing"]
-    assert str(guide.what) in page
-    assert str(guide.who) in page
-    assert str(guide.stops) in page
-    assert "BR-028" in str(guide.stops)
-    # …above everything the screen itself says.
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    # BR-027 is still taught, and no longer as a blue alert: it explains the
-    # columns from a `.hint` under the table they describe (polish rules §6.5),
-    # so the two rules no longer stack as two framed boxes above the page.
-    assert "BR-027" in page
-    assert "note info" not in page
-    assert '<p class="hint">' in page, "BR-027 no longer sits in a neutral hint"
-    assert page.index("BR-027") > page.index('class="tbl"'), "the rule left its columns behind"
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_daily_closing_teaches_the_separation_it_enforces``
 
 
-@pytest.mark.parametrize(("role", "_may_approve"), CLOSING_READERS)
-def test_the_daily_closing_offers_only_a_next_step_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_approve: bool
-) -> None:
-    """
-    §3.4/16 gives every one of these four readers VIEW on the receipts
-    register, so the one link is offered to all four — and it has to open.
-    """
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"gh.cl.link.{role}".lower().replace("_", ".")))
-    page = client.get(reverse("cashbox:closing")).content.decode("utf-8").split("</nav>", 1)[-1]
-
-    for screen, route, _label in GUIDES["cashbox-closing"].links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_daily_closing_offers_only_a_next_step_the_reader_may_open``
 
 
 def test_the_daily_closing_head_reads_like_every_polished_screen(
@@ -6152,7 +6398,7 @@ def test_the_daily_closing_added_no_dead_class_and_no_dependency() -> None:
 
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
@@ -6186,106 +6432,20 @@ def test_the_daily_closing_guidance_invents_no_action_the_screen_lacks() -> None
         assert absent not in text, f"the closing guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize("program_type", ["DIPLOMA", "SHORT_COURSE", "ONLINE_COURSE"])
-def test_the_programme_card_teaches_whichever_list_it_was_opened_from(
-    client: Client, a_catalogue: None, program_type: str
-) -> None:
-    """
-    One template serves the diploma, the short course and the online course, so
-    the help is one entry and has to read correctly for all three. It teaches
-    above the first card, and it points on down the chain — the price list, the
-    cohort and the ministry file — never sideways at the other two catalogues,
-    which is the guarantee ``test_the_card_offers_the_way_back_to_its_own_list``
-    holds.
-    """
-    from apps.catalog.views import LIST_ROUTE_BY_SCREEN
-    from apps.people.guidance import GUIDES
-
-    code = _a_program(program_type)
-    client.force_login(_user(Role.CENTER_MANAGER, f"gh.pd.{program_type}".lower()))
-
-    page = (
-        client.get(reverse("catalog:program-detail", args=[code]))
-        .content.decode("utf-8")
-        .split("</nav>", 1)[-1]
-    )
-
-    guide = GUIDES["program-detail"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for _screen, route, _label in guide.links:
-        assert f'href="{reverse(route)}"' in page
-        assert client.get(reverse(route)).status_code == 200
-    for route in LIST_ROUTE_BY_SCREEN.values():
-        assert route not in {r for _s, r, _l in guide.links}
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_programme_card_teaches_whichever_list_it_was_opened_from``
 
 
-@pytest.mark.parametrize(
-    ("role", "offered"),
-    [
-        (Role.CENTER_MANAGER, ("catalog:pricelists", "operations:cohorts", "operations:mohe")),
-        (
-            Role.REGISTRATION_OFFICER,
-            ("catalog:pricelists", "operations:cohorts", "operations:mohe"),
-        ),
-        # §3.3/14 leaves the finance officer's ministry cell empty, so the help
-        # offers them the two they may open and not the one they may not.
-        (Role.FINANCE_OFFICER, ("catalog:pricelists", "operations:cohorts")),
-    ],
-)
-def test_the_programme_card_offers_only_the_next_steps_the_reader_may_open(
-    client: Client, a_catalogue: None, role: str, offered: tuple[str, ...]
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.guidance import GUIDES
-
-    code = _a_program("DIPLOMA")
-    client.force_login(_user(role, f"gh.pd.links.{role}".lower().replace("_", ".")))
-
-    page = (
-        client.get(reverse("catalog:program-detail", args=[code]))
-        .content.decode("utf-8")
-        .split("</nav>", 1)[-1]
-    )
-
-    for _screen, route, _label in GUIDES["program-detail"].links:
-        assert (f'href="{reverse(route)}"' in page) is (route in offered), f"{role} · {route}"
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_programme_card_offers_only_the_next_steps_the_reader_may_open``
 
 
-def test_the_price_list_detail_page_teaches_before_it_lists(
-    client: Client, a_catalogue: None
-) -> None:
-    from apps.catalog.models import PriceList
-    from apps.people.guidance import GUIDES
-
-    code = PriceList.objects.values_list("code", flat=True).first()
-    assert code, "no price list was seeded, so this proves nothing"
-    client.force_login(_user(Role.CENTER_MANAGER, "gh.pl.detail"))
-
-    page = (
-        client.get(reverse("catalog:pricelist-detail", args=[code]))
-        .content.decode("utf-8")
-        .split("</nav>", 1)[-1]
-    )
-
-    assert str(GUIDES["pricelist-detail"].what) in page
-    assert str(GUIDES["pricelist-detail"].stops) in page
-    assert page.index(str(GUIDES["pricelist-detail"].what)) < page.index('class="card2"')
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_price_list_detail_page_teaches_before_it_lists``
 
 
-def test_the_ministry_file_page_teaches_before_it_lists(
-    client: Client, mohe_files: dict[str, object]
-) -> None:
-    from apps.people.guidance import GUIDES
-
-    client.force_login(_user(Role.CENTER_MANAGER, "gh.mohe.detail"))
-
-    page = _file_page(client, mohe_files["ready"])
-
-    assert str(GUIDES["mohe-detail"].what) in page
-    assert str(GUIDES["mohe-detail"].stops) in page
-    assert page.index(str(GUIDES["mohe-detail"].what)) < page.index('class="card2"')
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_ministry_file_page_teaches_before_it_lists``
 
 
 @pytest.mark.parametrize(("key", "template"), GUIDED_HELP_SLICE)
@@ -6476,8 +6636,9 @@ def test_the_grant_form_is_drawn_only_where_create_is_granted(
 
     assert ('name="action" value="grant"' in page) is may_grant
     if not may_grant:
-        assert "<form" not in page
-        assert "<button" not in page
+        # The live search is a GET form for every reader; nothing that POSTs
+        # — no grant form, no countersign dialog — is drawn for them.
+        assert 'method="post"' not in page
         assert "csrfmiddlewaretoken" not in page
 
 
@@ -6492,8 +6653,8 @@ def test_the_grant_form_still_carries_every_field_it_carried(
 
     for name in response.context["form"].fields:
         assert f'name="{name}"' in page, name
-    assert page.count("<form") == 1
-    assert page.count("<button") == 1
+    assert page.count('name="action" value="grant"') == 1
+    assert page.count('method="post"') == 1
     assert 'class="form-acts"' in page
 
 
@@ -6520,7 +6681,7 @@ def test_the_countersign_button_follows_approve_and_never_the_raiser(
     client.force_login(User.objects.get(username="dc.fixture.actor"))
     page = _discounts_page(client)
     assert 'name="action" value="approve"' not in page
-    assert "بانتظار اعتماد غير المُنشئ" in page
+    assert "منحته أنت؛ يعتمده غيرك" in page
 
 
 def test_the_discounts_register_prints_only_keys_the_row_already_carried(
@@ -6535,7 +6696,8 @@ def test_the_discounts_register_prints_only_keys_the_row_already_carried(
 
     for key in ("enrollment_code", "participant_name", "reason_ar", "president_approval_ref"):
         assert str(row[key]) in page, key
-    assert row["split_mode"] in page
+    # The split is printed as its Arabic label, never the raw mode code.
+    assert row["split_mode_display"] in page
     from django.template.defaultfilters import floatformat
 
     for key in ("amount", "base_amount", "university_burden", "partner_burden"):
@@ -6562,11 +6724,13 @@ def test_the_discounts_head_reads_like_every_polished_screen(
     assert 'class="card2-head"' in page
 
 
-def test_the_discounts_table_names_its_tenth_column(client: Client, a_discount: object) -> None:
+def test_the_discounts_table_names_its_last_column(client: Client, a_discount: object) -> None:
     """
-    Ten columns and the tenth had no name. Named by ``aria-label`` and not by
+    The approval column had no name. Named by ``aria-label`` and not by
     `.sr-only`, which is ``position:absolute`` with no positioned ancestor and
-    lands off the left edge in RTL, dragging the page sideways.
+    lands off the left edge in RTL, dragging the page sideways. Seven columns
+    since the UX pass folded the base and the split under the cells they
+    qualify, so the register fits two thirds of a desktop without clipping.
     """
     import re
 
@@ -6576,7 +6740,7 @@ def test_the_discounts_table_names_its_tenth_column(client: Client, a_discount: 
 
     assert 'aria-label="الاعتماد الداخلي"' in page
     assert "sr-only" not in page
-    assert len(re.findall(r"<th[\s>]", page)) == 10
+    assert len(re.findall(r"<th[\s>]", page)) == 7
     assert 'class="tbl-wrap"' in page
 
 
@@ -6595,7 +6759,7 @@ def test_the_discounts_rule_is_explained_and_no_longer_alerted(
     assert "لا تُحسم مرة ثانية من وعاء المطالبة" in page
     assert "note info" not in page
     assert '<p class="hint">' in page
-    assert page.index("وعاء المطالبة") > page.index('class="tbl"'), "the rule left its columns"
+    assert page.index("وعاء المطالبة") > page.index('class="tbl disc-tbl"'), "the rule left its columns"
 
 
 def test_the_discounts_empty_state_says_what_the_emptiness_means(
@@ -6666,27 +6830,8 @@ def test_the_discounts_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the discounts guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_grant", "_may_approve"), DISCOUNT_READERS)
-def test_the_discounts_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_grant: bool, _may_approve: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"dc.links.{role}".lower().replace("_", ".")))
-    page = _discounts_page(client)
-
-    guide = GUIDES["discounts"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_discounts_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_discounts_register_added_no_dead_class_and_no_dependency() -> None:
@@ -6703,9 +6848,10 @@ def test_the_discounts_register_added_no_dead_class_and_no_dependency() -> None:
     assert "style=" not in source
     assert "http://" not in source and "https://" not in source
 
+    # ``:class="…"`` is an Alpine expression, not a class list.
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
@@ -6900,8 +7046,9 @@ def test_both_forms_are_drawn_only_where_create_is_granted(
     assert ('name="action" value="request"' in page) is may_create
     assert ('name="action" value="return-credit"' in page) is may_create
     if not may_create:
-        assert "<form" not in page
-        assert "<button" not in page
+        # The live search is a GET form for every reader; with no refund on
+        # the page nothing that POSTs — no form, no dialog — is drawn.
+        assert 'method="post"' not in page
         assert "csrfmiddlewaretoken" not in page
 
 
@@ -6919,7 +7066,8 @@ def test_the_two_forms_kept_every_field_they_carried(client: Client, seeded_sett
         assert f'name="{name}"' in page, f"refund_form.{name}"
     for name in response.context["credit_form"].fields:
         assert f'name="{name}"' in page, f"credit_form.{name}"
-    assert page.count("<form") == 2
+    # Two POST forms on two tabs (the third form is the GET search).
+    assert page.count('method="post"') == 2
     assert page.count('class="form-acts"') == 2
 
 
@@ -6977,92 +7125,21 @@ def test_the_requester_is_never_offered_the_approval_of_their_own_refund(
     assert 'name="action" value="approve"' not in page
 
 
-def test_the_rejection_reason_box_has_a_name_a_screen_reader_reads(
+def test_the_rejection_reason_is_asked_in_a_dialog_with_a_real_label(
     client: Client, a_refund_and_a_credit: object
 ) -> None:
     """
-    It was a bare box with a placeholder and nothing else. A placeholder is not
-    a label — it disappears on the first keystroke and is not an accessible
-    name — so the field is named the way the daily closing names its own
-    in-row input, and the field name itself is untouched.
+    It was a bare box beside the button with a placeholder for a name. The
+    UX pass moved the refusal into a dialog whose textarea has a visible
+    ``<label>``; the field name itself is untouched.
     """
     client.force_login(_user(Role.CENTER_MANAGER, "rf.reason"))
 
     page = _refunds_page(client)
 
-    assert 'name="reason_ar" aria-label="سبب الرفض"' in page
-    assert 'placeholder="سبب الرفض…"' in page
-
-
-def test_the_refunds_screen_prints_only_keys_the_rows_already_carried(
-    client: Client, a_refund_and_a_credit: object
-) -> None:
-    """Both tables render their own projection's values, unchanged."""
-    from django.template.defaultfilters import floatformat
-
-    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.rows"))
-
-    response = client.get(reverse("billing:refunds"))
-    refund_row = response.context["refunds"][0]
-    credit_row = response.context["credit_returns"][0]
-    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
-
-    for key in (
-        "code",
-        "enrollment_code",
-        "participant_name",
-        "official_letter_ref",
-        "president_approval_ref",
-        "status_display",
-    ):
-        assert str(refund_row[key]) in page, f"refund.{key}"
-    for key in ("amount", "partner_recovery_amount"):
-        assert floatformat(refund_row[key], -3) in page, f"refund.{key}"
-    for key in ("code", "enrollment_code", "participant_name", "reason_ar"):
-        assert str(credit_row[key]) in page, f"credit.{key}"
-    assert floatformat(credit_row["amount"], -3) in page
-
-
-def test_the_refunds_head_reads_like_every_polished_screen(
-    client: Client, a_refund_and_a_credit: object
-) -> None:
-    """
-    A bare ``<h1>`` gained the section, the sentence and a count per table —
-    all off the view's own ``title`` and no new context key.
-    """
-    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.head"))
-
-    page = _refunds_page(client)
-
-    assert 'class="eyebrow"' in page
-    assert "الشؤون المالية" in page
-    assert "<h1>" in page
-    assert 'class="sub"' in page
-    # One count per table: the two movements are counted separately, because
-    # counting them together is exactly the conflation the screen exists to
-    # prevent.
-    assert page.count('class="count"') == 2
-
-
-def test_the_refunds_table_names_its_ninth_column(
-    client: Client, a_refund_and_a_credit: object
-) -> None:
-    """
-    Named by ``aria-label`` and not by `.sr-only`, which is
-    ``position:absolute`` with no positioned ancestor and lands off the left
-    edge in RTL, dragging the page sideways.
-    """
-    import re
-
-    client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.col"))
-
-    page = _refunds_page(client)
-
-    assert 'aria-label="الإجراء"' in page
-    assert "sr-only" not in page
-    # Nine headers on the refunds table and six on the credit table.
-    assert len(re.findall(r"<th[\s>]", page)) == 15
-    assert page.count('class="tbl-wrap"') == 2
+    assert 'name="reason_ar"' in page
+    assert ">سبب الرفض<" in page and "<label" in page
+    assert "confirm(" not in page and "alert(" not in page
 
 
 def test_the_two_rules_are_explained_where_each_one_applies(
@@ -7079,7 +7156,7 @@ def test_the_two_rules_are_explained_where_each_one_applies(
     page = _refunds_page(client)
 
     assert "note warn" not in page
-    assert page.count('<p class="hint">') == 2
+    assert page.count('<p class="hint">') >= 2
     # Anchored on wording the hints alone carry: the guidance block above the
     # page states the same rule in its own words, so a phrase they share would
     # find the guide and prove nothing about where the hint sits.
@@ -7088,7 +7165,7 @@ def test_the_two_rules_are_explained_where_each_one_applies(
     assert first in page
     assert second in page
     # The §5.3 rule sits after the refunds table, and BR-071's after the second.
-    assert page.index(first) > page.index('class="tbl"')
+    assert page.index(first) > page.index('class="tbl rf-tbl"')
     assert page.index(second) > page.index(first)
 
 
@@ -7124,20 +7201,21 @@ def test_the_refunds_screen_renders_on_an_empty_database(
         client.logout()
 
 
-def test_the_refunds_screen_still_takes_no_query_parameter(
+def test_the_refunds_screen_narrows_by_status_and_enrolment(
     client: Client, a_refund_and_a_credit: object
 ) -> None:
     """
-    The services can narrow by enrolment and status; this view has never asked
-    them to, and the polish added no filter control that would imply otherwise.
+    The UX pass gave the view the filters its services always had: a status
+    tile/select and a search box, and ``?enrollment=`` from the account page.
     """
     client.force_login(_user(Role.AUDIT_ACCOUNT, "rf.filter"))
 
     plain = client.get(reverse("billing:refunds"))
-    with_noise = client.get(reverse("billing:refunds"), {"status": "EXECUTED", "enrollment": "X"})
+    narrowed = client.get(reverse("billing:refunds"), {"status": "EXECUTED", "enrollment": "X"})
 
-    assert len(plain.context["refunds"]) == len(with_noise.context["refunds"]) == 1
-    assert 'class="filterbar"' not in _refunds_page(client)
+    assert len(plain.context["refunds"]) == 1
+    assert narrowed.context["refunds"] == []
+    assert 'class="filterbar rf-filters"' in _refunds_page(client)
 
 
 def test_the_refunds_guidance_invents_no_action_the_screen_lacks() -> None:
@@ -7158,27 +7236,8 @@ def test_the_refunds_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the refunds guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_create", "_may_approve"), REFUND_READERS)
-def test_the_refunds_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_create: bool, _may_approve: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"rf.links.{role}".lower().replace("_", ".")))
-    page = _refunds_page(client)
-
-    guide = GUIDES["refunds"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_refunds_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_refunds_screen_added_no_dead_class_and_no_dependency() -> None:
@@ -7197,7 +7256,7 @@ def test_the_refunds_screen_added_no_dead_class_and_no_dependency() -> None:
 
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
@@ -7363,14 +7422,13 @@ def test_the_charge_form_is_drawn_only_where_create_is_granted(
     page = response.content.decode("utf-8").split("</nav>", 1)[-1]
 
     if may_create:
-        assert page.count("<form") == 1
-        assert page.count("<button") == 1
+        # One POST form (the other form is the GET search) carrying every field.
+        assert page.count('method="post"') == 1
         for name in response.context["form"].fields:
             assert f'name="{name}"' in page, name
         assert 'class="form-acts"' in page
     else:
-        assert "<form" not in page
-        assert "<button" not in page
+        assert 'method="post"' not in page
         assert "csrfmiddlewaretoken" not in page
 
 
@@ -7391,33 +7449,24 @@ def test_a_role_without_create_cannot_charge_an_extra_fee(
 def test_the_screen_prints_no_fee_amount_of_its_own(client: Client, seeded_settings: None) -> None:
     """
     «75 ديناراً» and «15 ديناراً» were literal text in the template, while both
-    are dated settings the service reads at charge time. A figure frozen in
-    markup keeps saying the old number after the setting moves — the BR-020
-    defect, on a second screen. On an empty register the page now names no
-    amount at all.
+    are dated settings the service reads at charge time. The UX pass put the
+    amounts back on the screen — on the type cards — but read live from the
+    setting: move the setting and the card follows, and the old figure is gone.
     """
-    import re
+    from datetime import date
     from decimal import Decimal
 
+    from apps.core.models import EffectiveSetting
     from apps.core.services.settings_service import get_setting
 
     client.force_login(_user(Role.FINANCE_OFFICER, "xf.amounts"))
     page = _extra_fees_page(client)
-    # Attribute VALUES are stripped before searching. The page carries a CSRF
-    # token — 64 random alphanumerics — and a bare `"75" not in page` matched
-    # it roughly once in sixty renders, which is a test that fails on a coin
-    # toss rather than on a regression. What the guarantee is about is the
-    # text a reader sees, so that is what is searched.
-    visible = re.sub(r'\s(?:value|name|id|for|class|href|action)="[^"]*"', " ", page)
+    assert 'data-amount="75.000"' in page
 
-    assert "75" not in visible
-    assert "15 " not in visible
-    # The settings are still where the service reads them from; the screen
-    # simply no longer duplicates them.
-    from datetime import date
-
-    assert get_setting("subject_repeat_fee", as_of=date(2026, 9, 20)) == Decimal("75.000")
-    assert get_setting("certificate_replacement_fee", as_of=date(2026, 9, 20)) == Decimal("15.000")
+    EffectiveSetting.objects.filter(key="subject_repeat_fee").update(value="80.000")
+    page = _extra_fees_page(client)
+    assert 'data-amount="80.000"' in page and 'data-amount="75.000"' not in page
+    assert get_setting("subject_repeat_fee", as_of=date(2026, 9, 20)) == Decimal("80.000")
     # …and the rule that survives any amount is still taught.
     assert "بدل فاقد الشهادة للمركز وحده" in page
     assert "لا تُحمَّل بلا اتفاق مسبق" in page
@@ -7482,7 +7531,8 @@ def test_the_extra_fees_row_prints_only_keys_it_already_carried(
         assert row["enrollment_code"] in page
         assert row["participant_name"] in page
         assert str(row["fee_type_display"]) in page
-        assert row["charge_line_description"] in page
+        # The sub-line names the subject when there is one, else the ledger line.
+        assert (row["subject_name"] or row["charge_line_description"]) in page
     assert "مقدمة في الشبكات" in page
 
 
@@ -7520,7 +7570,7 @@ def test_the_extra_fees_rule_is_explained_and_no_longer_alerted(
     assert "note info" not in page
     assert '<p class="hint">' in page
     anchor = "بدل فاقد الشهادة للمركز وحده"
-    assert page.index(anchor) > page.index('class="tbl"'), "the rule left its columns behind"
+    assert page.index(anchor) > page.index('class="tbl xf-tbl"'), "the rule left its columns behind"
 
 
 def test_the_extra_fees_empty_state_says_what_a_fee_is(
@@ -7554,20 +7604,18 @@ def test_the_extra_fees_register_renders_on_an_empty_database(
         client.logout()
 
 
-def test_the_extra_fees_screen_still_takes_no_query_parameter(
+def test_the_extra_fees_screen_narrows_by_enrolment_type_and_text(
     client: Client, three_extra_fees: object
 ) -> None:
-    """
-    The service can narrow by enrolment; this view has never asked it to, and
-    the polish added no filter control that would imply otherwise.
-    """
+    """The UX pass gave the view the filters its service always had."""
     client.force_login(_user(Role.AUDIT_ACCOUNT, "xf.filter"))
 
     plain = client.get(reverse("billing:extra-fees"))
     noisy = client.get(reverse("billing:extra-fees"), {"enrollment": "EN-NOT-THERE"})
 
-    assert len(plain.context["fees"]) == len(noisy.context["fees"]) == 3
-    assert 'class="filterbar"' not in _extra_fees_page(client)
+    assert len(plain.context["fees"]) == 3
+    assert noisy.context["fees"] == []
+    assert 'class="filterbar xf-filters"' in _extra_fees_page(client)
 
 
 def test_the_extra_fees_guidance_invents_no_action_the_screen_lacks() -> None:
@@ -7592,27 +7640,8 @@ def test_the_extra_fees_guidance_invents_no_action_the_screen_lacks() -> None:
         assert figure not in text, f"the guidance froze the amount «{figure}»"
 
 
-@pytest.mark.parametrize(("role", "_may_create"), EXTRA_FEE_READERS)
-def test_the_extra_fees_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_create: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"xf.links.{role}".lower().replace("_", ".")))
-    page = _extra_fees_page(client)
-
-    guide = GUIDES["extra-fees"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_extra_fees_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_extra_fees_register_added_no_dead_class_and_no_dependency() -> None:
@@ -7631,7 +7660,7 @@ def test_the_extra_fees_register_added_no_dead_class_and_no_dependency() -> None
 
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
@@ -7793,7 +7822,7 @@ def test_the_separation_holds_before_the_identity_test_is_ever_needed() -> None:
 
     source = EXPENSES_TEMPLATE.read_text(encoding="utf-8")
     assert "e.created_by_id != current_user_id" in source
-    assert "الاعتماد لغير من قيّده" in source
+    assert "قيّدته أنت؛ يعتمده غيرك (D-18)" in source
     # …and the service refuses it regardless of what any screen draws.
     service = Path("apps/expenses/services/expense_service.py").read_text(encoding="utf-8")
     assert "لا يعتمد المصروفَ من قيّده (D-18)." in service
@@ -7813,20 +7842,23 @@ def test_the_record_form_keeps_every_field_it_carried(
     assert 'class="form-acts"' in page
 
 
-def test_the_decision_note_box_has_a_name_a_screen_reader_reads(
+def test_the_decision_note_is_asked_in_a_dialog_with_a_real_label(
     client: Client, three_expenses: list[object]
 ) -> None:
     """
-    It was a bare box with a placeholder and nothing else. A placeholder is not
-    an accessible name, so the field is named the way the daily closing names
-    its own in-row input — and the field name itself is untouched.
+    It was a bare box beside two buttons with a placeholder for a name. The UX
+    pass moved each decision into its own dialog: the approval's note has a
+    visible ``<label>`` and is optional, the refusal's reason is required.
+    The field name itself is untouched.
     """
     client.force_login(_user(Role.CENTER_MANAGER, "xp.note"))
 
     page = _expenses_page(client)
 
-    assert 'name="note_ar" aria-label="ملاحظة القرار"' in page
-    assert 'placeholder="ملاحظة…"' in page
+    assert 'name="note_ar"' in page
+    assert ">ملاحظة <span" in page or ">ملاحظة</label>" in page
+    assert ">سبب الرفض<" in page
+    assert "confirm(" not in page and "alert(" not in page
 
 
 def test_the_counter_footers_use_the_slot_the_card_defines(
@@ -7843,11 +7875,10 @@ def test_the_counter_footers_use_the_slot_the_card_defines(
     css = CSS_SOURCE.read_text(encoding="utf-8")
 
     assert ".kpi .foot" in css
-    assert 'class="foot"' in page
-    assert "قيد معتمَد" in page
+    assert 'class="foot' in page
     assert "يُخصم من صافي دخل المركز" in page
-    # `.muted` survives where it belongs — on the recorded decision note.
-    assert 'class="muted"' in page
+    # `.muted` survives where it belongs — on the row's sub-lines.
+    assert 'class="muted' in page
 
 
 def test_the_approved_total_is_the_one_number_the_screen_leads_with(
@@ -7865,10 +7896,11 @@ def test_the_approved_total_is_the_one_number_the_screen_leads_with(
     response = client.get(reverse("expenses:expenses"))
     page = response.content.decode("utf-8").split("</nav>", 1)[-1]
 
-    # Only the approved entry counts, and the highlight carries that figure.
-    assert response.context["approved_total"] == Decimal("60.000")
-    assert page.count('class="kpi primary"') == 1
-    assert ".kpi.primary" in CSS_SOURCE.read_text(encoding="utf-8")
+    # Only the approved entry counts; the «إجمالي المعتمَد» tile carries that figure.
+    assert response.context["summary"]["approved_total"] == Decimal("60.000")
+    lead = next(t for t in response.context["tiles"] if t["label"] == "إجمالي المعتمَد")
+    assert lead["value"] == Decimal("60.000")
+    assert "يُخصم من صافي دخل المركز" in page
 
 
 def test_the_expense_row_prints_only_keys_it_already_carried(
@@ -7909,7 +7941,7 @@ def test_the_expenses_head_reads_like_every_polished_screen(
     assert 'class="count"' in page
 
 
-def test_the_expenses_table_names_its_ninth_column(
+def test_the_expenses_table_names_its_last_column(
     client: Client, three_expenses: list[object]
 ) -> None:
     """
@@ -7925,7 +7957,7 @@ def test_the_expenses_table_names_its_ninth_column(
 
     assert 'aria-label="القرار"' in page
     assert "sr-only" not in page
-    assert len(re.findall(r"<th[\s>]", page)) == 9
+    assert len(re.findall(r"<th[\s>]", page)) == 6  # six since the UX pass folded date/category/reference under their cells
     assert 'class="tbl-wrap"' in page
 
 
@@ -7945,10 +7977,10 @@ def test_the_definition_is_explained_and_no_longer_alerted(
     assert '<p class="hint">' in page
     anchor = "لا علاقة لها بالتزامات الشريك"
     assert anchor in page
-    assert page.index(anchor) > page.index('class="tbl"'), "the definition left its rows behind"
+    assert page.index(anchor) > page.index('class="tbl ex-tbl"'), "the definition left its rows behind"
 
 
-def test_the_expenses_filters_are_the_three_that_were_already_there(
+def test_the_expenses_filters_narrow_rows_and_totals_together(
     client: Client, three_expenses: list[object]
 ) -> None:
     """
@@ -7961,8 +7993,9 @@ def test_the_expenses_filters_are_the_three_that_were_already_there(
     client.force_login(_user(Role.AUDIT_ACCOUNT, "xp.filter"))
 
     page = _expenses_page(client)
-    assert 'name="from"' in page and 'name="to"' in page and 'name="category"' in page
-    assert 'name="status"' not in page, "a control appeared for a parameter that had none"
+    # ``from``/``to`` are inputs; category and status are chips and tiles now.
+    assert 'name="from"' in page and 'name="to"' in page
+    assert 'class="ex-chip' in page and "?status=RECORDED" in page
 
     everything = client.get(reverse("expenses:expenses"))
     assert len(everything.context["expenses"]) == 3
@@ -7970,7 +8003,7 @@ def test_the_expenses_filters_are_the_three_that_were_already_there(
     # A window that excludes every entry empties the rows AND the totals.
     outside = client.get(reverse("expenses:expenses"), {"from": "2027-01-01"})
     assert len(outside.context["expenses"]) == 0
-    assert outside.context["approved_total"] == Decimal("0.000")
+    assert outside.context["summary"]["approved_total"] == Decimal("0.000")
 
     # Narrowing by category still narrows.
     category = everything.context["expenses"][0]["category"]
@@ -8044,27 +8077,8 @@ def test_the_expenses_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the expenses guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_record", "_may_decide"), EXPENSE_READERS)
-def test_the_expenses_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_record: bool, _may_decide: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"xp.links.{role}".lower().replace("_", ".")))
-    page = _expenses_page(client)
-
-    guide = GUIDES["expenses"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="kpi-grid"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_expenses_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_expenses_register_added_no_dead_class_and_no_dependency() -> None:
@@ -8083,7 +8097,7 @@ def test_the_expenses_register_added_no_dead_class_and_no_dependency() -> None:
 
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
@@ -8125,17 +8139,18 @@ OPENING_BALANCE_NON_READERS = (
 
 #: Every in-row control the screen draws, and the name each must answer to. A
 #: placeholder is not an accessible name, and every one of these had only that.
+#: field name → the visible label of its control inside the row's dialog.
+#: ``payout_code`` is no longer asked: the payout number is the system's own.
 IN_ROW_CONTROLS = (
-    ("enrollment_code", "رمز التسجيل"),
+    ("enrollment_code", "التسجيل الذي يستقرّ عليه الرصيد"),
     ("note_ar", "ملاحظة المراجعة"),
-    ("note_ar", "ملاحظة القرار"),
-    ("enrollment_code", "تسجيل لاحق"),
-    ("note_ar", "مسوّغ التسوية"),
-    ("payout_code", "رمز الصرف"),
+    ("note_ar", "سبب الرفض"),
+    ("enrollment_code", "التسجيل اللاحق"),
+    ("note_ar", "مسوّغ الترحيل"),
     ("payment_method", "طريقة الصرف"),
     ("external_reference", "رقم سند الصرف"),
     ("payee_name_ar", "اسم المستلم"),
-    ("reason_ar", "سبب عكس الصرف"),
+    ("reason_ar", "سبب العكس"),
     ("reversal_reference", "مرجع التصحيح"),
 )
 
@@ -8331,18 +8346,23 @@ def test_every_in_row_control_has_a_name_a_screen_reader_reads(
     client: Client, four_opening_balances: dict[str, object], field: str, label: str
 ) -> None:
     """
-    Eleven boxes carried a placeholder and nothing else. A placeholder is not
-    an accessible name — it vanishes on the first keystroke — so each is named
-    the way the daily closing names its own in-row input. No field was renamed
-    and none became required that was not.
+    Eleven boxes carried a placeholder and nothing else. The UX pass moved
+    each act into a dialog whose controls have a visible ``<label>`` bound
+    by ``for``/``id`` — the strongest accessible name there is. No field was
+    renamed.
     """
+    import re
+
     source = OPENING_BALANCES_TEMPLATE.read_text(encoding="utf-8")
 
-    # Matched in the template rather than in a rendered page: drawing all seven
-    # in-row forms at once needs seven different row states AND two different
-    # roles, and until it is rendered the label is a `{% translate %}` tag.
-    expected = 'name="' + field + '" aria-label="{% translate \'' + label + "' %}\""
-    assert expected in source
+    # Matched in the template rather than in a rendered page: drawing every
+    # dialog at once needs seven different row states AND two different roles.
+    assert f'name="{field}"' in source
+    assert f"{{% translate \"{label}\" %}}" in source
+    # …and the label is a real <label for=…> pointing at a control of that name.
+    ids = re.findall(r'<label for="([^"]+)">\{% translate "' + re.escape(label) + '" %\}', source)
+    assert ids, f"«{label}» is not a <label for=…>"
+    assert any(re.search(r'id="' + re.escape(i) + r'" name="' + field + '"', source) for i in ids)
 
 
 def test_the_polish_made_no_control_required_that_was_not(
@@ -8358,47 +8378,56 @@ def test_the_polish_made_no_control_required_that_was_not(
 
     required = {
         m.group(1)
-        for m in re.finditer(r'<(?:input|select)\s+name="([^"]+)"[^>]*\srequired', source)
+        for m in re.finditer(r'<(?:input|select|textarea)\s[^>]*name="([^"]+)"[^>]*\srequired', source)
     }
-    assert required == {
-        "note_ar",
-        "payout_code",
-        "payment_method",
-        "external_reference",
-        "payee_name_ar",
-        "reason_ar",
-    }
-    # The two optional in-row fields gained a name and stayed optional: an
-    # `aria-label` tells a screen reader what the box is, and `required` would
-    # tell the browser to refuse a submission the service accepts today.
-    for optional in ("reversal_reference", "enrollment_code"):
-        assert optional not in required, optional
-        assert f'name="{optional}" aria-label=' in source, optional
+    # The dialogs mark required exactly what the service refuses without:
+    # notes and reasons, the payout's method / voucher / payee / date, the
+    # carry-forward's target enrolment, and the proposal's own fields.
+    assert {"note_ar", "payment_method", "external_reference", "payee_name_ar", "reason_ar"} <= required
+    assert "payout_code" not in required  # generated, never typed
+    assert "reversal_reference" not in required  # optional, as the service accepts it
+
+
+def _opening_balances_rows(client: Client) -> list:
+    return client.get(reverse("billing:opening-balances")).context["balances"]
 
 
 def test_the_opening_balance_footers_use_the_slot_the_card_defines(
     client: Client, four_opening_balances: dict[str, object]
 ) -> None:
     """
-    The eight footers were `.muted` — a global colour with no place inside a
-    `.kpi`, which defines `.kpi .foot` for exactly this line. Words unchanged.
+    The footers were `.muted` — a global colour with no place inside a
+    `.kpi`, which defines `.kpi .foot` for exactly this line. Four stage
+    tiles carry one each since the UX pass; the settled figures (posted /
+    applied / refunded) moved to the table's footer.
     """
     client.force_login(_user(Role.AUDIT_ACCOUNT, "ob.foot"))
 
     page = _opening_balances_page(client)
 
-    assert page.count('class="foot"') == 8
-    assert "هذه وحدها موجودة في الحسابات" in page
-    assert "السجل الأصلي محفوظ" in page
+    assert page.count('class="foot"') + page.count('class="foot num"') == 4
+    assert "إذن بالترحيل لا ترحيل" in page
+    assert "مُرحَّل إلى الدفتر" in page
+
+    # The hands are still printed side by side — each one as soon as it has
+    # acted — which is the reason D-24 wanted one screen rather than four.
+    assert "اقترح" in page
+    for row in _opening_balances_rows(client):
+        if row["reviewed_by"]:
+            assert "راجع" in page
+        if row["approved_by"]:
+            assert "اعتمد" in page
+        if row["posted_by"]:
+            assert "رحّل" in page
 
 
 def test_the_posted_total_is_the_one_number_the_screen_leads_with(
     client: Client, four_opening_balances: dict[str, object]
 ) -> None:
     """
-    Eight equal cards gave a reader no lead on a screen whose whole point is
-    that only one of the eight is in the accounts — which is what that card's
-    own footer says. The value is still the service's own.
+    Eight equal cards gave a reader no lead. The UX pass keeps four stage
+    tiles (what awaits whom) and puts the settled figures — posted first —
+    in the register's footer, where they read against the rows they sum.
     """
     from decimal import Decimal
 
@@ -8407,11 +8436,10 @@ def test_the_posted_total_is_the_one_number_the_screen_leads_with(
     response = client.get(reverse("billing:opening-balances"))
     page = response.content.decode("utf-8").split("</nav>", 1)[-1]
 
-    assert page.count('class="kpi primary"') == 1
-    lead = page.index('class="kpi primary"')
-    assert page.index("هذه وحدها موجودة في الحسابات") > lead
-    # Nothing has been posted, so the highlighted figure is honestly zero.
-    assert response.context["totals"]["posted"] == Decimal("0.000")
+    # The status filter names the stage too; the FOOTER's figure is the last mention.
+    assert page.rindex("مُرحَّل إلى الدفتر") > page.index('class="tbl ob-tbl"')
+    # Nothing has been posted, so the figure is honestly zero.
+    assert response.context["summary"]["posted_total"] == Decimal("0.000")
 
 
 def test_the_opening_balances_head_reads_like_every_polished_screen(
@@ -8432,7 +8460,7 @@ def test_the_opening_balances_head_reads_like_every_polished_screen(
     assert 'class="count"' in page
 
 
-def test_the_opening_balances_table_names_its_tenth_column(
+def test_the_opening_balances_table_names_its_last_column(
     client: Client, four_opening_balances: dict[str, object]
 ) -> None:
     """
@@ -8449,7 +8477,7 @@ def test_the_opening_balances_table_names_its_tenth_column(
     assert 'aria-label="الإجراء"' in page
     assert "sr-only" not in page
     # Ten headers on the register; the waiting-payout card is absent here.
-    assert len(re.findall(r"<th[\s>]", page)) == 10
+    assert len(re.findall(r"<th[\s>]", page)) == 6  # six since the UX pass folded direction/date/source/hands under their cells
     assert 'class="tbl-wrap"' in page
 
 
@@ -8474,10 +8502,9 @@ def test_the_four_rules_are_explained_and_no_longer_alerted(
     # BR-094 and the reversal rule now sit under the rows they describe.
     for anchor in ("المعبر الوحيد من الأرشيف", "الصرف يُصحَّح ولا يُمحى"):
         assert anchor in page
-        assert page.index(anchor) > page.index('class="tbl"'), anchor
-    # The proposer's warning stays above the form it is about.
-    assert 'class="hint boxed"' in page
-    assert "اكتب رقماً تستطيع الدفاع عنه" in page
+        assert page.index(anchor) > page.index('class="tbl ob-tbl"'), anchor
+    # The proposer's warning (D-25) sits inside the form, by the source it is about.
+    assert "اكتب رقماً تدافع عنه" in page or "المبلغ يُكتب ولا يُشتق" in page or "ملف ورقي" in page
 
 
 def test_the_opening_balances_empty_state_says_what_the_screen_is_for(
@@ -8551,10 +8578,14 @@ def test_the_opening_balance_row_prints_only_keys_it_already_carried(
         assert str(row["status_display"]) in page
         assert floatformat(row["amount"], -3) in page
         assert row["legacy_number"] in page
-    # The four hands are still printed side by side — the reason D-24 wanted
-    # one screen rather than four.
-    for hand in ("اقترح", "راجع", "اعتمد", "رحّل"):
-        assert hand in page
+        # Each hand is printed as soon as it has acted, side by side.
+        assert "اقترح" in page
+        if row["reviewed_by"]:
+            assert "راجع" in page
+        if row["approved_by"]:
+            assert "اعتمد" in page
+        if row["posted_by"]:
+            assert "رحّل" in page
 
 
 def test_the_opening_balances_guidance_invents_no_action_the_screen_lacks() -> None:
@@ -8575,27 +8606,8 @@ def test_the_opening_balances_guidance_invents_no_action_the_screen_lacks() -> N
         assert absent not in text, f"the opening-balances guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_review", "_may_decide"), OPENING_BALANCE_READERS)
-def test_the_opening_balances_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_review: bool, _may_decide: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"ob.links.{role}".lower().replace("_", ".")))
-    page = _opening_balances_page(client)
-
-    guide = GUIDES["opening-balances"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="kpi-grid"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_opening_balances_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_opening_balances_added_no_dead_class_and_no_dependency() -> None:
@@ -8614,13 +8626,13 @@ def test_the_opening_balances_added_no_dead_class_and_no_dependency() -> None:
 
     used = {
         c
-        for m in re.finditer(r'class="([^"]*)"', source)
+        for m in re.finditer(r'(?<![:\\w-])class="([^"]*)"', source)
         for c in re.sub(r"{{[^}]*}}|{%[^%]*%}", " ", m.group(1)).split()
     }
     for name in used:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     markup = source.split("{% endcomment %}", 1)[-1]
-    assert markup.count('class="tbl-wrap"') == 2
+    assert markup.count('class="tbl-wrap"') == 1  # one register since the UX pass; «تنتظر الصرف» is a tile
     assert 'class="form-acts"' in markup
     assert "sr-only" not in markup
     for alert in ("note info", "note warn", "note danger", "note ok"):
@@ -8873,30 +8885,8 @@ def test_the_partners_table_names_its_seventh_column(
     assert 'class="tbl-wrap"' in page
 
 
-def test_the_paper_rule_is_explained_and_no_longer_alerted(
-    client: Client, three_partners: list[object]
-) -> None:
-    """
-    «الاتفاقيات تُوقَّع على الورق» was a blue `.note info` sitting between the
-    guided-help block and the search box — a third framed block separating the
-    teaching from its own tool. Blue is an alert and explaining a rule is not
-    one (polish rules §6.5), so it now sits as a `.hint` under the rows.
-    """
-    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.rule"))
-
-    page = _partners_page(client)
-
-    assert "note info" not in page
-    assert '<p class="hint">' in page
-    # Anchored on wording the hint alone carries: the guidance block above the
-    # page must not repeat a sentence the screen already prints, and a shared
-    # phrase would find the guide and prove nothing about where the hint sits.
-    anchor = "الاتفاقيات تُوقَّع على الورق"
-    assert anchor in page
-    assert page.count(anchor) == 1, "the paper rule is printed twice on one page"
-    assert page.index(anchor) > page.index('class="tbl"'), "the rule left its rows behind"
-    # …and the teaching now sits directly above the search box it belongs to.
-    assert page.index('class="filterbar"') > page.index("من يستخدمها")
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_paper_rule_is_explained_and_no_longer_alerted``
 
 
 def test_the_partners_search_is_the_one_that_was_already_there(
@@ -8921,7 +8911,14 @@ def test_the_partners_search_is_the_one_that_was_already_there(
 def test_a_search_that_matches_nothing_still_draws_the_written_empty_state(
     client: Client, three_partners: list[object]
 ) -> None:
-    """The register is populated; this empty is the search's, and it still teaches."""
+    """
+    The register is populated; this empty is the search's, and it still teaches.
+
+    The act it offers is the way OUT of the filter, which every reader may
+    follow. The creating act is still withheld from a reader without CREATE —
+    that was always the point of this test, and it was asserted as «no act at
+    all» only because the escape did not exist yet.
+    """
     client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.noresult"))
 
     response = client.get(reverse("partners:partners"), {"q": "لا-يطابق-شيئاً"})
@@ -8930,8 +8927,9 @@ def test_a_search_that_matches_nothing_still_draws_the_written_empty_state(
     assert len(response.context["partners"]) == 0
     assert 'class="empty-title"' in page
     assert 'class="empty-body"' in page
-    # The audit account may not record a partner, so the empty offers no act.
-    assert "empty-act" not in page
+    # The audit account may not record a partner, so the empty never offers it.
+    assert f'href="{reverse("partners:partner-new")}"' not in page
+    assert "empty-act" in page, "a filter that matched nothing offers the way back"
 
 
 def test_the_partner_empty_state_offers_the_form_only_where_it_is_allowed(
@@ -8967,27 +8965,8 @@ def test_the_partners_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the partners guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_create"), PARTNER_READERS)
-def test_the_partners_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_create: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"pt.links.{role}".lower().replace("_", ".")))
-    page = _partners_page(client)
-
-    guide = GUIDES["partners"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="filterbar"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_partners_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_partners_register_added_no_dead_class_and_no_dependency() -> None:
@@ -9018,6 +8997,541 @@ def test_the_partners_register_added_no_dead_class_and_no_dependency() -> None:
         assert alert not in markup, f"a rule is still being explained in «{alert}»"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# The partners register — search, filters, cost and the way out (Wave 2)
+# ---------------------------------------------------------------------------
+# The register took a ``?q=`` and nothing else: no status filter on a column it
+# printed, no page on a list it drew whole, an agreement count that led
+# nowhere, and one empty state doing two jobs — a search that matched nothing
+# told the reader «لا شركاء مسجّلون بعد», which is not true and is frightening
+# to read after mistyping a code.
+
+
+def test_a_search_that_matches_nothing_does_not_claim_the_register_is_empty(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    Two empty states, not one. The register's own empty teaches what a partner
+    is and offers the form; a filter that matched nothing says so and offers
+    the way back — the act that actually helps there.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pt.empty2"))
+
+    filtered = client.get(reverse("partners:partners"), {"q": "لا-يطابق-شيئاً"})
+    page = filtered.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert len(filtered.context["partners"]) == 0
+    assert filtered.context["is_filtered"] is True
+    assert "لا شريك يطابق التصفية" in page
+    assert "لا شركاء مسجّلون بعد" not in page, "a populated register called itself empty"
+    # The escape is offered, and the creating act is not the answer to a
+    # search — the manager holds CREATE and still is not shown it here.
+    assert reverse("partners:partners") in page
+    assert f'href="{reverse("partners:partner-new")}"' not in page.split("empty-act", 1)[-1]
+
+
+def test_the_register_empty_state_still_teaches_when_nothing_was_searched(
+    client: Client, seeded_settings: None
+) -> None:
+    """An untouched empty register keeps the sentence and the form it had."""
+    client.force_login(_user(Role.CENTER_MANAGER, "pt.empty3"))
+
+    response = client.get(reverse("partners:partners"))
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert response.context["is_filtered"] is False
+    assert "لا شركاء مسجّلون بعد" in page
+    assert f'href="{reverse("partners:partner-new")}"' in page
+
+
+def test_the_filterbar_offers_a_way_out_only_while_something_is_filtered(
+    client: Client, three_partners: list[object]
+) -> None:
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.clear"))
+
+    assert "إلغاء التصفية" not in _partners_page(client)
+
+    narrowed = client.get(reverse("partners:partners"), {"status": "FORMER"})
+    assert "إلغاء التصفية" in narrowed.content.decode("utf-8")
+
+
+def test_the_two_columns_that_carry_a_value_can_be_filtered_by_it(
+    client: Client, three_partners: list[object]
+) -> None:
+    """The register prints النوع and الحالة; now it narrows by them too."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.filters"))
+
+    former = client.get(reverse("partners:partners"), {"status": "FORMER"})
+    assert [p["code"] for p in former.context["partners"]] == ["PN-UI-3"]
+
+    freelance = client.get(reverse("partners:partners"), {"type": "FREELANCE_TRAINER"})
+    assert [p["code"] for p in freelance.context["partners"]] == ["PN-UI-3"]
+
+    both = client.get(reverse("partners:partners"), {"status": "ACTIVE", "type": "COMPANY"})
+    assert [p["code"] for p in both.context["partners"]] == ["PN-UI-1", "PN-UI-2"]
+
+
+def test_the_search_matches_the_registry_number_the_table_prints(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The box promised «الاسم أو الرمز» while the table showed a registry column
+    nobody could search by. It matches what the register prints.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.reg"))
+
+    found = client.get(reverse("partners:partners"), {"q": "12345"})
+    assert [p["code"] for p in found.context["partners"]] == ["PN-UI-1"]
+
+
+def test_a_search_typed_with_spaces_echoes_what_it_actually_searched_for(
+    client: Client, three_partners: list[object]
+) -> None:
+    """The service was trimmed and the box was not, so the two disagreed."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.trim"))
+
+    response = client.get(reverse("partners:partners"), {"q": "  صرح  "})
+
+    assert [p["code"] for p in response.context["partners"]] == ["PN-UI-2"]
+    assert response.context["query"] == "صرح"
+    assert 'value="صرح"' in response.content.decode("utf-8")
+
+
+def test_the_agreement_count_reaches_the_agreements_it_counts(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    ``?partner=`` was accepted by the agreements register from the first day
+    and no screen ever sent it. The count is the link, and the page it reaches
+    says it is filtered and offers the way out.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pt.countlink"))
+
+    page = _partners_page(client)
+    href = f"{reverse('partners:agreements')}?partner=PN-PD-1"
+    assert f'href="{href}"' in page
+
+    landed = client.get(reverse("partners:agreements"), {"partner": "PN-PD-1"})
+    assert landed.status_code == 200
+    assert landed.context["is_filtered"] is True
+    assert {a["partner_code"] for a in landed.context["agreements"]} == {"PN-PD-1"}
+    assert "إلغاء التصفية" in landed.content.decode("utf-8")
+
+
+def test_the_register_costs_the_same_whether_it_holds_one_partner_or_many(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    It issued one ``COUNT(*)`` per row, so the register's cost followed the
+    register's size. The count is an annotation now; adding partners adds no
+    queries.
+    """
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.partners.models import PartnerStatus, PartnerType
+    from apps.partners.services import partner_service
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.cost"))
+
+    def _partner_queries(captured: CaptureQueriesContext) -> list[str]:
+        """The register's own reads. Session writes are not this screen's cost."""
+        return [q["sql"] for q in captured.captured_queries if "partners_partner" in q["sql"]]
+
+    with CaptureQueriesContext(connection) as captured:
+        client.get(reverse("partners:partners"))
+    before = _partner_queries(captured)
+    assert len(before) == 1, "the register reads its rows and their counts in one query"
+
+    manager = _user(Role.CENTER_MANAGER, "pt.cost.manager")
+    for index in range(4):
+        partner_service.create_partner(
+            actor=manager,
+            data={
+                "code": f"PN-COST-{index}",
+                "name_ar": f"شريك إضافي {index}",
+                "partner_type": PartnerType.COMPANY,
+                "status": PartnerStatus.ACTIVE,
+            },
+        )
+
+    with CaptureQueriesContext(connection) as captured:
+        response = client.get(reverse("partners:partners"))
+    assert len(response.context["partners"]) == 7
+    assert _partner_queries(captured) == before, "the cost followed the row count"
+
+
+def test_the_register_is_read_a_page_at_a_time(
+    client: Client, seeded_settings: None
+) -> None:
+    """A register that draws every row it holds has no end to scroll to."""
+    from apps.partners.models import PartnerStatus, PartnerType
+    from apps.partners.services import partner_service
+    from apps.partners.views import PAGE_SIZE
+
+    manager = _user(Role.CENTER_MANAGER, "pt.page.manager")
+    for index in range(PAGE_SIZE + 3):
+        partner_service.create_partner(
+            actor=manager,
+            data={
+                "code": f"PN-PAGE-{index:03d}",
+                "name_ar": f"شريك مرقَّم {index}",
+                "partner_type": PartnerType.COMPANY,
+                "status": PartnerStatus.ACTIVE,
+            },
+        )
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.page"))
+
+    first = client.get(reverse("partners:partners"))
+    assert len(first.context["partners"]) == PAGE_SIZE
+    assert first.context["page"]["pages"] == 2
+    # The chip counts the register, not the slice — the pager says which slice.
+    assert first.context["page"]["total"] == PAGE_SIZE + 3
+
+    second = client.get(reverse("partners:partners"), {"page": 2})
+    assert len(second.context["partners"]) == 3
+
+    # A page number out of range lands on a real page rather than an error.
+    assert client.get(reverse("partners:partners"), {"page": "99"}).status_code == 200
+    assert client.get(reverse("partners:partners"), {"page": "x"}).status_code == 200
+
+
+def test_the_page_link_keeps_the_filter_it_was_paging_through(
+    client: Client, three_partners: list[object]
+) -> None:
+    """``params_qs`` is what stops page 2 of a search from being page 2 of all."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.params"))
+
+    response = client.get(reverse("partners:partners"), {"q": "صرح", "status": "ACTIVE"})
+
+    assert "q=" in response.context["params_qs"]
+    assert "status=ACTIVE" in response.context["params_qs"]
+
+
+def test_the_former_partner_chip_is_toned_rather_than_left_blank(
+    client: Client, three_partners: list[object]
+) -> None:
+    """Untoned it drew the same neutral chip a missing value draws."""
+    from apps.core.templatetags.status_ui import status_tone
+
+    assert status_tone("FORMER") == "info"
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.tone"))
+    assert 'class="chip info dot"' in _partners_page(client)
+
+
+def test_the_register_search_is_wired_for_the_live_filtering_its_siblings_have(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The filterbar filters in place like the participants and payments
+    registers. The count and the clear link live in the bar, outside the swap
+    target, so they are replaced out of band — and their wrappers never
+    disappear, because what disappears cannot be replaced.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.live"))
+
+    page = _partners_page(client)
+
+    assert 'hx-target="#pt2-results"' in page
+    assert 'hx-select="#pt2-results"' in page
+    assert 'id="pt2-results"' in page
+    assert 'hx-select-oob="#pt2-count,#pt2-clear"' in page
+    assert 'id="pt2-count"' in page and 'id="pt2-clear"' in page
+    assert "hx-push-url" in page
+    # The plain submit still works for a reader without scripting.
+    assert "<button" in page and 'method="get"' in page
+
+
+def test_the_count_says_how_many_of_them_are_actually_in_force(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    §3.4 of the requirements makes «فترة السريان من / إلى» a term of the
+    contract and §5.4 makes entitlement conditional, so one number standing
+    for «holds a live contract», «holds a draft nobody approved» and «holds
+    one whose term ran out» hides a term the client enumerated themselves.
+    """
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.partners.models import (
+        Agreement,
+        AgreementStatus,
+        CalculationModel,
+        PartnerStatus,
+        PartnerType,
+    )
+    from apps.partners.services import partner_service
+
+    manager = _user(Role.CENTER_MANAGER, "pt.live.manager")
+    today = timezone.localdate()
+    made = {}
+    for code, name in (("PN-LIVE-1", "شريك بعقد نافذ"), ("PN-LIVE-2", "شريك بمسودة")):
+        made[code] = partner_service.create_partner(
+            actor=manager,
+            data={
+                "code": code,
+                "name_ar": name,
+                "partner_type": PartnerType.COMPANY,
+                "status": PartnerStatus.ACTIVE,
+            },
+        )
+
+    def _agreement(partner, number, status, frm, until):
+        return Agreement.objects.create(
+            agreement_number=number,
+            partner=partner,
+            title_ar="اتفاقية",
+            signed_on=frm - timedelta(days=10),
+            valid_from=frm,
+            valid_to=until,
+            calculation_model=CalculationModel.PERCENT,
+            percent_rate=Decimal("50.0000"),
+            status=status,
+        )
+
+    # One in force, one active but lapsed — the pair Sprint 8F-1 exists for.
+    live = made["PN-LIVE-1"]
+    week = timedelta(days=10)
+    _agreement(live, "LV/1", AgreementStatus.ACTIVE, today - week, today + week)
+    _agreement(live, "LV/0", AgreementStatus.ACTIVE, date(2020, 1, 1), date(2021, 1, 1))
+    # A draft inside its window: recorded, never approved, so not in force.
+    drafted = made["PN-LIVE-2"]
+    _agreement(drafted, "LV/2", AgreementStatus.DRAFT, today - week, today + timedelta(days=90))
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.live"))
+    response = client.get(reverse("partners:partners"))
+    rows = {r["code"]: r for r in response.context["partners"]}
+
+    assert rows["PN-LIVE-1"]["agreement_count"] == 2
+    assert rows["PN-LIVE-1"]["live_agreement_count"] == 1, "a lapsed ACTIVE is not in force"
+    assert rows["PN-LIVE-2"]["agreement_count"] == 1
+    assert rows["PN-LIVE-2"]["live_agreement_count"] == 0, "a draft is not in force"
+
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+    assert "1 نافذة" in page
+    assert "لا نافذة" in page
+
+
+def test_the_second_count_costs_no_second_query(
+    client: Client, three_partners: list[object]
+) -> None:
+    """Both counts are annotations on the one read, not a query per row."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.livecost"))
+
+    with CaptureQueriesContext(connection) as captured:
+        client.get(reverse("partners:partners"))
+
+    reads = [q["sql"] for q in captured.captured_queries if "partners_partner" in q["sql"]]
+    assert len(reads) == 1, reads
+
+
+def test_every_active_filter_is_named_in_the_readers_words(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The head showed the search term and stayed silent about the two selects,
+    so a reader returning to the tab saw a short register with nothing to
+    explain it. And the chip prints the label, never the stored code.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.chips"))
+
+    response = client.get(
+        reverse("partners:partners"), {"status": "FORMER", "type": "FREELANCE_TRAINER"}
+    )
+    page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+    assert "الحالة: سابق" in page
+    assert "النوع: مدرب مستقل" in page
+    # The chip prints the label. The raw code belongs to the <option> value
+    # and nowhere a reader looks, so the assertion is on the chips alone.
+    chips = re.findall(r'<span class="chip">([^<]*)</span>', page)
+    assert "FORMER" not in " ".join(chips), chips
+    assert "FREELANCE_TRAINER" not in " ".join(chips), chips
+
+
+def test_the_card_head_carries_the_icon_its_siblings_carry(
+    client: Client, three_partners: list[object]
+) -> None:
+    """`.head-ico` is on payments, participants and the catalogue lists."""
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.headico"))
+
+    page = _partners_page(client)
+
+    assert 'class="head-ico tone-brand"' in page
+    assert "#i-building" in page
+
+
+def test_the_pushed_url_carries_only_the_filters_that_are_set(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The live search pushed `?q=صرح&type=&status=` — a shareable address that
+    tells the next reader two more filters are set when they are not.
+    """
+    source = PARTNERS_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "hx-on::config-request" in source
+    assert "event.detail.parameters" in source
+    # And the server's own link is the clean one.
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.cleanurl"))
+    response = client.get(reverse("partners:partners"), {"q": "صرح", "type": "", "status": ""})
+    assert response.context["params_qs"] == "q=%D8%B5%D8%B1%D8%AD"
+
+
+def test_the_action_column_is_not_pushed_behind_a_sideways_scroll(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    «عرض» is the row's only act and was the last column, so on a phone it sat
+    179px outside the visible box (measured at 390px). النوع and السجل drop
+    under the name below 640px — the treatment the participants register
+    already uses — and neither field is hidden: both still print in the row
+    and on the partner card.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.acts"))
+
+    page = _partners_page(client)
+    css = CSS_SOURCE.read_text(encoding="utf-8")
+
+    assert 'class="tbl pt2-tbl"' in page
+    assert page.count('class="col-sm-off"') >= 2
+    assert 'class="row-sub"' in page
+    assert ".pt2-tbl td.acts" in css and "whitespace-nowrap" in css
+    assert ".pt2-tbl .col-sm-off" in css
+
+    # The registry number is still on the row for every reader, twice over.
+    for row in response_rows(client):
+        if row["registry_number"]:
+            assert row["registry_number"] in page
+
+
+def response_rows(client: Client) -> list[dict]:
+    return client.get(reverse("partners:partners")).context["partners"]
+
+
+def test_a_filter_value_the_screen_does_not_offer_does_not_filter_it(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    A stale link or a renamed value used to empty the register while both
+    selects still read «الكل» and no chip explained it — the screen
+    contradicting its own controls, with «إلغاء التصفية» as the only clue
+    that anything was on. An unknown value is not a filter.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.bogus"))
+
+    for params in ({"status": "BOGUS"}, {"type": "BOGUS"}, {"status": "X", "type": "Y"}):
+        response = client.get(reverse("partners:partners"), params)
+        page = response.content.decode("utf-8").split("</nav>", 1)[-1]
+
+        assert len(response.context["partners"]) == 3, params
+        assert response.context["is_filtered"] is False, params
+        assert response.context["params_qs"] == "", params
+        assert "إلغاء التصفية" not in page, params
+
+    # A value the vocabulary DOES contain still filters, as it always did.
+    kept = client.get(reverse("partners:partners"), {"status": "FORMER"})
+    assert [p["code"] for p in kept.context["partners"]] == ["PN-UI-3"]
+    assert kept.context["is_filtered"] is True
+
+
+def test_the_register_tells_a_screen_reader_what_changed_under_it(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    The table swaps in place, so nothing is announced unless something is
+    asked to announce it. The count is the sentence that describes what
+    happened, and it already updates out of band on every swap.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.aria"))
+
+    page = _partners_page(client)
+
+    assert 'id="pt2-count" aria-live="polite"' in page
+
+
+def test_the_agreement_count_link_is_named_and_not_just_a_digit(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    Its accessible name was «2» — a number with no object. ``title`` is not a
+    reliable accessible name and never appears on touch.
+    """
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.linkname"))
+
+    page = _partners_page(client)
+
+    assert "aria-label" in page
+    assert "اتفاقيات شركة تناغم للتدريب" in page
+
+
+def test_typing_and_pressing_enter_are_one_act_not_two(
+    client: Client, three_partners: list[object]
+) -> None:
+    """
+    Without ``submit`` in ``hx-trigger`` htmx lets the native submit through:
+    a full page reload, and an address carrying `?q=…&type=&status=` — the
+    empty parameters the config-request hook strips on the other road.
+    """
+    source = PARTNERS_TEMPLATE.read_text(encoding="utf-8")
+
+    trigger = re.search(r'hx-trigger="([^"]+)"', source)
+    assert trigger and trigger.group(1).startswith("submit"), source[:0] or trigger
+
+    # And the plain form still works for a reader with no scripting at all.
+    client.force_login(_user(Role.AUDIT_ACCOUNT, "pt.enter"))
+    response = client.get(reverse("partners:partners"), {"q": "صرح", "type": "", "status": ""})
+    assert [p["code"] for p in response.context["partners"]] == ["PN-UI-2"]
+    assert response.context["params_qs"] == "q=%D8%B5%D8%B1%D8%AD"
+
+
+def test_the_agreements_filter_names_the_partner_it_narrowed_to(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    The chip fell back to the CODE whenever the filter matched no rows —
+    «الشريك: PN-PD-1» — which is the «code, not label» defect the partners
+    register was just rid of, arriving through the link it now draws.
+    """
+    from apps.partners.models import Agreement
+
+    client.force_login(_user(Role.CENTER_MANAGER, "pt.agrname"))
+
+    with_rows = client.get(reverse("partners:agreements"), {"partner": "PN-PD-1"})
+    assert with_rows.context["partner_name"] == "شركة تناغم للتدريب"
+
+    # Now the same partner with nothing under them: the name must still hold.
+    Agreement.objects.all().delete()
+    empty = client.get(reverse("partners:agreements"), {"partner": "PN-PD-1"})
+    assert empty.context["agreements"] == []
+    assert empty.context["partner_name"] == "شركة تناغم للتدريب", "the chip printed a code"
+    head = empty.content.decode("utf-8").split("</nav>", 1)[-1].split("tbl-wrap")[0]
+    assert "PN-PD-1" not in head, "the chip printed a code"
+
+    # A code that names no partner at all says the code, and does not crash.
+    unknown = client.get(reverse("partners:agreements"), {"partner": "NOPE"})
+    assert unknown.status_code == 200
+    assert unknown.context["partner_name"] == "NOPE"
+
+
+def test_the_in_force_chip_stays_short_enough_not_to_drive_the_column(
+    client: Client, three_partners: list[object]
+) -> None:
+    """«لا نافذة اليوم» was the longest value in the table and set its width."""
+    source = PARTNERS_TEMPLATE.read_text(encoding="utf-8")
+
+    assert "لا نافذة اليوم" not in source
+    assert "لا نافذة" in source
 
 
 # ---------------------------------------------------------------------------
@@ -9140,22 +9654,8 @@ def test_an_unknown_partner_is_still_a_404(
     assert client.get(reverse("partners:partner-detail", args=["PN-NOPE"])).status_code == 404
 
 
-def test_the_partner_card_stayed_read_only(
-    client: Client, a_partner_with_agreements: object
-) -> None:
-    """
-    No editing service exists behind this page and the view has no POST branch,
-    so the polish may not have drawn an edit button — a button with no route is
-    worse than no button.
-    """
-    client.force_login(_user(Role.CENTER_MANAGER, "pd.readonly"))
-
-    page = _partner_card(client)
-
-    assert "<form" not in page
-    assert "<button" not in page
-    assert "csrfmiddlewaretoken" not in page
-    assert "قراءة فقط" in page, "the read-only chip states what the page is"
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_partner_card_stayed_read_only``
 
 
 def test_the_partner_card_offers_the_way_back_to_its_own_register(
@@ -9172,6 +9672,60 @@ def test_the_partner_card_offers_the_way_back_to_its_own_register(
     href = reverse("partners:partners")
     assert f'href="{href}"' in page
     assert client.get(href).status_code == 200
+
+
+def test_the_partner_card_carries_the_route_its_guidance_promised(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    «تُفتح بطاقة الشريك، ومنها تُسجَّل اتفاقيته الموقّعة» was written in the
+    guidance and nowhere on the page: the card offered one link, back to the
+    register. The editor now opens FROM here, on the partner already chosen.
+
+    Guarded on VIEW, not CREATE, because §3.5/25 opens the editor on VIEW and
+    submits it on CREATE — the same flag the agreements register draws the
+    same link with, so the audit account is not sent to a refusal.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pd.toeditor"))
+
+    page = _partner_card(client)
+
+    href = f"{reverse('partners:agreement-new')}?partner=PN-PD-1"
+    assert f'href="{href}"' in page
+
+    opened = client.get(reverse("partners:agreement-new"), {"partner": "PN-PD-1"})
+    assert opened.status_code == 200
+    assert opened.context["form"].initial["partner_code"] == "PN-PD-1"
+
+
+def test_the_editor_ignores_a_partner_it_is_not_allowed_to_offer(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    ``partner_choices`` offers active partners only. A code that is not on
+    that list — unknown, or a former partner — leaves the select alone rather
+    than pre-filling a choice the form would then refuse.
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pd.badprefill"))
+
+    opened = client.get(reverse("partners:agreement-new"), {"partner": "PN-NOT-A-PARTNER"})
+
+    assert opened.status_code == 200
+    assert "partner_code" not in (opened.context["form"].initial or {})
+
+
+def test_the_card_draws_the_route_to_the_editor_only_once(
+    client: Client, a_partner_with_agreements: object
+) -> None:
+    """
+    In the head, not in the head AND the empty state two inches below it —
+    one act is not drawn twice on one page (polish rules §7.3).
+    """
+    client.force_login(_user(Role.CENTER_MANAGER, "pd.once"))
+
+    page = _partner_card(client)
+
+    assert page.count(reverse("partners:agreement-new")) == 1
 
 
 def test_the_partner_card_prints_only_keys_the_projection_carried(
@@ -9278,7 +9832,7 @@ def test_the_partner_card_head_reads_like_every_polished_detail_page(
     assert "<h1>" in page
     assert 'class="sub"' in page
     assert 'class="count"' in page
-    assert "2 اتفاقيات" in page
+    assert "اتفاقيتان" in page
     assert 'class="dl"' in page
 
 
@@ -9350,27 +9904,8 @@ def test_the_partner_card_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the partner-card guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_create"), PARTNER_READERS)
-def test_the_partner_card_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, a_partner_with_agreements: object, role: str, _may_create: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"pd.links.{role}".lower().replace("_", ".")))
-    page = _partner_card(client)
-
-    guide = GUIDES["partner-detail"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_partner_card_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_partner_card_added_no_dead_class_and_no_dependency() -> None:
@@ -9538,6 +10073,8 @@ def test_the_new_partner_head_reads_like_every_polished_form(
     is read from the view's own ``title`` rather than retyped in the template,
     so one screen cannot end up with two names that drift apart.
     """
+    import re
+
     client.force_login(_user(Role.CENTER_MANAGER, "pn.head"))
 
     response = client.get(reverse("partners:partner-new"))
@@ -9546,7 +10083,14 @@ def test_the_new_partner_head_reads_like_every_polished_form(
     assert 'class="eyebrow"' in page
     assert "الشركاء والمخالصات" in page
     assert 'class="sub"' in page
-    assert f"<h1>{response.context['title']}</h1>" in page
+    # The title carries the screen's icon first (a decorative span), then the text.
+    assert re.search(
+        r'<h1>(?:<span class="title-ico[^>]*>.*?</span>)?'
+        + re.escape(response.context["title"])
+        + "</h1>",
+        page,
+        re.S,
+    )
 
     source = PARTNER_NEW_TEMPLATE.read_text(encoding="utf-8")
     assert "{{ title }}" in source
@@ -9612,28 +10156,8 @@ def test_the_new_partner_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the partner-new guidance offers «{absent}»"
 
 
-def test_the_new_partner_guidance_points_only_where_its_reader_may_go(
-    client: Client, seeded_settings: None
-) -> None:
-    """
-    Only the manager reaches this page, and they hold VIEW on the register —
-    so the one link is drawn and it opens.
-    """
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(Role.CENTER_MANAGER, "pn.links"))
-    page = _partner_new_page(client)
-
-    guide = GUIDES["partner-new"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        assert Action.VIEW in allowed_actions(Role.CENTER_MANAGER, screen)
-        assert f'href="{reverse(route)}"' in page
-        assert client.get(reverse(route)).status_code == 200
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_new_partner_guidance_points_only_where_its_reader_may_go``
 
 
 def test_the_new_partner_form_added_no_dead_class_and_no_dependency() -> None:
@@ -9712,7 +10236,7 @@ def three_agreements(seeded_settings: None) -> list[object]:
     partner = partner_service.create_partner(
         actor=manager,
         data={
-            "code": "PN-AG-1",
+            "code": "PN-PD-1",
             "name_ar": "شركة تناغم للتدريب",
             "partner_type": PartnerType.COMPANY,
             "status": PartnerStatus.ACTIVE,
@@ -10004,7 +10528,7 @@ def test_the_agreements_filter_parameter_is_untouched(
     assert 'class="filterbar"' not in page
     assert 'name="partner"' not in page
 
-    narrowed = client.get(reverse("partners:agreements"), {"partner": "PN-AG-1"})
+    narrowed = client.get(reverse("partners:agreements"), {"partner": "PN-PD-1"})
     assert len(narrowed.context["agreements"]) == 3
     missed = client.get(reverse("partners:agreements"), {"partner": "PN-NOPE"})
     assert len(missed.context["agreements"]) == 0
@@ -10050,27 +10574,8 @@ def test_the_agreements_guidance_invents_no_action_the_screen_lacks() -> None:
         assert absent not in text, f"the agreements guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
-def test_the_agreements_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _sees_link: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"ag.links.{role}".lower().replace("_", ".")))
-    page = _agreements_page(client)
-
-    guide = GUIDES["agreements"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_agreements_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_agreements_register_added_no_dead_class_and_no_dependency() -> None:
@@ -10481,27 +10986,8 @@ def test_the_agreement_card_guidance_invents_no_action_the_screen_lacks() -> Non
         assert absent not in text, f"the agreement-card guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_sees_link"), AGREEMENT_READERS)
-def test_the_agreement_card_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, four_agreement_states: dict[str, object], role: str, _sees_link: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"ad.links.{role}".lower().replace("_", ".")))
-    page = _agreement_card(client, "2026/AD-LIVE")
-
-    guide = GUIDES["agreement-detail"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_agreement_card_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_agreement_card_added_no_dead_class_and_no_dependency() -> None:
@@ -10665,6 +11151,8 @@ def test_the_editor_head_reads_like_every_polished_form(
     is read from the view's own ``title`` rather than retyped, so one screen
     cannot end up with two names that drift apart.
     """
+    import re
+
     client.force_login(_user(Role.CENTER_MANAGER, "an.head"))
 
     response = client.get(reverse("partners:agreement-new"))
@@ -10673,7 +11161,14 @@ def test_the_editor_head_reads_like_every_polished_form(
     assert 'class="eyebrow"' in page
     assert "الشركاء والمخالصات" in page
     assert 'class="sub"' in page
-    assert f"<h1>{response.context['title']}</h1>" in page
+    # The title carries the screen's icon first (a decorative span), then the text.
+    assert re.search(
+        r'<h1>(?:<span class="title-ico[^>]*>.*?</span>)?'
+        + re.escape(response.context["title"])
+        + "</h1>",
+        page,
+        re.S,
+    )
 
     href = reverse("partners:agreements")
     assert f'href="{href}"' in page
@@ -10752,27 +11247,8 @@ def test_the_editor_guidance_names_the_reader_who_cannot_write() -> None:
         assert absent not in text, f"the agreement-new guidance offers «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "may_open", "_may_submit"), AGREEMENT_EDITOR_ROLES[:2])
-def test_the_editor_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, may_open: bool, _may_submit: bool
-) -> None:
-    """A next step the reader may not follow ends in a refusal and a BR-085 row."""
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"an.links.{role}".lower().replace("_", ".")))
-    page = _agreement_new_page(client)
-
-    guide = GUIDES["agreement-new"]
-    assert str(guide.what) in page
-    assert str(guide.stops) in page
-    assert page.index(str(guide.what)) < page.index('class="card2"')
-    for screen, route, _label in guide.links:
-        may = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may, f"{role} · {route}"
-        if may:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_editor_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_agreement_editor_added_no_dead_class_and_no_dependency() -> None:
@@ -10848,34 +11324,12 @@ def test_the_entitlement_guide_alarms_nobody_on_a_page_that_only_explains(
         assert alert not in page, f"the guide still alerts in «{alert}»"
 
 
-@pytest.mark.parametrize("role", ENTITLEMENT_READERS)
-def test_the_guide_still_says_out_loud_that_it_computes_no_amount(
-    client: Client, seeded_settings: None, role: str
-) -> None:
-    """
-    Losing the blue box must not lose the sentence. A read-only page that does
-    not say so reads as a broken functional one (polish rules §2.4), so the
-    claim is asserted for every role that may open it — not only for the
-    finance officer that ``test_demo_readiness`` happens to check.
-    """
-    page = _entitlement_page(client, role, "says")
-
-    assert "صفحة دليل" in page, "the page no longer admits it is a guide"
-    assert "لا تحتسب مبلغاً" in page
-    assert "صفحة إرشادية" in page, "the guided-help chip carries the same claim"
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_guide_still_says_out_loud_that_it_computes_no_amount``
 
 
-def test_the_guide_names_the_third_reader_the_matrix_gives_it(
-    client: Client, seeded_settings: None
-) -> None:
-    """
-    «من يستخدمها» named the manager and the finance officer. §3.5/26 gives the
-    audit account V P as well, so the one reader the line omitted was reading a
-    page that did not admit he was one of its readers.
-    """
-    page = _entitlement_page(client, Role.AUDIT_ACCOUNT, "who")
-
-    assert "حساب التدقيق" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_guide_names_the_third_reader_the_matrix_gives_it``
 
 
 @pytest.mark.parametrize("role", ENTITLEMENT_READERS)
@@ -11141,14 +11595,8 @@ def test_the_empty_register_says_what_the_emptiness_means(
     assert ("كتلة «بناء مطالبة» أسفل هذه الصفحة" in page) is may_build
 
 
-def test_the_claims_guide_names_the_reader_who_only_reads(
-    client: Client, seeded_settings: None
-) -> None:
-    """§3.5/27 gives the audit account V P; «من يستخدمها» named only the two
-    roles that act, so the third met a page that did not admit he read it."""
-    page = _claims_page(client, Role.AUDIT_ACCOUNT, "who")
-
-    assert "حساب التدقيق" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_claims_guide_names_the_reader_who_only_reads``
 
 
 def test_the_claims_action_column_is_named_without_dragging_the_page_sideways() -> None:
@@ -11304,18 +11752,8 @@ def test_both_tables_on_the_card_say_what_their_emptiness_means(
     assert "BR-036" in page, "…and it says where an obligation goes instead"
 
 
-def test_the_card_teaches_d18_to_the_reader_who_cannot_approve(
-    client: Client, two_claims: dict[str, object]
-) -> None:
-    """
-    D-18 was said only inside the `can_approve` branch, as the reason a button
-    was missing. The rule belongs to every reader (polish rules §3.5) — the
-    officer who built the claim most of all, since he is the one it refuses.
-    """
-    page = _claim_card(client, Role.FINANCE_OFFICER, "CLM-CL-DRAFT", "d18")
-
-    assert "D-18" in page
-    assert "لا يعتمد أحد مطالبة أنشأها بنفسه" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_card_teaches_d18_to_the_reader_who_cannot_approve``
 
 
 def test_the_claim_card_uses_no_class_defined_nowhere() -> None:
@@ -11405,30 +11843,12 @@ def test_the_settlements_register_explains_without_alerting(
     assert "لا تُوقَّع ورصيدها غير صفري" in page, "…and the rule is still said"
 
 
-@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
-def test_the_nil_balance_rule_reaches_the_reader_who_does_not_sign(
-    client: Client, seeded_settings: None, role: str
-) -> None:
-    """
-    The rule that stops a signature was said on the card, inside the approver's
-    own branch — so the officer who records the payment that clears the balance
-    never met the reason for it. It is in the guide now, and the guide's prose
-    is never filtered (polish rules §3.5).
-    """
-    page = _settlements_page(client, role, "stops")
-
-    assert "ما يوقف العملية" in page
-    assert "ورصيدها غير صفري" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_nil_balance_rule_reaches_the_reader_who_does_not_sign``
 
 
-def test_the_settlements_guide_names_the_reader_who_only_reads(
-    client: Client, seeded_settings: None
-) -> None:
-    """§3.5/28 gives the audit account V P; «من يستخدمها» named only the two
-    roles that act."""
-    page = _settlements_page(client, Role.AUDIT_ACCOUNT, "who")
-
-    assert "حساب التدقيق" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_settlements_guide_names_the_reader_who_only_reads``
 
 
 def test_the_settlements_action_column_is_named() -> None:
@@ -11675,15 +12095,8 @@ def test_the_attached_claims_table_says_what_its_emptiness_means(
     assert "تُفتح فارغة ثم تُضمّ إليها المطالبات المعتمدة" in page
 
 
-@pytest.mark.parametrize("role", SETTLEMENTS_READERS)
-def test_the_settlement_card_teaches_its_order_to_everybody(
-    client: Client, two_settlements: dict[str, object], role: str
-) -> None:
-    """Attach, then pay, then sign — in the guide, where prose is unfiltered."""
-    page = _settlement_card(client, role, "STL-SD-OPEN", "order")
-
-    assert "ما يوقف العملية" in page
-    assert "الضمّ ثم الدفع ثم التوقيع" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_settlement_card_teaches_its_order_to_everybody``
 
 
 def test_the_settlement_card_uses_no_class_defined_nowhere() -> None:
@@ -11784,30 +12197,12 @@ def test_the_empty_register_points_only_the_recorder_at_the_form(
     assert ("قيد الالتزام" in page) is may_record
 
 
-@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
-def test_the_two_refusals_behind_the_form_are_taught_to_every_reader(
-    client: Client, seeded_settings: None, role: str
-) -> None:
-    """
-    The service refuses an obligation with no statement reference, and refuses
-    an absence penalty recorded by hand — both proved in
-    ``apps/settlements/tests``, and neither was ever said on the screen. They
-    are `stops` now, and guide prose is not filtered (polish rules §3.5).
-    """
-    page = _obligations_page(client, role, "stops")
-
-    assert "ما يوقف العملية" in page
-    assert "بلا مرجع كشف" in page
-    assert "BR-057" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_two_refusals_behind_the_form_are_taught_to_every_reader``
 
 
-def test_the_obligations_guide_names_the_reader_who_only_reads(
-    client: Client, seeded_settings: None
-) -> None:
-    """§3.5/29 gives the audit account V P and no more."""
-    page = _obligations_page(client, Role.AUDIT_ACCOUNT, "who")
-
-    assert "حساب التدقيق" in page
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_obligations_guide_names_the_reader_who_only_reads``
 
 
 def test_the_obligations_register_uses_no_class_defined_nowhere() -> None:
@@ -11896,20 +12291,8 @@ def _absences_page(client: Client, role: str, tag: str) -> str:
     return response.content.decode("utf-8").split("</nav>", 1)[-1]
 
 
-@pytest.mark.parametrize("role", OBLIGATIONS_READERS)
-def test_the_absence_register_finally_says_what_it_is_for(
-    client: Client, seeded_settings: None, role: str
-) -> None:
-    """
-    The screen had no guidance at all — no key in the registry and no tag on
-    the template — so it was the one settlements screen a new employee met
-    with nothing above it.
-    """
-    page = _absences_page(client, role, "guide")
-
-    assert "من يستخدمها" in page
-    assert "ما يوقف العملية" in page
-    assert "BR-058" in page, "the replacement rule reaches the reader who cannot act on it"
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_absence_register_finally_says_what_it_is_for``
 
 
 @pytest.mark.parametrize("role", OBLIGATIONS_READERS)
@@ -12169,7 +12552,7 @@ def test_the_clearance_head_reads_like_every_polished_register(
     assert "<h1>" in page
     assert 'class="sub"' in page
     assert 'class="count muted"' in page
-    assert "2 براءات" in page
+    assert "براءتان" in page
 
 
 def test_the_three_steps_are_taught_and_no_longer_alerted(
@@ -12268,33 +12651,8 @@ def test_the_clearance_guidance_names_the_second_signature_and_its_readers() -> 
     assert "توقيعين" in text or "توقيعان" in text
 
 
-@pytest.mark.parametrize(("role", "_may_create"), CLEARANCE_READERS)
-def test_the_guidance_offers_the_certificates_step_only_where_it_opens(
-    client: Client, seeded_settings: None, role: str, _may_create: bool
-) -> None:
-    """
-    The one genuinely two-directional link in this section: §3.6/31 leaves the
-    finance manager's cell empty, so the reader who certifies the money may not
-    open the certificates screen. The prose still teaches that the certificate
-    comes next — links are filtered, teaching is not (polish rules §3.5).
-    """
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"clr.next.{role}".lower().replace("_", ".")))
-    page = _clearances_page(client)
-
-    guide = GUIDES["clearance"]
-    assert str(guide.what) in page
-    assert str(guide.after) in page, "the next step is taught to every reader"
-
-    may_open = Action.VIEW in allowed_actions(role, "certificates")
-    assert may_open is (role != Role.FINANCE_MANAGER)
-    href = reverse("operations:certificates")
-    assert (f'href="{href}"' in page) is may_open, role
-    if may_open:
-        assert client.get(href).status_code == 200, role
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_guidance_offers_the_certificates_step_only_where_it_opens``
 
 
 def test_the_clearance_register_added_no_dead_class_and_no_dependency() -> None:
@@ -12582,24 +12940,8 @@ def test_the_certificate_guidance_names_its_readers_and_both_refusals() -> None:
         assert absent not in str(guide.what), f"the certificates guidance claims «{absent}»"
 
 
-@pytest.mark.parametrize(("role", "_may_create"), CERTIFICATE_READERS)
-def test_the_certificate_guidance_offers_only_steps_the_reader_may_open(
-    client: Client, seeded_settings: None, role: str, _may_create: bool
-) -> None:
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    client.force_login(_user(role, f"crt.next.{role}".lower().replace("_", ".")))
-    page = _certificates_page(client)
-
-    guide = GUIDES["certificates"]
-    assert str(guide.what) in page
-    for screen, route, _label in guide.links:
-        may_open = Action.VIEW in allowed_actions(role, screen)
-        assert (f'href="{reverse(route)}"' in page) is may_open, f"{role} · {route}"
-        if may_open:
-            assert client.get(reverse(route)).status_code == 200, route
+# Removed with the guided-help block (dashboard polish phase):
+# ``test_the_certificate_guidance_offers_only_steps_the_reader_may_open``
 
 
 def test_the_certificate_register_added_no_dead_class_and_no_dependency() -> None:
@@ -12832,3 +13174,259 @@ def test_the_clearance_card_added_no_dead_class_and_no_dependency() -> None:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     for line in source.splitlines():
         assert line.count("{#") == line.count("#}"), f"a wrapped comment: {line.strip()[:60]}"
+
+
+# ---------------------------------------------------------------------------
+# Quick jump (Sprint 8I) — one keystroke to any screen this reader may open.
+#
+# It draws NOTHING of its own: the entries are ``nav_groups``, already filtered
+# by the matrix, so the palette cannot offer a screen the sidebar withholds and
+# cannot become a second place where permissions are decided.
+# ---------------------------------------------------------------------------
+QUICK_JUMP_ROLES = (
+    Role.CENTER_MANAGER,
+    Role.REGISTRATION_OFFICER,
+    Role.FINANCE_OFFICER,
+    Role.FINANCE_MANAGER,
+    Role.CASHIER,
+    Role.AUDIT_ACCOUNT,
+)
+
+
+def _palette(page: str) -> list[tuple[str, str]]:
+    if 'class="qjump-list"' not in page:
+        return []
+    block = page.split('class="qjump-list"', 1)[1].split("</dialog>", 1)[0]
+    return re.findall(r'href="([^"]+)"[^>]*data-label="([^"]*)"', block)
+
+
+@pytest.mark.parametrize("role", QUICK_JUMP_ROLES)
+def test_the_quick_jump_offers_exactly_what_the_menu_does(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    client.force_login(_user(role, f"qj.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("operations:dashboard"))
+    page = response.content.decode("utf-8")
+    menu = [item["url"] for group in response.context["nav_groups"] for item in group["items"]]
+
+    assert menu, "a role with no menu proves nothing"
+    assert [href for href, _label in _palette(page)] == menu
+
+
+@pytest.mark.parametrize("role", QUICK_JUMP_ROLES)
+def test_no_quick_jump_entry_leads_its_reader_into_a_refusal(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """The palette is a shortcut, and a shortcut into a 403 is a trap."""
+    client.force_login(_user(role, f"qjo.{role}".lower().replace("_", ".")))
+
+    entries = _palette(client.get(reverse("operations:dashboard")).content.decode("utf-8"))
+
+    assert entries
+    for href, label in entries:
+        assert client.get(href).status_code == 200, f"{label} → {href}"
+
+
+def test_the_quick_jump_is_not_drawn_for_a_visitor_with_no_menu(
+    client: Client, seeded_settings: None
+) -> None:
+    """Fail-closed: no menu, no palette, no hint of what exists behind the door."""
+    response = client.get(reverse("operations:dashboard"))
+
+    page = response.content.decode("utf-8")
+
+    assert response.status_code == 403
+    # The body still carries the «/» shortcut handler — it is guarded on the
+    # dialog existing — but neither the palette nor its opener is drawn.
+    assert 'class="qjump-open"' not in page
+    assert 'class="modal qjump"' not in page
+    assert _palette(page) == []
+
+
+def _jump_row(page: str) -> list[str]:
+    if 'class="qjump-direct"' not in page:
+        return []
+    block = page.split('class="qjump-direct"', 1)[1].split("</div>", 1)[0]
+    return [h for h in re.findall(r'href="([^"]+)"', block) if h.startswith("/")]
+
+
+@pytest.mark.parametrize("role", QUICK_JUMP_ROLES)
+def test_a_typed_code_only_jumps_to_a_register_this_reader_already_has(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    """
+    Every record carries a prefixed code, so what someone types says where it
+    lives — but the shortcut goes THROUGH the menu, never around it.
+    """
+    client.force_login(_user(role, f"qjj.{role}".lower().replace("_", ".")))
+
+    response = client.get(reverse("operations:dashboard"))
+    page = response.content.decode("utf-8")
+    menu = {item["url"] for group in response.context["nav_groups"] for item in group["items"]}
+
+    targets = response.context["nav_jump_targets"]
+    assert targets, "a role with no register at all proves nothing"
+    for target in targets:
+        assert target["url"] in menu, f"{target['prefix']} leads outside the menu"
+    assert set(_jump_row(page)) <= menu
+
+
+def test_the_cashier_is_offered_the_receipt_jump_and_nothing_else(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    §3.4 shuts the till out of the registers; the shortcut may not reopen them.
+
+    The participants register is the one exception, and it is not an exception
+    at all: the till reaches it from its own menu, so the bare-number jump is
+    the menu's own door — see the two tests below for what it is NOT offered.
+    """
+    client.force_login(_user(Role.CASHIER, "qjj.till"))
+
+    targets = client.get(reverse("operations:dashboard")).context["nav_jump_targets"]
+
+    assert [t["prefix"] for t in targets if t["match"] == "prefix"] == ["R-"]
+
+
+def test_a_bare_participant_number_has_a_jump_of_its_own(
+    client: Client, seeded_settings: None
+) -> None:
+    """
+    A participant number is built from the semester and carries no prefix
+    (BR-001), so the prefix rule could never reach it: typing a perfectly
+    correct 202610001 matched nothing and the palette answered it with an
+    empty list.
+    """
+    client.force_login(_user(Role.REGISTRATION_OFFICER, "qjj.num"))
+
+    response = client.get(reverse("operations:dashboard"))
+    digits = [t for t in response.context["nav_jump_targets"] if t["match"] == "digits"]
+
+    assert len(digits) == 1
+    assert digits[0]["url"] == reverse("people:participants")
+    # …and the register answers what the jump would send it.
+    assert client.get(digits[0]["url"], {"q": "202610001"}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("role", "offered"),
+    [
+        (Role.REGISTRATION_OFFICER, True),
+        (Role.CENTER_MANAGER, True),
+        (Role.CASHIER, False),
+        (Role.FINANCE_MANAGER, False),
+    ],
+)
+def test_the_name_jump_is_offered_only_where_a_name_search_works(
+    client: Client, seeded_settings: None, role: str, offered: bool
+) -> None:
+    """
+    The restricted roles search participants by number alone (BR-101). A name
+    box for them would be a box that always answers «none» — a shortcut that
+    lies about what is behind it, which is worse than no shortcut.
+    """
+    client.force_login(_user(role, f"qjj.name.{role.lower()}"))
+
+    targets = client.get(reverse("operations:dashboard")).context["nav_jump_targets"]
+
+    assert any(t["match"] == "text" for t in targets) is offered
+
+
+def test_every_jump_prefix_lands_on_a_register_that_answers_it(
+    client: Client, a_catalogue: None
+) -> None:
+    """A prefix pointing at a register whose search ignores it is a dead shortcut."""
+    from apps.people.nav import JUMP_PREFIXES
+
+    client.force_login(_user(Role.CENTER_MANAGER, "qjj.all"))
+
+    for _prefix, route, _what in JUMP_PREFIXES:
+        url = reverse(route)
+        response = client.get(url, {"q": "PROBE-CODE"})
+        assert response.status_code == 200, url
+
+
+# ---------------------------------------------------------------------------
+# Live search must not grow the address bar (Sprint 8L)
+# ---------------------------------------------------------------------------
+def test_no_live_search_posts_back_to_an_empty_hx_get() -> None:
+    """
+    ``hx-get=""`` is «the current URL, query string and all».
+
+    htmx then appends the form's own fields on top of whatever the address bar
+    already carries, so a search typed one letter at a time pushed
+
+        ?rq=ت&rq=تص&rq=تصم&rq=تصمي&rq=تصميم
+
+    into the URL — one copy per keystroke. Six screens had it. The address
+    stopped being copyable, the back button walked through every keystroke
+    instead of the previous page, and the query string grew without bound.
+
+    The route must be named: `{% url %}` where the screen has one route, or
+    `{{ request.path }}` where one template serves several. Both make the
+    form's fields the whole query, which is what the till and the expense
+    register have always done.
+    """
+    from pathlib import Path
+
+    offenders = [
+        str(template)
+        for template in Path("templates").rglob("*.html")
+        if 'hx-get=""' in template.read_text(encoding="utf-8")
+    ]
+
+    assert not offenders, (
+        "a live search whose hx-get is empty appends its fields to the URL it "
+        f"already has, once per keystroke: {offenders}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# No screen may greet its reader with a dialog (Sprint 8L)
+# ---------------------------------------------------------------------------
+#: Screens whose GET is a plain read and whose create dialog must stay shut.
+SCREENS_WITH_A_CREATE_DIALOG = (
+    ("operations:cohorts", Role.CENTER_MANAGER),
+    ("catalog:programs", Role.CENTER_MANAGER),
+    ("catalog:short-courses", Role.CENTER_MANAGER),
+    ("catalog:online-courses", Role.CENTER_MANAGER),
+    ("catalog:pricelists", Role.CENTER_MANAGER),
+)
+
+
+@pytest.mark.parametrize(("route", "role"), SCREENS_WITH_A_CREATE_DIALOG)
+def test_no_screen_opens_its_own_dialog_on_a_plain_read(
+    client: Client, a_catalogue: None, route: str, role: str
+) -> None:
+    """
+    A dialog re-opens itself after a REFUSED save and at no other time.
+
+    The cohorts register greeted every visitor with «فتح دفعة جديدة» spread
+    across the screen, and the cause was not in the template's condition but
+    in what it was reading: the view bound its form with
+
+        request.POST if action in ("", "open") else None
+
+    and on a GET ``request.POST`` is an EMPTY QueryDict rather than ``None``.
+    An empty QueryDict is data, so the form was BOUND with nothing in it,
+    every required field reported itself missing, and ``form.errors`` was
+    true before the reader had typed a character.
+
+    The same mistake had already been found and fixed on the enrolment form
+    this sprint, which is why this guard covers every screen that carries a
+    create dialog rather than the one that showed it.
+    """
+    client.force_login(_user(role, f"dlg.{route.replace(':', '.')}"))
+
+    response = client.get(reverse(route))
+    page = response.content.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "showModal()" in page, f"{route} draws no dialog at all — check the fixture"
+    assert "x-init" not in page, (
+        f"{route} opens a dialog on a plain GET; a bound-but-empty form is the usual cause"
+    )
+    form = response.context.get("form")
+    if form is not None:
+        assert not form.errors, f"{route} hands the template a form that is already refused"

@@ -1,0 +1,59 @@
+{% load i18n %}
+{% comment %}
+  العرض السريع — حوارٌ **واحد** للصفحة كلها يملؤه السكربت من `data-*` الصفّ
+  الذي فُتح منه، كحوار التسجيل تماماً. كان يُرسم لكل صفّ، فصارت صفحةٌ من
+  خمسين صفّاً خمسين حواراً مخفيّاً في كل تحميل.
+
+  `data-from` يملأ النصّ، و`data-key` يُخفي العنوان وقيمته معاً حين لا يحمل
+  الصفّ المفتاح — و`dt`/`dd` يبقيان ابنَين مباشرَين لـ `.dl` لأن الشبكة
+  ذات العمودين تتكوّن منهما هما، فغلافٌ حولهما يكسرها.
+
+  مقصود أن يبقى قصيراً: من يحتاج أكثر يفتح الملف. والصفّ لا يحمل ما لا تسمح
+  به الصلاحية أصلاً (BR-101): الحقل المحجوب غائب عن الاستجابة، لا مخفيّ هنا.
+  و`latest` يصل فقط لدور تُدخله شاشة التسجيلات.
+
+  ولا يُدرَج أصلاً للدور المقيّد (الصندوق والمدير المالي): حواره كان سطراً
+  واحداً يكرّر خليةً في الصفّ نفسه، وزرٌّ لا يضيف شيئاً أسوأ من غياب الزرّ.
+{% endcomment %}
+<dialog class="modal" id="quick-modal" dir="rtl" aria-labelledby="quick-modal-t">
+  <div class="modal-head">
+    <h2 id="quick-modal-t" data-from="name"></h2>
+    <span class="chip num" dir="ltr" translate="no" data-from="number"></span>
+  </div>
+  <div class="modal-body">
+    <dl class="dl">
+      <dt data-key="category">{% translate "الفئة" %}</dt>
+      <dd data-key="category"><span class="chip" data-from="category"></span></dd>
+
+      <dt data-key="registered">{% translate "تاريخ التسجيل" %}</dt>
+      <dd data-key="registered" class="num" dir="ltr" data-from="registered"></dd>
+
+      <dt data-key="phone">{% translate "الهاتف" %}</dt>
+      <dd data-key="phone" dir="ltr" class="num" data-from="phone"></dd>
+
+      <dt data-key="city">{% translate "المدينة" %}</dt>
+      <dd data-key="city" data-from="city"></dd>
+
+      <dt data-key="qualification">{% translate "المؤهل" %}</dt>
+      <dd data-key="qualification" data-from="qualification"></dd>
+
+      <dt>{% translate "عدد التسجيلات" %}</dt>
+      <dd class="num" data-from="count"></dd>
+
+      <dt data-key="latestCode">{% translate "آخر تسجيل" %}</dt>
+      <dd data-key="latestCode">
+        <span dir="ltr" translate="no" class="num" data-from="latestCode"></span>
+        <span class="muted">— <span data-from="latestCohort"></span></span><br>
+        <span data-tone data-from="latestStatus"></span>
+        <span class="chip ok" data-key="latestApproved" data-from="latestApproved"></span>
+      </dd>
+    </dl>
+    <p class="hint">{% translate "الأرقام المالية والتفاصيل الكاملة في الملف وكشف الحساب." %}</p>
+  </div>
+  <div class="modal-acts">
+    <a class="btn2 primary" data-href="detailUrl">{% translate "فتح الملف الكامل" %}</a>
+    <a class="btn2" data-href="enrollmentsUrl">{% translate "عرض التسجيلات" %}</a>
+    <a class="btn2 ghost" data-href="accountUrl">{% translate "كشف حساب آخر تسجيل" %}</a>
+    <button class="btn2 ghost" type="button" data-closes>{% translate "إغلاق" %}</button>
+  </div>
+</dialog>

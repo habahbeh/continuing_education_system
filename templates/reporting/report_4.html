@@ -1,31 +1,130 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n money_ui status_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.4 — قائمة المتأخرين في الدفع (Sprint 8L).
+
+  ليست قائمة متابعة: §5.4 يجعل «متأخر عن الدفع» واحدةً من أربع حالات تُسقط
+  استحقاق الشريك، وتُحجب بها براءة الذمة ومعها الشهادة. فهذا التقرير هو الذي
+  يُراجَع به أثرٌ مالي واقع على ثلاثة أطراف، لا قائمةُ أسماء تُتّصل بها.
+
+  ولهذا الهاتف عمودٌ فيه: مَن يلاحق ذمّة يحتاج الرقم في الصفّ لا في شاشة
+  أخرى يفتحها لكل اسم.
+
+  ⚠️ التأخّر نفسه افتراض مهني (Q-16) لم يحسمه العميل: كم يوماً بعد آخر دفعة
+  يصير المشارك متأخراً؟ القيمة إعداد (`payment_overdue_days`) لا ثابتٌ في
+  الشيفرة، فحسمُها تغييرُ قيمة لا إصدارٌ برمجي.
+{% endcomment %}
+
 {% block content %}
 {% include "reporting/_shell.html" %}
+
 <div class="note warn">
-  {% translate "المتأخر عن الدفع لا يستحق عنه الشريك شيئاً (§5.4) — هذا التقرير هو الذي يُراجَع به ذلك الأثر المالي، لا مجرد قائمة متابعة." %}
+  <div>
+    <strong>{% translate "أثر التأخّر ثلاثيّ:" %}</strong>
+    {% translate "الشريك لا يستحقّ شيئاً عن المتأخر حتى يسدّد (§5.4) · براءة الذمة تُحجب · والشهادة معها. فهذه ليست قائمة متابعة بل مراجعةُ أثرٍ مالي واقع." %}
+  </div>
 </div>
-<div class="grid2">
-  <div class="kpi"><div class="label">{% translate "عدد المتأخرين" %}</div><div class="value num">{{ report.count }}</div></div>
-  <div class="kpi"><div class="label">{% translate "إجمالي المتأخر" %}</div><div class="value num">{{ report.total_outstanding }}</div></div>
+
+<div class="kpi-grid tiles">
+  <div class="kpi tile is-lead">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "إجمالي المتأخر" %}</span>
+      <span class="value num">{% money report.total_outstanding %}</span>
+      <span class="foot">{% translate "حتى" %} <span dir="ltr">{{ report.as_of }}</span></span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-users"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "عدد المتأخرين" %}</span>
+      <span class="value num">{{ report.count }}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-user-off"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "منهم يُسقطون استحقاق شريك" %}</span>
+      <span class="value num">{{ report.voiding_count }}</span>
+      <span class="foot">{% translate "تسجيلات على اتفاقيات شركاء" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-flag"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "متأخر عنهم بقرار" %}</span>
+      <span class="value num">{{ report.manual_count }}</span>
+      <span class="foot">{% translate "وضعه موظّف بسبب مكتوب" %}</span>
+    </span>
+  </div>
 </div>
+
 <div class="card2">
+  <div class="card2-head"><h2>{% translate "المتأخرون" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "الدفعة" %}</th>
-        <th>{% translate "المستحق" %}</th><th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th>
-        <th>{% translate "الحالة" %}</th><th>{% translate "يُسقط استحقاق الشريك" %}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "المشارك" %}</th>
+          <th>{% translate "الهاتف" %}</th>
+          <th>{% translate "الدفعة" %}</th>
+          <th class="num">{% translate "تاريخ التسجيل" %}</th>
+          <th class="num">{% translate "المستحق" %}</th>
+          <th class="num">{% translate "المدفوع" %}</th>
+          <th class="num">{% translate "الرصيد" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "أثر على الشريك" %}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for r in report.rows %}
-          <tr><td dir="ltr">{{ r.code }}</td>
-              <td>{{ r.participant_name }}<br><small class="muted" dir="ltr">{{ r.participant_number }}</small></td>
-              <td dir="ltr">{{ r.cohort_code }}</td>
-              <td class="num">{{ r.total_due }}</td><td class="num">{{ r.total_paid }}</td>
-              <td class="num">{{ r.balance }}</td><td>{{ r.status_display }}</td>
-              <td>{% if r.voids_partner_entitlement %}<span class="chip danger">{% translate "نعم" %}</span>{% else %}—{% endif %}</td></tr>
-        {% empty %}<tr><td colspan="8" class="empty"><span class="empty-title">{% translate "لا متأخرين" %}</span></td></tr>{% endfor %}
+          <tr{% if r.status == "PAYMENT_OVERDUE" %} class="is-flagged"{% endif %}>
+            <td>
+              {% if may_open_participant %}
+                <a href="{% url 'people:participant-detail' r.participant_number %}"><strong>{{ r.participant_name }}</strong></a>
+              {% else %}
+                <strong>{{ r.participant_name }}</strong>
+              {% endif %}
+              <br><small class="muted" dir="ltr">{{ r.participant_number }}</small>
+            </td>
+            <td dir="ltr">{{ r.participant_phone|default:"—" }}</td>
+            <td>{{ r.cohort_name }}<br><small class="muted" dir="ltr">{{ r.cohort_code }}</small></td>
+            <td class="num"><span dir="ltr">{{ r.enrolled_on }}</span></td>
+            <td class="num amt">{% money r.total_due %}</td>
+            <td class="num amt">{% money r.total_paid %}</td>
+            <td class="num amt"><strong>{% money r.balance %}</strong></td>
+            <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span></td>
+            <td>
+              {% if r.voids_partner_entitlement %}
+                <span class="chip danger">{% translate "لا يستحقّ شريكه" %}</span>
+              {% else %}
+                <span class="muted">{% translate "لا شريك" %}</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا متأخرين حتى هذا التاريخ" %}</span>
+            <span class="empty-body">{% translate "الفراغ هنا نتيجة صحيحة: مَن عليه رصيد ولم تمضِ المهلة على آخر دفعته ليس متأخراً، ومَن لم يبدأ برنامجه بعدُ ليس متأخراً ولو كان عليه رصيد." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
+      {% if report.rows %}
+        <tfoot>
+          <tr>
+            <td colspan="4">{% translate "الإجمالي" %}</td>
+            <td class="num amt">{% money report.total_due_sum %}</td>
+            <td class="num amt">{% money report.total_paid_sum %}</td>
+            <td class="num amt">{% money report.total_outstanding %}</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
+      {% endif %}
     </table>
   </div>
+  {% include "reporting/_pager.html" with page=pages.page param="page" qs=params_qs %}
 </div>
 {% endblock %}

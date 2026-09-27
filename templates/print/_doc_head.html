@@ -4,12 +4,15 @@
   own blank forms were not available, so nothing here is a literal.
 {% endcomment %}
 <div class="doc-head">
+  {% if chrome.logo_url %}
+    <img class="doc-logo" src="{{ chrome.logo_url }}" alt="{{ chrome.logo_alt }}">
+  {% endif %}
   <div>
     <div class="org">{{ chrome.university_ar }}<small>{{ chrome.center_ar }}</small></div>
   </div>
   <div class="meta">
     {% if form_code %}<div dir="ltr">{{ form_code }}</div>{% endif %}
     {% if reference %}<div dir="ltr">{{ reference }}</div>{% endif %}
-    <div>{% translate "تاريخ الطباعة" %}: {% now "Y-m-d" %}</div>
+    <div>{% translate "تاريخ الطباعة" %}: <span dir="ltr">{% now "Y/m/d" %}</span></div>
   </div>
 </div>

@@ -1,0 +1,11 @@
+{% comment %}
+  شريط نسبة: عشر خانات، الممتلئة منها تحمل الصنف `on`. لا نمط سطري ولا سكربت
+  (§6.4)، والنسبة الرقمية بجانبه لأن اللون وحده لا يُقرأ في الطباعة الأحادية
+  ولا لمن لا يميّز الألوان.
+{% endcomment %}
+<span class="pct-bar">
+  <span class="bar calm" role="img" aria-label="{% if label %}{{ label }} — {% endif %}{{ percent }}٪">
+    {% for on in segments %}<span{% if on %} class="on"{% endif %}></span>{% endfor %}
+  </span>
+  <span class="num pct">{{ percent }}%</span>
+</span>

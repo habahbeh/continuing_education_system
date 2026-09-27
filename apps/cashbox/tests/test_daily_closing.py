@@ -32,13 +32,14 @@ PASSWORD = "probe-password-1234"
 @pytest.fixture
 def day_with_receipts(cashier, cash_method, make_enrollment):
     enrollment, _quote = make_enrollment("SC-NET", category="UNIVERSITY")
-    for amount in ("100.000", "70.000", "50.000"):
+    for i, amount in enumerate(("100.000", "70.000", "50.000")):
         payment_service.take_payment(
             actor=cashier,
             enrollment=enrollment,
             amount=Decimal(amount),
             payment_method=cash_method,
             received_on=PAY_DAY,
+            external_receipt_ref=f"FIN-{i}",  # vouched: the finance department's number
         )
     return cashier
 
@@ -146,6 +147,7 @@ def test_t079_whoever_took_the_cash_cannot_approve_the_day(
         amount=Decimal("100.000"),
         payment_method=cash_method,
         received_on=PAY_DAY,
+        external_receipt_ref="FIN-9",
     )
     closing = closing_service.open_closing(
         actor=finance,

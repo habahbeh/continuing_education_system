@@ -1091,3 +1091,117 @@ def test_a_cohort_already_under_a_now_lapsed_agreement_keeps_working(
     assert entitlement_service.partner_share_for(
         agreement=attached, base=Decimal("100.000"), student_count=1
     ) == Decimal("50.000")
+
+
+# ---------------------------------------------------------------------------
+# The demo seed (Wave 2)
+# ---------------------------------------------------------------------------
+# Nothing in the project seeded a Partner or an Agreement. The only rows that
+# ever existed were the ones fixtures made, so a fresh installation opened the
+# partners register on nothing and everything downstream of an agreement —
+# استحقاق، مطالبات، مخالصات، التزامات — had no contract to stand on.
+
+
+def test_the_demo_seed_fills_both_registers_through_the_services(
+    seeded_settings: None,
+) -> None:
+    """
+    Written through ``partner_service``, so every seeded row is audited and
+    obeys the rules the screens obey — C-01 among them.
+    """
+    from django.core.management import call_command
+    from django.utils import timezone
+
+    from apps.core.models import AuditEvent
+    from apps.settlements.services import entitlement_service
+
+    _user(Role.SUPER_ADMIN, "seed.partners.admin")
+    call_command("seed_partners_demo", verbosity=0)
+
+    partners = Partner.objects.all()
+    assert partners.count() == 3
+    # §2.4 of the requirements names them, with their registry numbers. The
+    # demo register is the client's own file, not three invented companies.
+    assert {p.name_ar for p in partners} == {
+        "مركز تناغم اللغة",
+        "شركة صرح العالمية",
+        "المثالية",
+    }
+    tanagom = partners.get(name_ar="مركز تناغم اللغة")
+    assert tanagom.registry_number == "312160"
+    assert tanagom.registry_date == date(2013, 10, 27)
+    assert partners.get(name_ar="شركة صرح العالمية").registry_number == "10200"
+    # «المثالية · — · شريك سابق (تاريخي)» — no registry number, and FORMER,
+    # which is why the register needs a status filter and a «سابق» chip.
+    mithaliya = partners.get(name_ar="المثالية")
+    assert mithaliya.registry_number == ""
+    assert mithaliya.status == PartnerStatus.FORMER
+
+    agreements = Agreement.objects.all()
+    assert agreements.count() == 4
+    # §3.4 — the three models are DATA. A demo showing three percentage
+    # agreements would demonstrate the opposite.
+    assert {a.calculation_model for a in agreements} == set(CalculationModel.values)
+
+    # §3.1 — تناغم at 50%, with the registration fee, the deposits and the
+    # consumables out of the divisible base; end of each subject, every four
+    # months.
+    percent = agreements.get(agreement_number="TNG-2026/14")
+    assert percent.percent_rate == Decimal("50.0000")
+    assert percent.exclude_registration_fee
+    assert percent.exclude_deposits
+    assert percent.exclude_consumables
+    assert percent.payout_timing == PayoutTiming.END_OF_SUBJECT
+    assert percent.settlement_cycle == SettlementCycle.EVERY_4_MONTHS
+
+    # §3.2 — صرح: 195 per student against a 365 sell price, in advance, name
+    # list due within a week.
+    fixed = agreements.get(agreement_number="SRH-2026/03")
+    assert fixed.fixed_amount_per_student == Decimal("195.000")
+    assert fixed.sell_price == Decimal("365.000")
+    assert fixed.payout_timing == PayoutTiming.ADVANCE
+    assert fixed.name_list_due_days == 7
+
+    # §3.3 — a 195 exam with 40 to the university, so 155 is the partner's
+    # share, which is what ``partner_share_for`` pays out.
+    service = agreements.get(agreement_number="MTH-2024/07")
+    assert service.service_price == Decimal("195.000")
+    assert service.commission_amount == Decimal("155.000")
+    assert entitlement_service.partner_share_for(
+        agreement=service, base=Decimal("195.000"), student_count=1
+    ) == Decimal("155.000")
+
+    # Two live contracts to place cohorts under; an appendix left a draft so
+    # the activation button on §3.5/24 has something to press; and the
+    # historical contract, recorded and never activated because Sprint 8F-1
+    # refuses to make a lapsed window live.
+    today = timezone.localdate()
+    assert agreements.filter(status=AgreementStatus.ACTIVE).count() == 2
+    assert agreements.filter(status=AgreementStatus.DRAFT).count() == 2
+    assert agreements.get(agreement_number="TNG-2026/16").supersedes == percent
+    assert service.valid_to < today
+    assert service.status == AgreementStatus.DRAFT
+
+    assert AuditEvent.objects.filter(entity_type=partner_service.PARTNER_ENTITY).exists()
+    assert AuditEvent.objects.filter(entity_type=partner_service.AGREEMENT_ENTITY).exists()
+
+
+def test_the_demo_seed_is_idempotent(seeded_settings: None) -> None:
+    """Re-running must not write a second copy of a signed contract."""
+    from django.core.management import call_command
+
+    _user(Role.SUPER_ADMIN, "seed.partners.again")
+    call_command("seed_partners_demo", verbosity=0)
+    call_command("seed_partners_demo", verbosity=0)
+
+    assert Partner.objects.count() == 3
+    assert Agreement.objects.count() == 4
+
+
+def test_the_demo_seed_refuses_without_an_actor(seeded_settings: None) -> None:
+    """The services audit against an actor; a seed with none is not a seed."""
+    from django.core.management import call_command
+    from django.core.management.base import CommandError
+
+    with pytest.raises(CommandError):
+        call_command("seed_partners_demo", verbosity=0)

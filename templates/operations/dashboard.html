@@ -1,31 +1,35 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{% translate "لوحة المؤشرات — مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
   الأرقام كلها من `dashboard_view`، وكلها عدّ صفوف يستطيع القارئ فتحها بنفسه.
   لا رقم يُحسب هنا، ولا رقم يظهر لدور لا يملك شاشته — العرض يُبنى من الصلاحية
-  لا من اسم الدور، فأمين الصندوق يحصل على شاشة صندوق وموظف التسجيل على شاشة
-  تسجيل دون أن يسأل هذا القالب من هو أحدهما.
+  لا من اسم الدور.
 
-  الترتيب ترتيب ما يفعله القارئ:
-  1. النطاق — ما الذي تغطّيه صلاحياته، مرة واحدة في الأعلى.
-  2. «ابدأ من هنا» — الأفعال، بطاقاتٍ لا صفَّ أزرار مسطّح.
-  3. «مسار العمل» — ستّ محطات. خريطة لا مؤشّر تقدّم، ولا تعتمد على حجم
-     البيانات: مركزٌ فيه أربعة تسجيلات له مسارٌ كامل كمركزٍ فيه أربعمئة.
-  4. «حالة المركز اليوم» — العدّادات، وأولها واحد بارز لا أربعة متساوية.
-  5. «ما يحتاج متابعة» — الطوابير، ولا يظهر طابور إلا وفيه شيء فعلاً.
+  الترتيب (Sprint 8I):
+  1. «مسار العمل» — ثماني محطات أفقية ملوّنة، كلٌّ منها بطاقة تفتح شاشتها؛
+     المحطة التي لا تفتحها الصلاحية تبقى في مكانها بلا رابط. مطويّ افتراضياً.
+  2. العدّادات — أولها المال المستحقّ، ثم عدّ الصفوف.
+  3. الرسوم — حلقة الأرصدة (SVG بسمات لا أنماط)، وأعمدة قبض الأسبوع، وتوزيع
+     حالات التسجيل، وحالة البراءات القائمة. الامتلاء صنف من عشرين (`lv-N`)
+     لا عرض محسوب: CSS خالص، لا مكتبة رسم ولا سكربت ولا نمط سطري.
+  4. «الأعمال المعلّقة» — جدول بألسنة (Alpine الموجود أصلاً)، لسانٌ لكلّ طابور،
+     وكلّ صفّ يفتح شاشته بزرّ لا برابط مسطور.
 
-  الأشرطة خانات لا أعرض محسوبة، فلا نمط سطري ولا سكربت ولا مكتبة رسم. وهي
-  تُحجب حين لا يكون هناك ما يُقارَن به: صنف واحد بنسبة ١٠٠٪ ليس توزيعاً.
+  اللون والرمز: كلّ محطة وعدّاد ولسان يحمل `tone` ورمزاً من لوحة الرموز
+  المشتركة (`_nav_icons.html` تُدرَج في base.html). البطاقة كلها رابط —
+  لا رابط مسطور في هذه الشاشة (`.dash a { text-decoration: none }`)، والبطاقة
+  سطران لا أكثر: عنوان وقيمة، أو عنوان وسطر واحد يُقصّ إن طال.
 {% endcomment %}
 
 {% block content %}
+<div class="dash">
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الرئيسية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     {% if scope %}
       <p class="sub">
         {% translate "صلاحياتك تغطّي" %}:
@@ -38,101 +42,266 @@
   </div>
 </div>
 
-{% guided_help "dashboard" %}
+{# لا كتلة إرشاد هنا: الشاشة نفسها هي الشرح — أُزيلت بطلب العميل. #}
 
-{% if actions %}
-  <h2 class="sec-title">{% translate "ابدأ من هنا" %}</h2>
-  <div class="act-grid">
-    {% for action in actions %}
-      <a class="act-card {% if forloop.first %}lead{% endif %}" href="{{ action.url }}">
-        <span class="t">{{ action.label }}</span>
-        <span class="d">{{ action.hint }}</span>
+{# ---- 1. مسار العمل ---------------------------------------------------- #}
+{# مطويّ افتراضياً: `<details>` أصلي فلا يحتاج سكربتاً ولا يختفي إن تعطّل. #}
+<details class="flow-box">
+  <summary>
+    <span class="head-ico tone-brand" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-route"/></svg></span>
+    <span class="t">{% translate "مسار العمل — من اعتماد الوزارة حتى الشهادة" %}</span>
+    <span class="chip">{{ flow|length }} {% translate "محطات" %}</span>
+    <span class="chev" aria-hidden="true">‹</span>
+  </summary>
+<ol class="stepper">
+  {% for step in flow %}
+    <li class="tone-{{ step.tone }} {% if step.url %}on{% else %}off{% endif %}">
+      {% if step.url %}<a class="stop" href="{{ step.url }}" data-tip="{{ step.desc }}">{% else %}<span class="stop" data-tip="{% translate 'خارج صلاحيتك' %} — {{ step.desc }}">{% endif %}
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ step.icon }}"/></svg>
+          <span class="n">{{ forloop.counter }}</span>
+        </span>
+        <span class="txt">
+          <span class="t">{{ step.label }}</span>
+          <span class="w">{{ step.who }}</span>
+        </span>
+      {% if step.url %}</a>{% else %}</span>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
+</details>
+
+{# ---- تنبيهات رقابية: تُرسم فقط حين يوجد ما يُنبَّه إليه ---------------- #}
+{% for a in alerts %}
+  <div class="card2 pointer-card tone-{{ a.tone }}">
+    <div class="card2-body">
+      <div class="pointer">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ a.icon }}"/></svg></span>
+        <div class="min-w-0"><strong>{{ a.title }}</strong><div class="muted">{{ a.body }}</div></div>
+        <a class="btn2 primary" href="{{ a.url }}">{{ a.action }}</a>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+{# ---- 2. العدّادات ------------------------------------------------------ #}
+{% if kpis %}
+  <h2 class="sec-title">{% translate "حالة المركز اليوم" %}</h2>
+  <div class="kpi-grid">
+    {% for kpi in kpis %}
+      <a class="kpi tone-{{ kpi.tone }}{% if kpi.lead %} primary{% endif %}" href="{{ kpi.url }}"
+         title="{% if kpi.value %}{{ kpi.foot }}{% else %}{% translate "لا يوجد حالياً" %}{% endif %}">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ kpi.icon }}"/></svg></span>
+        <span class="txt">
+          <span class="label">{{ kpi.label }}</span>
+          <span class="value num">{{ kpi.value }}</span>
+        </span>
       </a>
     {% endfor %}
   </div>
 {% endif %}
 
-<h2 class="sec-title">{% translate "مسار العمل — من الطلب حتى الشهادة" %}</h2>
-<ol class="flow">
-  {% for step in flow %}
-    <li class="{% if step.url %}on{% else %}off{% endif %}">
-      <span class="n">{{ forloop.counter }}</span>
-      {% if step.url %}<a href="{{ step.url }}">{{ step.label }}</a>{% else %}<span>{{ step.label }}</span>{% endif %}
-    </li>
-  {% endfor %}
-</ol>
-<p class="hint">{% translate "خريطة إرشادية لتسلسل العمل، لا حالة مشارك بعينه. المحطة التي لا تفتحها صلاحيتك تبقى معروضة بلا رابط." %}</p>
+{# ---- 3. الرسوم -------------------------------------------------------- #}
+{% if charts or distribution %}
+  <h2 class="sec-title">{% translate "الصورة العامة" %}</h2>
+  <div class="chart-grid">
 
-{% if kpis or waiting %}
-  <div class="dash-cols">
-    <div class="dash-main">
-      {% if kpis %}
-        <h2 class="sec-title">{% translate "حالة المركز اليوم" %}</h2>
-        <div class="kpi-grid">
-          {% for kpi in kpis %}
-            <a class="kpi tile {% if kpi.lead %}primary is-lead{% endif %}" href="{{ kpi.url }}">
-              <div class="label">{{ kpi.label }}</div>
-              <div class="value num">{{ kpi.value }}</div>
-              <div class="foot">{% if kpi.value %}{{ kpi.foot }}{% else %}{% translate "لا يوجد حالياً" %}{% endif %}</div>
-            </a>
+    {% if charts.balances %}
+      <div class="card2">
+        <div class="card2-head"><span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-scale"/></svg></span><h2>{% translate "أرصدة التسجيلات" %}</h2><div class="acts"><span class="chip num">{{ charts.balances.total }}</span></div></div>
+        <div class="card2-body">
+          <div class="donut-wrap">
+            <svg class="donut" viewBox="0 0 42 42" role="img" aria-label="{% translate 'توزيع الأرصدة' %}">
+              <circle class="ring" cx="21" cy="21" r="15.9" pathLength="100"/>
+              {% for part in charts.balances.parts %}{% if part.pct %}<circle class="seg {{ part.tone }}" cx="21" cy="21" r="15.9" pathLength="100" stroke-dasharray="{{ part.pct }} 100" stroke-dashoffset="-{{ part.offset }}"/>{% endif %}{% endfor %}
+              <text class="num" x="21" y="21" text-anchor="middle" dominant-baseline="central">{{ charts.balances.total }}</text>
+            </svg>
+            <ul class="legend">
+              {% for part in charts.balances.parts %}
+                <li><span class="dot {{ part.tone }}"></span>{{ part.label }} <span class="num">{{ part.value }}</span> <small class="muted num">{{ part.pct }}%</small></li>
+              {% endfor %}
+            </ul>
+          </div>
+          <p class="hint">{% translate "«عليه» ذمة على المشارك، «له» رصيد دائن يُردّ، «مسوّى» صفر في الاتجاهين." %}</p>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if charts.week %}
+      <div class="card2">
+        <div class="card2-head"><span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span><h2>{% translate "قبض آخر سبعة أيام" %}</h2><div class="acts"><span class="chip ok num">{{ charts.week.total }}</span></div></div>
+        <div class="card2-body">
+          <div class="vbars" role="img" aria-label="{% translate 'قبض كل يوم' %}">
+            {% for d in charts.week.days %}
+              <div class="vcol{% if d.is_today %} today{% endif %}" title="{{ d.label }} — {{ d.amount }}">
+                <span class="v num">{% if d.count %}{{ d.count }}{% endif %}</span>
+                <span class="vtrack" aria-hidden="true"><span class="fill lv-{{ d.level }}"></span></span>
+                <span class="l num">{{ d.label }}</span>
+              </div>
+            {% endfor %}
+          </div>
+          <p class="hint">{% translate "عدد السندات فوق كلّ عمود، والارتفاع بقيمتها. السندات الصادرة فقط." %}</p>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if distribution %}
+      <div class="card2">
+        <div class="card2-head"><span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-chart"/></svg></span><h2>{% translate "توزيع التسجيلات حسب الحالة" %}</h2></div>
+        <div class="card2-body">
+          {% for row in distribution %}
+            <div class="chart-row">
+              <div class="top"><span>{{ row.label }}</span><span class="num">{{ row.value }} <small class="muted">{{ row.pct }}%</small></span></div>
+              <div class="hbar" aria-hidden="true"><span class="fill lv-{{ row.level }}"></span></div>
+            </div>
           {% endfor %}
         </div>
-      {% endif %}
-
-      {% if distribution %}
-        <h2 class="sec-title">{% translate "توزيع التسجيلات حسب الحالة" %}</h2>
-        <div class="card2">
-          <div class="card2-body">
-            {% for row in distribution %}
-              <div class="chart-row">
-                <div class="top">
-                  <span>{{ row.label }}</span>
-                  <span class="num">{{ row.value }}</span>
-                </div>
-                <div class="bar" aria-hidden="true">
-                  {% for on in row.bar %}<span class="{% if on %}on{% endif %}"></span>{% endfor %}
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        </div>
-      {% endif %}
-    </div>
-
-    <div class="dash-side">
-      <h2 class="sec-title">{% translate "ما يحتاج متابعة" %}</h2>
-      <div class="card2">
-        {% if waiting %}
-          <div class="card2-body">
-            {% for row in waiting %}
-              <div class="chart-row">
-                <div class="top">
-                  <a href="{{ row.url }}">{{ row.label }}</a>
-                  <span class="chip">{{ row.value }}</span>
-                </div>
-                {% if row.bar %}
-                  <div class="bar calm" aria-hidden="true">
-                    {% for on in row.bar %}<span class="{% if on %}on{% endif %}"></span>{% endfor %}
-                  </div>
-                {% endif %}
-                <div class="hint">{{ row.foot }}</div>
-              </div>
-            {% endfor %}
-          </div>
-        {% else %}
-          <div class="empty">
-            <span class="empty-title">{% translate "لا شيء ينتظر قراراً" %}</span>
-            <span class="empty-body">
-              {% translate "لا وصولات ناقصة، ولا طلبات معلّقة، ولا إقفال بانتظار اعتماد ضمن شاشاتك. هذه حالة تشغيلية سليمة، لا صفحة فارغة." %}
-            </span>
-          </div>
-        {% endif %}
       </div>
-    </div>
+    {% endif %}
+
+    {% if charts.clearances %}
+      <div class="card2">
+        <div class="card2-head"><span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-shield-check"/></svg></span><h2>{% translate "البراءات القائمة — أين تقف" %}</h2></div>
+        <div class="card2-body">
+          {% for row in charts.clearances %}
+            <div class="chart-row">
+              <div class="top"><span>{{ row.label }}</span><span class="num">{{ row.value }} <small class="muted">{{ row.pct }}%</small></span></div>
+              <div class="hbar calm" aria-hidden="true"><span class="fill lv-{{ row.level }}"></span></div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
   </div>
 {% endif %}
 
-{% if not kpis and not waiting and not actions %}
+{# ---- 4. الأعمال المعلّقة ------------------------------------------------ #}
+{% if queues %}
+  <h2 class="sec-title">{% translate "الأعمال المعلّقة" %} <span class="chip{% if pending_total %} warn{% else %} ok{% endif %} num">{{ pending_total }}</span></h2>
+  <div class="card2" x-data="{ tab: '{{ queues.0.key }}' }">
+    <div class="tabs" role="tablist" aria-label="{% translate 'طوابير العمل' %}">
+      {% for q in queues %}
+        <button type="button" role="tab" class="tab tone-{{ q.tone }}" :class="{ 'is-active': tab === '{{ q.key }}' }"
+                :aria-selected="tab === '{{ q.key }}'" @click="tab = '{{ q.key }}'">
+          <span class="tab-ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ q.icon }}"/></svg></span>
+          {{ q.label }} <span class="chip{% if q.count %} warn{% endif %} num">{{ q.count }}</span>
+        </button>
+      {% endfor %}
+    </div>
+
+    {% for q in queues %}
+      <div role="tabpanel" x-show="tab === '{{ q.key }}'" x-cloak>
+        {% if q.rows %}
+          <div class="tbl-wrap">
+            <table class="tbl">
+              {% if q.columns == "enrollment" %}
+                <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "الدفعة" %}</th><th>{% translate "الحالة" %}</th><th>{% translate "الرصيد" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+                <tbody>
+                  {% for r in q.rows %}
+                    <tr>
+                      <td dir="ltr" translate="no"><strong class="num">{{ r.code }}</strong></td>
+                      <td>{{ r.participant_name }}<br><small class="muted num" dir="ltr">{{ r.participant_number }}</small></td>
+                      <td><span dir="ltr" translate="no">{{ r.cohort_code }}</span><br><small class="muted">{{ r.program_name }}</small></td>
+                      <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span></td>
+                      <td>{% if r.participant_owes %}<span class="chip danger dot">{{ r.balance }} {% translate "عليه" %}</span>{% elif r.centre_owes %}<span class="chip warn dot">{{ r.balance }} {% translate "له" %}</span>{% else %}<span class="chip ok dot">{% translate "مسوّى" %}</span>{% endif %}</td>
+                      <td class="acts"><a class="btn2 sm" href="{% url 'operations:account' r.code %}">{% translate "كشف الحساب" %}</a> <a class="btn2 primary sm" href="{% url 'operations:enrollments' %}?participant={{ r.participant_number }}">{% translate "افتح" %}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% elif q.columns == "clearance" %}
+                <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "النوع" %}</th><th>{% translate "الخطوة المنتظرة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+                <tbody>
+                  {% for c in q.rows %}
+                    <tr>
+                      <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+                      <td>{{ c.participant_name }}</td>
+                      <td dir="ltr" translate="no" class="num">{{ c.enrollment_code }}</td>
+                      <td>{{ c.case_type_display }}</td>
+                      <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span>{% if c.pending_step_name %} <small class="muted">{{ c.pending_step_name }}</small>{% endif %}</td>
+                      <td class="acts"><a class="btn2 primary sm" href="{% url 'operations:clearance-detail' c.code %}">{% translate "افتح" %}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% elif q.columns == "transfer" %}
+                <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th><th>{% translate "من" %}</th><th>{% translate "إلى" %}</th><th>{% translate "الحالة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+                <tbody>
+                  {% for t in q.rows %}
+                    <tr>
+                      <td dir="ltr" translate="no"><strong class="num">{{ t.code }}</strong></td>
+                      <td>{{ t.participant_name }}</td>
+                      <td><span dir="ltr" translate="no">{{ t.from_cohort_code }}</span></td>
+                      <td><span dir="ltr" translate="no">{{ t.to_cohort_code }}</span></td>
+                      <td><span class="chip {{ t.status|status_tone }}">{{ t.status_display }}</span></td>
+                      <td class="acts"><a class="btn2 primary sm" href="{{ q.url }}">{% translate "افتح" %}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% elif q.columns == "open_day" %}
+                <thead><tr><th>{% translate "التاريخ" %}</th><th>{% translate "الصندوق" %}</th><th class="num">{% translate "النظامي" %}</th><th class="num">{% translate "السندات" %}</th><th>{% translate "منذ" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+                <tbody>
+                  {% for d in q.rows %}
+                    <tr>
+                      <td class="num"><span dir="ltr">{{ d.closing_date|date:"Y/m/d" }}</span></td>
+                      <td>{{ d.cashier }}</td>
+                      <td class="num">{{ d.total }}</td>
+                      <td class="num">{{ d.count }}</td>
+                      <td>{% if d.age == 0 %}<span class="chip ok">{% translate "اليوم" %}</span>{% else %}<span class="chip {% if d.age >= 3 %}danger{% else %}warn{% endif %}">{{ d.age|ar_count:"يوم واحد|يومان|أيام|يوماً" }}</span>{% endif %}</td>
+                      <td class="acts"><a class="btn2 primary sm" href="{{ d.url }}">{% translate "أقفل" %}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% elif q.columns == "closing" %}
+                <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "أمين الصندوق" %}</th><th class="num">{% translate "النظام" %}</th><th class="num">{% translate "الوصولات" %}</th><th>{% translate "الحالة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+                <tbody>
+                  {% for c in q.rows %}
+                    <tr>
+                      <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+                      <td class="num">{{ c.closing_date|date:"Y-m-d" }}</td>
+                      <td>{{ c.cashier }}</td>
+                      <td class="num">{{ c.system_total }}</td>
+                      <td class="num">{{ c.counted_total|default:"—" }}</td>
+                      <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
+                      <td class="acts"><a class="btn2 primary sm" href="{{ q.url }}">{% translate "افتح" %}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% elif q.columns == "claim" %}
+                <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الدفعة" %}</th><th class="num">{% translate "الصافي" %}</th><th>{% translate "الحالة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+                <tbody>
+                  {% for c in q.rows %}
+                    <tr>
+                      <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+                      <td>{{ c.partner_name }}</td>
+                      <td><span dir="ltr" translate="no">{{ c.cohort_code|default:"—" }}</span></td>
+                      <td class="num">{{ c.net_payable }}</td>
+                      <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
+                      <td class="acts"><a class="btn2 primary sm" href="{{ q.url }}">{% translate "افتح" %}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% endif %}
+            </table>
+          </div>
+          {% if q.more %}
+            <div class="tbl-foot">
+              <span class="muted">و{{ q.more|ar_count:"صفّ آخر لم يُعرض هنا|صفّان آخران لم يُعرضا هنا|صفوف أخرى لم تُعرض هنا|صفّاً آخر لم يُعرض هنا" }}</span>
+              <a class="btn2 sm" href="{{ q.url }}">{% translate "افتح الشاشة كاملة" %} <span aria-hidden="true">←</span></a>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="empty">
+            <span class="empty-title">{% translate "لا شيء في هذا الطابور" %}</span>
+            <span class="empty-body">{{ q.label }} — {% translate "لا صفّ ينتظر إجراءً الآن." %}</span>
+            <a class="btn2 empty-act" href="{{ q.url }}">{% translate "افتح الشاشة" %}</a>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if not kpis and not queues %}
   <div class="card2">
     <div class="empty">
       <span class="empty-title">{% translate "لا عدّادات ضمن صلاحيات دورك" %}</span>
@@ -145,5 +314,6 @@
 
 <div class="hint boxed">
   {% translate "التقارير المالية السبعة (§9) لها شاشتها الخاصة — هذه الشاشة عدّادات تشغيلية لا تقارير." %}
+</div>
 </div>
 {% endblock %}

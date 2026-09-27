@@ -15,6 +15,7 @@ import django
 from django.conf import settings
 from django.db import connection
 from django.http import HttpRequest, HttpResponse
+from django.http.response import HttpResponseBase
 from django.shortcuts import redirect, render
 
 
@@ -55,3 +56,34 @@ def health(request: HttpRequest) -> HttpResponse:
             "db_detail": db_detail,
         },
     )
+
+
+def brand_asset(request: HttpRequest, slot: str, digest: str, extension: str) -> HttpResponseBase:
+    """
+    يقدّم ملف هوية واحداً — عامّاً بلا مصادقة، وبقصد.
+
+    صفحة الدخول تحتاج الشعار **قبل** أن يوجد مستخدم، فلا يصلح لها مسار
+    المرفقات المحميّ (Q-13). وما يُقدَّم هنا ليس مرفقاً على أي حال: شعار
+    جامعةٍ مطبوعٌ على كل ورقة تخرج من المركز ليس سرّاً يُحرس.
+
+    العنوان مُعنوَن بالمحتوى (بصمة الملف فيه)، فالبحث بالبصمة لا بالتأريخ:
+    شعارٌ قديم بقي في تخزين متصفّح يُقدَّم كما كان — وهو الصحيح — بينما الصفحة
+    الجديدة تطلب بصمةً جديدة فتحصل على الملف الجديد.
+
+    ``Content-Security-Policy: sandbox`` لأن SVG يُقدَّم من أصل الموقع نفسه:
+    الرفع يرفض ما فيه سكربت، وهذه الترويسة هي الحزام الثاني.
+    """
+    from django.http import FileResponse, Http404
+
+    from apps.core.services import branding_service
+
+    asset = branding_service.asset_by_digest(slot=slot, digest=digest, extension=extension)
+    if asset is None:
+        raise Http404
+
+    response = FileResponse(asset.file.open("rb"), content_type=asset.mime_type)
+    response["Cache-Control"] = "public, max-age=31536000, immutable"
+    response["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["ETag"] = f'"{asset.sha256}"'
+    return response

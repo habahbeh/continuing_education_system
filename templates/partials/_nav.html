@@ -13,8 +13,8 @@
   تبتلع 256px من عرض الشاشة وتسحق عمود المحتوى. الحالة في Alpine على
   `<body>`، والدرج مغلق افتراضياً وظاهر ثابتاً من `md` فصاعداً.
 
-  الرموز: لوحة SVG محلية واحدة في `_nav_icons.html` تُدرَج مرة، وكل مدخل
-  يشير إليها بـ `<use>`. لا CDN ولا خطّ رموز. الرمز `aria-hidden` لأنه زينة —
+  الرموز: لوحة SVG محلية واحدة في `_nav_icons.html` تُدرَج مرة في `base.html`
+  (فتستعملها لوحة المؤشرات أيضاً)، وكل مدخل يشير إليها بـ `<use>`. لا CDN ولا خطّ رموز. الرمز `aria-hidden` لأنه زينة —
   الاسم المقروء يبقى النصّ، ولا تعتمد الحالة المفتوحة على وجود رمز.
 
   تحسين الشريط الجانبي: البنية صارت قائمةً معنونة لا سلسلة روابط. أربعون
@@ -26,8 +26,6 @@
   <nav class="sidebar" id="sidebar" aria-label="{% translate 'التنقّل الرئيسي' %}"
        :class="{ 'is-open': nav }">
 
-    {% include "partials/_nav_icons.html" %}
-
     {# زرّ الإغلاق للهاتف وحده: على الشاشة الكبيرة القائمة ليست درجاً. #}
     <div class="nav-close-row">
       <button type="button" class="btn2 sm" x-ref="navClose" @click="nav = false">
@@ -36,7 +34,8 @@
     </div>
 
     {% for group in nav_groups %}
-      <div class="nav-group" role="group" aria-labelledby="nav-group-{{ forloop.counter }}">
+      {# اللون للمجموعة كلها لا للرمز: `tone-*` من nav.py، والرمز يرثه في CSS. #}
+      <div class="nav-group tone-{{ group.tone }}" role="group" aria-labelledby="nav-group-{{ forloop.counter }}">
         <h2 class="nav-group-title" id="nav-group-{{ forloop.counter }}">{{ group.title }}</h2>
         <ul>
           {% for item in group.items %}
@@ -49,9 +48,11 @@
                   سماكة الخط وأطرافه هنا لا على كل رمز: مكانٌ واحد يحكم الشكل
                   كله. و`aria-hidden` لأن الرمز زينة — الاسم المقروء هو النصّ.
                 {% endcomment %}
-                <svg class="nav-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor"
-                     stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
-                     aria-hidden="true" focusable="false"><use href="#i-{{ item.icon }}"/></svg>
+                <span class="nav-ico-wrap" aria-hidden="true">
+                  <svg class="nav-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                       stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+                       focusable="false"><use href="#i-{{ item.icon }}"/></svg>
+                </span>
                 <span>{{ item.label }}</span>
               </a>
             </li>

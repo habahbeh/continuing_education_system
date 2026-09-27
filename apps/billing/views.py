@@ -17,12 +17,15 @@ reverse. They sit side by side so the difference is visible.
 from __future__ import annotations
 
 from datetime import date
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
@@ -31,7 +34,6 @@ from apps.billing.forms import (
     DiscountForm,
     ExtraFeeForm,
     OpeningBalanceProposeForm,
-    OpeningBalanceReviewForm,
     RefundForm,
 )
 from apps.billing.services import (
@@ -67,10 +69,31 @@ def _enrollment(request: HttpRequest, code: str) -> object:
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET", "POST"])
 def discounts_view(request: HttpRequest) -> HttpResponse:
+    """
+    The discounts register and, beside it, the grant form.
+
+    The form offers only enrolments a discount can still land on (the same
+    tests the service applies), each carrying its tuition base and the
+    cohort's split so the amount, the remainder and each party's share are
+    previewed before the save. ``?enrollment=`` from the account page both
+    narrows the register and preselects the form.
+    """
     can_create = policy.is_allowed(request.user, Screen.DISCOUNTS, Action.CREATE)
+    enrollment_code = request.GET.get("enrollment", "").strip()
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    if status not in discount_service.DISCOUNT_FILTERS:
+        status = ""
+
+    candidates = (
+        discount_service.discountable_rows(actor=request.user, request=request)
+        if can_create
+        else []
+    )
     form = DiscountForm(
         request.POST if request.POST.get("action") == "grant" else None,
-        enrollment_choices=_enrollment_choices(request),
+        initial={"enrollment_code": enrollment_code} if enrollment_code else None,
+        enrollment_choices=[(r["code"], f'{r["code"]} — {r["participant_name"]}') for r in candidates],
     )
 
     if request.method == "POST":
@@ -80,9 +103,39 @@ def discounts_view(request: HttpRequest) -> HttpResponse:
 
     rows = discount_service.list_discounts(
         actor=request.user,
-        enrollment_code=request.GET.get("enrollment", "").strip(),
+        enrollment_code=enrollment_code,
+        query=query,
+        status=status,
         request=request,
     )
+    summary = discount_service.discounts_summary(rows)
+    base_url = reverse("billing:discounts")
+    keep = {k: v for k, v in (("q", query), ("enrollment", enrollment_code)) if v}
+
+    def _tile(key: str, label: str, value: object, tone: str, icon: str) -> dict:
+        params = dict(keep)
+        if key and status != key:
+            params["status"] = key
+        qs = urlencode(params)
+        return {
+            "key": key,
+            "label": label,
+            "value": value,
+            "tone": tone,
+            "icon": icon,
+            "on": bool(key) and status == key,
+            "url": base_url + (f"?{qs}" if qs else ""),
+        }
+
+    tiles = [
+        _tile("", _("الخصومات"), summary["count"], "info", "percent"),
+        _tile("pending", _("بانتظار الاعتماد"), summary["pending"], "amber", "checks"),
+        _tile("", _("حصة الجامعة"), summary["university"], "violet", "building"),
+        _tile("", _("حصة الشريك"), summary["partner"], "teal", "swap"),
+    ]
+    tiles[0]["url"] = base_url + (f"?{urlencode(keep)}" if keep else "")
+    tiles[2]["url"] = tiles[3]["url"] = tiles[0]["url"]
+
     return render(
         request,
         "billing/discounts.html",
@@ -90,10 +143,18 @@ def discounts_view(request: HttpRequest) -> HttpResponse:
             "title": _("الخصومات"),
             "active_screen": Screen.DISCOUNTS,
             "discounts": rows,
+            "summary": summary,
+            "tiles": tiles,
+            "candidates": candidates,
             "form": form,
+            "query": query,
+            "status": status,
+            "enrollment_code": enrollment_code,
+            "is_filtered": bool(query or status or enrollment_code),
             "can_create": can_create,
             "can_approve": policy.is_allowed(request.user, Screen.DISCOUNTS, Action.APPROVE),
             "current_user_id": request.user.pk,
+            "posted_action": request.POST.get("action", ""),
         },
     )
 
@@ -129,7 +190,7 @@ def _handle_discount(request: HttpRequest, form: DiscountForm) -> HttpResponse |
                 request=request,
                 **data,
             )
-            messages.success(request, _("سُجِّل الخصم"))
+            messages.success(request, _("سُجِّل الخصم — يظهر في كشف حساب المشارك فوراً"))
         elif action == "approve":
             discount_service.approve_discount(
                 actor=request.user,
@@ -155,19 +216,87 @@ def _handle_discount(request: HttpRequest, form: DiscountForm) -> HttpResponse |
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET", "POST"])
 def refunds_view(request: HttpRequest) -> HttpResponse:
-    choices = _enrollment_choices(request)
+    """
+    Two registers and, beside them, the two forms on tabs.
+
+    Each form offers only what its service would accept — enrolments with
+    money collected for a refund, enrolments holding a credit for a return —
+    and every option carries the figure the form previews. ``?enrollment=``
+    from the account page preselects and opens the matching tab; ``?tab=``
+    picks one outright.
+    """
+    today = timezone.localdate()
+    can_create = policy.is_allowed(request.user, Screen.REFUNDS, Action.CREATE)
+    enrollment_code = request.GET.get("enrollment", "").strip()
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    if status not in refund_service.REFUND_FILTERS:
+        status = ""
+
+    refundable = (
+        refund_service.refundable_rows(actor=request.user, request=request) if can_create else []
+    )
+    creditable = (
+        credit_service.creditable_rows(actor=request.user, request=request) if can_create else []
+    )
     action = request.POST.get("action", "")
     refund_form = RefundForm(
-        request.POST if action == "request" else None, enrollment_choices=choices
+        request.POST if action == "request" else None,
+        initial={"enrollment_code": enrollment_code} if enrollment_code else None,
+        enrollment_choices=[(r["code"], f'{r["code"]} — {r["participant_name"]}') for r in refundable],
     )
     credit_form = CreditReturnForm(
-        request.POST if action == "return-credit" else None, enrollment_choices=choices
+        request.POST if action == "return-credit" else None,
+        initial={"enrollment_code": enrollment_code, "returned_on": today},
+        enrollment_choices=[(r["code"], f'{r["code"]} — {r["participant_name"]}') for r in creditable],
     )
 
     if request.method == "POST":
-        response = _handle_refund(request, refund_form, credit_form)
+        response = _handle_refund(request, refund_form, credit_form, refundable)
         if response is not None:
             return response
+
+    # Which tab opens: the posted one, the asked one, or the one that can act
+    # on the enrolment that brought the reader here.
+    tab = request.POST.get("action", "") if request.method == "POST" else request.GET.get("tab", "")
+    tab = {"return-credit": "credit", "credit": "credit"}.get(tab, "refund")
+    if request.method == "GET" and enrollment_code and not request.GET.get("tab"):
+        # A credit balance is the lighter, correct path when one exists.
+        tab = "credit" if any(r["code"] == enrollment_code for r in creditable) else "refund"
+
+    refunds = refund_service.list_refunds(
+        actor=request.user,
+        enrollment_code=enrollment_code,
+        status=status,
+        query=query,
+        request=request,
+    )
+    summary = refund_service.refunds_summary(refunds)
+    base_url = reverse("billing:refunds")
+    keep = {k: v for k, v in (("q", query), ("enrollment", enrollment_code)) if v}
+
+    def _tile(key: str, label: str, value: object, tone: str, icon: str) -> dict:
+        params = dict(keep)
+        if key and status != key:
+            params["status"] = key
+        qs = urlencode(params)
+        return {
+            "key": key,
+            "label": label,
+            "value": value,
+            "tone": tone,
+            "icon": icon,
+            "on": bool(key) and status == key,
+            "url": base_url + (f"?{qs}" if qs else ""),
+        }
+
+    tiles = [
+        _tile("REQUESTED", _("بانتظار الاعتماد"), summary["requested"], "amber", "checks"),
+        _tile("APPROVED", _("بانتظار التنفيذ"), summary["approved"], "info", "coins"),
+        _tile("EXECUTED", _("المنفَّذ"), summary["executed_total"], "ok", "undo"),
+        _tile("", _("استرجاع من الشريك"), summary["recovery_total"], "teal", "swap"),
+    ]
+    tiles[3]["url"] = base_url + (f"?{urlencode(keep)}" if keep else "")
 
     return render(
         request,
@@ -175,22 +304,37 @@ def refunds_view(request: HttpRequest) -> HttpResponse:
         {
             "title": _("الاستردادات وردّ الأرصدة"),
             "active_screen": Screen.REFUNDS,
-            "refunds": refund_service.list_refunds(actor=request.user, request=request),
+            "refunds": refunds,
+            "summary": summary,
+            "tiles": tiles,
             "credit_returns": credit_service.list_credit_returns(
-                actor=request.user, request=request
+                actor=request.user, enrollment_code=enrollment_code, request=request
             ),
             "refund_form": refund_form,
             "credit_form": credit_form,
-            "can_create": policy.is_allowed(request.user, Screen.REFUNDS, Action.CREATE),
+            "refundable": refundable,
+            "creditable": creditable,
+            "tab": tab,
+            "query": query,
+            "status": status,
+            "enrollment_code": enrollment_code,
+            "is_filtered": bool(query or status or enrollment_code),
+            "today": today,
+            "can_create": can_create,
             "can_approve": policy.is_allowed(request.user, Screen.REFUNDS, Action.APPROVE),
             "can_execute": policy.is_allowed(request.user, Screen.REFUNDS, Action.EDIT),
             "current_user_id": request.user.pk,
+            "posted_action": action,
+            "posted_code": request.POST.get("code", ""),
         },
     )
 
 
 def _handle_refund(
-    request: HttpRequest, refund_form: RefundForm, credit_form: CreditReturnForm
+    request: HttpRequest,
+    refund_form: RefundForm,
+    credit_form: CreditReturnForm,
+    refundable: list[dict],
 ) -> HttpResponse | None:
     action = request.POST.get("action", "")
     if action in REFUND_ACTIONS:
@@ -201,13 +345,17 @@ def _handle_refund(
                 return None
             data = dict(refund_form.cleaned_data)
             code = data.pop("enrollment_code")
+            if data["refund_type"] == "FULL" or data["amount"] is None:
+                # FULL = everything collected; the service's own ceiling.
+                row = next((r for r in refundable if r["code"] == code), None)
+                data["amount"] = row["paid"] if row else data["amount"]
             refund_service.request_refund(
                 actor=request.user,
                 enrollment=_enrollment(request, code),
                 request=request,
                 **data,
             )
-            messages.success(request, _("سُجِّل طلب الاسترداد"))
+            messages.success(request, _("سُجِّل طلب الاسترداد — بانتظار اعتماد مدير المركز"))
         elif action == "return-credit":
             if not credit_form.is_valid():
                 return None
@@ -219,7 +367,7 @@ def _handle_refund(
                 request=request,
                 **data,
             )
-            messages.success(request, _("رُدّ الرصيد الدائن"))
+            messages.success(request, _("رُدّ الرصيد الدائن كاملاً"))
         elif action in {"approve", "reject", "execute"}:
             _refund_transition(request, action)
         else:
@@ -234,14 +382,12 @@ def _handle_refund(
 
 
 def _refund_transition(request: HttpRequest, action: str) -> None:
-    from datetime import date
-
     refund = refund_service.get_refund(
         actor=request.user, code=request.POST.get("code", ""), request=request
     )
     if action == "approve":
         refund_service.approve_refund(actor=request.user, refund=refund, request=request)
-        messages.success(request, _("اعتُمد الاسترداد"))
+        messages.success(request, _("اعتُمد الاسترداد — بانتظار التنفيذ من الموظف المالي"))
     elif action == "reject":
         refund_service.reject_refund(
             actor=request.user,
@@ -252,9 +398,12 @@ def _refund_transition(request: HttpRequest, action: str) -> None:
         messages.success(request, _("رُفض الاسترداد"))
     else:
         refund_service.execute_refund(
-            actor=request.user, refund=refund, executed_on=date.today(), request=request
+            actor=request.user,
+            refund=refund,
+            executed_on=timezone.localdate(),
+            request=request,
         )
-        messages.success(request, _("نُفِّذ الاسترداد"))
+        messages.success(request, _("نُفِّذ الاسترداد وسُجِّل خروج المال"))
 
 
 # ---------------------------------------------------------------------------
@@ -262,12 +411,31 @@ def _refund_transition(request: HttpRequest, action: str) -> None:
 # ---------------------------------------------------------------------------
 @require_http_methods(["GET", "POST"])
 def extra_fees_view(request: HttpRequest) -> HttpResponse:
+    """
+    The register beside the charge form. The form's type cards carry the
+    seeded amount and the sharing rule each type charges with, so the reader
+    sees the figure and who bears it before the save; ``?enrollment=`` and
+    ``?type=`` from other screens preselect.
+    """
+    today = timezone.localdate()
     can_create = policy.is_allowed(request.user, Screen.EXTRA_FEES, Action.CREATE)
-    form = ExtraFeeForm(request.POST or None, enrollment_choices=_enrollment_choices(request))
+    enrollment_code = request.GET.get("enrollment", "").strip()
+    query = request.GET.get("q", "").strip()
+    fee_type = request.GET.get("type", "").strip()
+    if fee_type not in extra_fee_service.FEE_TYPE_NEEDS:
+        fee_type = ""
+
+    candidates = (
+        extra_fee_service.chargeable_rows(actor=request.user, request=request) if can_create else []
+    )
+    form = ExtraFeeForm(
+        request.POST or None,
+        initial={"enrollment_code": enrollment_code, "charged_on": today, "fee_type": fee_type or None},
+        enrollment_choices=[(r["code"], f'{r["code"]} — {r["participant_name"]}') for r in candidates],
+    )
 
     if request.method == "POST":
-        if not can_create:
-            raise PermissionDenied
+        policy.require(request.user, Screen.EXTRA_FEES, Action.CREATE, request=request)
         if form.is_valid():
             data = dict(form.cleaned_data)
             code = data.pop("enrollment_code")
@@ -278,12 +446,48 @@ def extra_fees_view(request: HttpRequest) -> HttpResponse:
                     request=request,
                     **data,
                 )
-                messages.success(request, _("حُمِّل الرسم"))
+                messages.success(request, _("حُمِّل الرسم وصار بنداً في حساب المشارك"))
                 return redirect("billing:extra-fees")
             except DjangoValidationError as exc:
                 messages.error(request, _message_of(exc))
             except ObjectDoesNotExist:
                 messages.error(request, _("تسجيل غير معروف"))
+
+    fees = extra_fee_service.list_extra_fees(
+        actor=request.user,
+        enrollment_code=enrollment_code,
+        fee_type=fee_type,
+        query=query,
+        request=request,
+    )
+    summary = extra_fee_service.fees_summary(
+        extra_fee_service.list_extra_fees(
+            actor=request.user, enrollment_code=enrollment_code, query=query, request=request
+        )
+        if fee_type
+        else fees
+    )
+    base_url = reverse("billing:extra-fees")
+    keep = {k: v for k, v in (("q", query), ("enrollment", enrollment_code)) if v}
+    tiles = []
+    for key, bucket in summary.items():
+        params = dict(keep)
+        if fee_type != key:
+            params["type"] = key
+        qs = urlencode(params)
+        tone, icon = extra_fee_service.FEE_TYPE_LOOK[key]
+        tiles.append(
+            {
+                "key": key,
+                "label": bucket["label"],
+                "value": bucket["count"],
+                "foot": bucket["total"],
+                "tone": tone,
+                "icon": icon,
+                "on": fee_type == key,
+                "url": base_url + (f"?{qs}" if qs else ""),
+            }
+        )
 
     return render(
         request,
@@ -291,8 +495,17 @@ def extra_fees_view(request: HttpRequest) -> HttpResponse:
         {
             "title": _("الرسوم الإضافية"),
             "active_screen": Screen.EXTRA_FEES,
-            "fees": extra_fee_service.list_extra_fees(actor=request.user, request=request),
+            "fees": fees,
+            "tiles": tiles,
+            "summary": summary,
             "form": form,
+            "candidates": candidates,
+            "type_cards": extra_fee_service.fee_type_cards(as_of=today),
+            "query": query,
+            "fee_type": fee_type,
+            "enrollment_code": enrollment_code,
+            "is_filtered": bool(query or fee_type or enrollment_code),
+            "today": today,
             "can_create": can_create,
         },
     )
@@ -348,16 +561,42 @@ def opening_balances_view(request: HttpRequest) -> HttpResponse:
 
     Deliberately one screen rather than four: the whole point of D-24 is that
     a reader can see who proposed, who reviewed and who approved a given
-    balance side by side. Splitting the steps across screens would hide the
-    separation the rule exists to create.
+    balance side by side. The tiles are the stage filter; every act on a row
+    opens its own dialog; ``?row=`` from the archive fills the proposal with
+    the archive row it comes from.
     """
+    today = timezone.localdate()
     can_propose = policy.is_allowed(request.user, Screen.OPENING_BALANCES, Action.CREATE)
     can_review = policy.is_allowed(request.user, Screen.OPENING_BALANCES, Action.EDIT)
     can_decide = policy.is_allowed(request.user, Screen.OPENING_BALANCES, Action.APPROVE)
 
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    statuses = opening_balance_service.status_choices()
+    if status not in {c for c, _l in statuses}:
+        status = ""
+    direction = request.GET.get("direction", "").strip()
+    directions = opening_balance_service.direction_choices()
+    if direction not in {c for c, _l in directions}:
+        direction = ""
+
+    row_id = _parse_int(request.GET.get("row", "")) or _parse_int(request.POST.get("source_row_id", ""))
+    archive_row = (
+        opening_balance_service.archive_row_summary(
+            actor=request.user, source_row_id=row_id, request=request
+        )
+        if row_id and can_propose
+        else None
+    )
     propose_form = OpeningBalanceProposeForm(
         request.POST if request.POST.get("action") == "propose" else None,
-        direction_choices=opening_balance_service.direction_choices(),
+        initial={
+            "source_row_id": row_id or None,
+            "legacy_number": archive_row["legacy_number"] if archive_row else "",
+            "as_of": today,
+            "direction": "RECEIVABLE",
+        },
+        direction_choices=directions,
     )
 
     if request.method == "POST":
@@ -365,34 +604,84 @@ def opening_balances_view(request: HttpRequest) -> HttpResponse:
         if response is not None:
             return response
 
+    common = {"actor": request.user, "direction": direction, "query": query, "request": request}
+    rows = opening_balance_service.list_balances(status=status, **common)
+    summary = opening_balance_service.balances_summary(
+        opening_balance_service.list_balances(**common) if status else rows
+    )
+    # Every row a reviewer or decider may act on carries the enrolments it
+    # could be attached to — drawn once per row, into its dialog.
+    if can_review or can_decide:
+        for r in rows:
+            if r["status"] in ("DRAFT", "REVIEWED") or r["is_resolvable_credit"]:
+                r["enrollment_options"] = opening_balance_service.enrollment_options(
+                    actor=request.user,
+                    balance=opening_balance_service.balance_instance(
+                        actor=request.user, code=r["code"], request=request
+                    ),
+                    request=request,
+                )
+
+    base_url = reverse("billing:opening-balances")
+    keep = {k: v for k, v in (("q", query), ("direction", direction)) if v}
+
+    def _tile(key: str, label: str, value: object, foot: object, tone: str, icon: str) -> dict:
+        params = dict(keep)
+        if key and status != key:
+            params["status"] = key
+        qs = urlencode(params)
+        return {
+            "key": key,
+            "label": label,
+            "value": value,
+            "foot": foot,
+            "tone": tone,
+            "icon": icon,
+            "on": bool(key) and status == key,
+            "url": base_url + (f"?{qs}" if qs else ""),
+        }
+
+    tiles = [
+        _tile("DRAFT", _("مسودات تنتظر المراجعة"), summary["draft"], _("لا أثر مالي"), "amber", "doc"),
+        _tile("REVIEWED", _("مُراجَعة تنتظر الاعتماد"), summary["reviewed"], _("لا أثر مالي"), "info", "checks"),
+        _tile("APPROVED", _("معتمَدة تنتظر الترحيل"), summary["approved"], _("إذن بالترحيل لا ترحيل"), "violet", "swap"),
+        _tile("REFUND_DUE", _("تنتظر الصرف نقداً"), summary["refund_due"], summary["refund_due_total"], "danger", "coins"),
+    ]
+
     return render(
         request,
         "billing/opening_balances.html",
         {
             "title": _("الأرصدة الافتتاحية"),
             "active_screen": Screen.OPENING_BALANCES,
-            "balances": opening_balance_service.list_balances(
-                actor=request.user,
-                status=request.GET.get("status", "").strip(),
-                direction=request.GET.get("direction", "").strip(),
-                request=request,
-            ),
-            "totals": opening_balance_service.totals(actor=request.user, request=request),
-            "outstanding_refunds": opening_balance_service.outstanding_refunds(
-                actor=request.user, request=request
-            ),
+            "balances": rows,
+            "summary": summary,
+            "tiles": tiles,
             "payment_methods": payment_service.payment_method_choices(),
-            "today": date.today().isoformat(),
-            "statuses": opening_balance_service.status_choices(),
-            "directions": opening_balance_service.direction_choices(),
+            "today": today,
+            "statuses": statuses,
+            "directions": directions,
+            "query": query,
+            "status": status,
+            "direction": direction,
+            "is_filtered": bool(query or status or direction),
             "form": propose_form if can_propose else None,
-            "review_form": OpeningBalanceReviewForm() if can_review else None,
+            "archive_row": archive_row,
             "can_propose": can_propose,
             "can_review": can_review,
             "can_decide": can_decide,
             "current_user_id": request.user.pk,
+            "posted_action": request.POST.get("action", ""),
+            "posted_code": request.POST.get("code", ""),
         },
     )
+
+
+def _parse_int(raw: str) -> int | None:
+    try:
+        return int(raw) if raw and raw.strip() else None
+    except ValueError:
+        return None
 
 
 def _handle_opening_balance(
@@ -431,7 +720,7 @@ def _movement_date(request: HttpRequest, field: str) -> date:
     """
     raw = request.POST.get(field, "").strip()
     if not raw:
-        return date.today()
+        return timezone.localdate()
     try:
         return date.fromisoformat(raw)
     except ValueError as exc:
@@ -455,7 +744,6 @@ def _propose_opening_balance(
         opening_balance_service.propose_from_archive(
             actor=request.user,
             historical_enrollment=historical,
-            code=data["code"],
             direction=data["direction"],
             amount=data["amount"],
             as_of=data["as_of"],
@@ -465,7 +753,6 @@ def _propose_opening_balance(
     else:
         opening_balance_service.propose_manually(
             actor=request.user,
-            code=data["code"],
             direction=data["direction"],
             amount=data["amount"],
             as_of=data["as_of"],
@@ -525,7 +812,6 @@ def _advance_opening_balance(request: HttpRequest, action: str) -> HttpResponse 
         payout = opening_balance_service.pay_refund_due(
             actor=request.user,
             balance=balance,
-            code=request.POST.get("payout_code", "").strip(),
             amount=balance.amount,
             paid_on=_movement_date(request, "paid_on"),
             payment_method=cashbox.method_by_code(request.POST.get("payment_method", "").strip()),

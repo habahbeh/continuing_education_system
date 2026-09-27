@@ -1,0 +1,42 @@
+{% load i18n l10n arabic_ui %}
+{% comment %}
+  الجهة النظامية من إقفال يوم واحد، تُرسم داخل نموذج الفتح فور اختيار الصندوق
+  والتاريخ (htmx): الإجمالي وعدد السندات، التفصيل بالطرق للتوثيق، والسندات
+  التي سُجّلت بلا رقم سند من الدائرة المالية — وهي ما تُطابَق عليه (§5.2).
+  المبلغ النظامي يُحمل في data-total ليحسب الفرق حيّاً قبل الحفظ.
+{% endcomment %}
+<div id="closing-preview" data-total="{% if summary %}{{ summary.total|unlocalize }}{% else %}{% endif %}" data-count="{% if summary %}{{ summary.count }}{% else %}0{% endif %}">
+  {% if summary is None %}
+    <p class="hint">{% translate "اختر الصندوق والتاريخ ليظهر ما سجّله النظام لذلك اليوم." %}</p>
+  {% elif summary.count == 0 %}
+    <div class="empty snug">
+      <span class="empty-title">{% translate "لا سندات صادرة في هذا اليوم لهذا الصندوق" %}</span>
+      <span class="empty-body">{% translate "لا شيء يُقفل. اختر يوماً آخر أو صندوقاً آخر." %}</span>
+    </div>
+  {% else %}
+    <div class="sys-box">
+      <div class="sys-total">
+        <span class="lbl">{% translate "النظامي" %}</span>
+        <span class="val num">{{ summary.total }}</span>
+        <span class="foot">{{ summary.count|ar_count:"سند واحد|سندان|سندات|سنداً" }} · {{ closing_date|date:"Y/m/d" }}</span>
+      </div>
+      <div class="sys-methods">
+        {% for m in summary.by_method %}<span class="chip">{{ m.name }} <span class="num">{{ m.amount }}</span> <span class="muted">({{ m.count }})</span></span>{% endfor %}
+      </div>
+    </div>
+    {% if summary.unvouched %}
+      <div class="{% if vouchers_required %}err{% else %}hint boxed{% endif %} unvouched">
+        <strong>{{ summary.unvouched_count|ar_count:"سند واحد|سندان|سندات|سنداً" }} {% translate "بلا رقم سند من الدائرة المالية" %}</strong>
+        <span class="num">({{ summary.unvouched_total }})</span>
+        {% if vouchers_required %}— {% translate "سيبقى الإقفال «قيد المطابقة» حتى تُستكمل الأرقام أو تُكتب تسوية." %}{% endif %}
+        <ul class="reasons">
+          {% for u in summary.unvouched %}
+            <li><a class="row-link num" dir="ltr" href="{% url 'cashbox:receipt-detail' u.number %}">{{ u.number }}</a> — {{ u.participant_name }} · <span class="num">{{ u.amount }}</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% else %}
+      <p class="hint ok-line">✓ {% translate "كل سندات اليوم تحمل رقم سند الدائرة المالية." %}</p>
+    {% endif %}
+  {% endif %}
+</div>

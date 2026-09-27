@@ -1,0 +1,76 @@
+{% load i18n %}
+{% comment %}
+  حقول بطاقة البرنامج (§2.2) — تُرسم في حوار الإنشاء وحوار التعديل معاً. الرمز
+  في التعديل معطَّل: هو هوية البرنامج في الدفعات وقوائم الأسعار والأرشيف.
+  «عدد المستويات» يظهر عند تعليم «ذات مستويات» (Alpine `lv` من الحوار الحاضن).
+{% endcomment %}
+<div class="grid2">
+  <div class="fld{% if form.code.errors %} has-error{% endif %}">
+    <label for="{{ form.code.id_for_label }}">{{ form.code.label }}<span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="{{ form.code.id_for_label }}" name="code" maxlength="32" dir="ltr" autocomplete="off" required value="{{ form.code.value|default:'' }}"{% if form.code.field.disabled %} disabled{% endif %} placeholder="{{ code_hint|default:'DIP-…' }}">
+    {% for e in form.code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  </div>
+  <div class="fld{% if form.training_hours.errors %} has-error{% endif %}">
+    <label for="{{ form.training_hours.id_for_label }}">{{ form.training_hours.label }}<span class="req" aria-hidden="true">*</span></label>
+    <input type="number" min="0" step="1" id="{{ form.training_hours.id_for_label }}" name="training_hours" dir="ltr" required value="{{ form.training_hours.value|default:'0' }}">
+    {% for e in form.training_hours.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  </div>
+</div>
+<div class="fld{% if form.name_ar.errors %} has-error{% endif %}">
+  <label for="{{ form.name_ar.id_for_label }}">{{ form.name_ar.label }}<span class="req" aria-hidden="true">*</span></label>
+  <input type="text" id="{{ form.name_ar.id_for_label }}" name="name_ar" maxlength="150" required value="{{ form.name_ar.value|default:'' }}">
+  {% for e in form.name_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}
+</div>
+<div class="fld{% if form.name_en.errors %} has-error{% endif %}">
+  <label for="{{ form.name_en.id_for_label }}">{{ form.name_en.label }}</label>
+  <input type="text" id="{{ form.name_en.id_for_label }}" name="name_en" maxlength="150" dir="ltr" value="{{ form.name_en.value|default:'' }}">
+  {% for e in form.name_en.errors %}<div class="err">{{ e }}</div>{% endfor %}
+</div>
+<div class="grid2">
+  <div class="fld{% if form.knowledge_field.errors %} has-error{% endif %}">
+    <label for="{{ form.knowledge_field.id_for_label }}">{{ form.knowledge_field.label }}</label>
+    <select id="{{ form.knowledge_field.id_for_label }}" name="knowledge_field">
+      {% for value, label in form.fields.knowledge_field.choices %}<option value="{{ value }}"{% if form.knowledge_field.value|stringformat:"s" == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    {% for e in form.knowledge_field.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  </div>
+  {% if shows_category %}
+    <div class="fld{% if form.course_category.errors %} has-error{% endif %}">
+      <label for="{{ form.course_category.id_for_label }}">{{ form.course_category.label }}{% if form.program_type == "SHORT_COURSE" %}<span class="req" aria-hidden="true">*</span>{% endif %}</label>
+      <select id="{{ form.course_category.id_for_label }}" name="course_category"{% if form.program_type == "SHORT_COURSE" %} required{% endif %}>
+        {% for value, label in form.fields.course_category.choices %}<option value="{{ value }}"{% if form.course_category.value|stringformat:"s" == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if form.program_type == "SHORT_COURSE" %}<div class="help">{% translate "يحدّ النقل المسموح بين دورتين (BR-061)." %}</div>{% endif %}
+      {% for e in form.course_category.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    </div>
+  {% endif %}
+</div>
+<div class="fld{% if form.specialization.errors %} has-error{% endif %}">
+  <label for="{{ form.specialization.id_for_label }}">{{ form.specialization.label }}</label>
+  <input type="text" id="{{ form.specialization.id_for_label }}" name="specialization" maxlength="150" value="{{ form.specialization.value|default:'' }}">
+  {% for e in form.specialization.errors %}<div class="err">{{ e }}</div>{% endfor %}
+</div>
+<div class="grid2">
+  <div class="fld is-check">
+    <label class="check-row"><input type="checkbox" name="is_leveled" value="on" x-model="lv"{% if form.is_leveled.value %} checked{% endif %}> {{ form.is_leveled.label }}</label>
+  </div>
+  <div class="fld{% if form.levels_count.errors %} has-error{% endif %}" x-show="lv" x-cloak>
+    <label for="{{ form.levels_count.id_for_label }}">{{ form.levels_count.label }}<span class="req" aria-hidden="true">*</span></label>
+    <input type="number" min="1" step="1" id="{{ form.levels_count.id_for_label }}" name="levels_count" dir="ltr" :required="lv" value="{{ form.levels_count.value|default:'' }}">
+    {% for e in form.levels_count.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  </div>
+</div>
+<div class="grid2">
+  <div class="fld{% if form.consumables_per_student.errors %} has-error{% endif %}">
+    <label for="{{ form.consumables_per_student.id_for_label }}">{{ form.consumables_per_student.label }}</label>
+    <input type="number" min="0" step="0.001" inputmode="decimal" id="{{ form.consumables_per_student.id_for_label }}" name="consumables_per_student" dir="ltr" value="{{ form.consumables_per_student.value|default:'0' }}">
+    <div class="help">{% translate "تُستثنى من وعاء القسمة مع الشريك (§3.1)." %}</div>
+    {% for e in form.consumables_per_student.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  </div>
+  <div class="fld{% if form.minimum_first_payment_override.errors %} has-error{% endif %}">
+    <label for="{{ form.minimum_first_payment_override.id_for_label }}">{{ form.minimum_first_payment_override.label }}</label>
+    <input type="number" min="0" step="0.001" inputmode="decimal" id="{{ form.minimum_first_payment_override.id_for_label }}" name="minimum_first_payment_override" dir="ltr" value="{{ form.minimum_first_payment_override.value|default:'' }}">
+    <div class="help">{{ form.minimum_first_payment_override.help_text }}</div>
+    {% for e in form.minimum_first_payment_override.errors %}<div class="err">{{ e }}</div>{% endfor %}
+  </div>
+</div>

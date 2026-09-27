@@ -1,35 +1,63 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
+
+{% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  فهرس التقارير السبعة (§9) — بأسلوب «مسار العمل» في لوحة المؤشرات
+  (`.stepper`): بطاقةٌ ملوّنة بنغمتها، رمزٌ دائري تحمل زاويتُه رقمَ التقرير،
+  عنوانٌ وسطرٌ يقول ما يجيب عنه، وتلميحٌ عند المرور من CSS وحدها بلا سكربت.
+
+  وفرقان عن المسار، كلاهما مقصود:
+
+  * **لا سهم بين البطاقات.** السهم في المسار يقول «هذه ثم تلك» — والتقارير
+    السبعة ليست تسلسلاً: لا يسبق «المتأخرون» «المصروفات» ولا يتوقّف عليه.
+    وسهمٌ هنا يدّعي ترتيباً لا وجود له.
+  * **العنوان يلتفّ ولا يُقصّ.** محطات المسار أسماء قصيرة («الدفعات»)،
+    وعناوين §9 جُمَلٌ كاملة («إجمالي الإيرادات ضمن فترة زمنية»)؛ وسطرٌ مقصوص
+    في قائمة اختيارٍ من سبعة يجعل الاختيار تخميناً.
+
+  ولا `<details>` يطويها كما في اللوحة: هناك المسار ثانويٌّ تحت العدّادات،
+  وهنا السبعة **هي** الشاشة — وطيُّها يطوي الصفحة كلها.
+
+  والمحجوب عن الدور يبقى مرئياً معطَّلاً (`off`) لا محذوفاً: أن يعرف القارئ
+  أن التقرير موجود وليس من نصيبه خيرٌ من أن يظنّه غير موجود، والتلميح يقول
+  السبب بمرجعه (BR-099).
+{% endcomment %}
+
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
-</div>
-
-{% guided_help "reports" %}
-<div class="note info">
-  {% translate "منح شاشة التقارير ليس منح السبعة — لكل تقرير صلاحيته، والمحجوب عن دورك معلَّم أدناه." %}
-</div>
-<div class="card2">
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead><tr><th>#</th><th>{% translate "التقرير" %}</th><th>{% translate "المصدر" %}</th><th></th></tr></thead>
-      <tbody>
-        {% for r in reports %}
-          <tr>
-            <td class="num">{{ r.number }}</td>
-            <td>{{ r.title }}</td>
-            <td class="muted">§9.{{ r.number }}</td>
-            <td>
-              {% if r.allowed %}
-                <a class="btn2 ghost" href="{% url 'reporting:report' r.number %}">{% translate "فتح" %}</a>
-              {% else %}
-                <span class="chip">{% translate "خارج نطاق دورك" %}</span>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div>
+    <span class="eyebrow">{% translate "التقارير" %}</span>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "التقارير السبعة التي يطلبها البند (9) من المتطلبات. ومنح شاشة التقارير ليس منح السبعة: لكل تقرير صلاحيته، والمحجوب عن دورك معلَّم أدناه بسببه." %}</p>
   </div>
 </div>
+
+<ol class="stepper as-menu">
+  {% for r in reports %}
+    <li class="tone-{{ r.tone }} {% if r.allowed %}on{% else %}off{% endif %}">
+      {% if r.allowed %}
+        {% comment %}
+          لا `data-tip` على البطاقة المتاحة: نصّه هو نفسه سطر `.w` الظاهر تحت
+          العنوان، وتلميحٌ يكرّر ما يُقرأ أصلاً ضجيجٌ يزحف خارج حافة الصفحة
+          بلا فائدة. ويبقى على المحجوبة، حيث `.w` تقول «خارج نطاق دورك»
+          والتلميح يقول السبب بمرجعه.
+        {% endcomment %}
+        <a class="stop" href="{% url 'reporting:report' r.number %}">
+      {% else %}
+        <span class="stop" data-tip="{% translate 'خارج نطاق دورك' %} (BR-099) — {{ r.question }}">
+      {% endif %}
+        <span class="ico" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ r.icon }}"/></svg>
+          <span class="n">{{ r.number }}</span>
+        </span>
+        <span class="txt">
+          <span class="t">{{ r.title }}</span>
+          <span class="w">{% if r.allowed %}{{ r.question }}{% else %}{% translate "خارج نطاق دورك" %}{% endif %}</span>
+        </span>
+      {% if r.allowed %}</a>{% else %}</span>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
 {% endblock %}

@@ -1,57 +1,204 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n money_ui status_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.3 — كشف مستحقات كل شريك ومخالصاته (Sprint 8L).
+
+  «لكل شريك» في نصّ المتطلب، فالصفّ الأول شريكٌ لا مطالبة: كم استحقّ، وكم
+  حُسم منه، وكم صُرف له، وكم بقي، ومتى آخر مخالصة. وكانت الشاشة ثلاثة جداول
+  مسطّحة تترك القارئ يجمعها بنفسه — وهو حسابُ مالٍ يقع في رأس القارئ.
+
+  الجداول الثلاثة باقية تحته: الصفّ يقول «كم»، وهي تقول «من أين». ومن يراجع
+  مخالصةً بعينها يحتاج الثاني لا الأول.
+
+  الالتزامات في جدولها الخاصّ لأنها تُحسم من المستحق ولا تُجمع معه: التزامٌ
+  على شريك دَينٌ عليه، لا نقصٌ في استحقاقه — والفرق يظهر حين يُصرف له.
+{% endcomment %}
+
 {% block content %}
 {% include "reporting/_shell.html" %}
-<div class="grid2">
-  <div class="kpi"><div class="label">{% translate "إجمالي المطالبات" %}</div><div class="value num">{{ report.claims_total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "المدفوع بالمخالصات" %}</div><div class="value num">{{ report.settled_total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "التزامات قائمة" %}</div><div class="value num">{{ report.obligations_outstanding }}</div></div>
+
+<div class="kpi-grid tiles">
+  <div class="kpi tile is-lead">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-building"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "صافي مستحقات الشركاء" %}</span>
+      <span class="value num">{% money report.claims_total %}</span>
+      <span class="foot">{% translate "من مطالبات معتمدة" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc-check"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "المدفوع بالمخالصات" %}</span>
+      <span class="value num">{% money report.settled_total %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "التزامات قائمة عليهم" %}</span>
+      <span class="value num">{% money report.obligations_outstanding %}</span>
+      <span class="foot">{% translate "تُحسم من المستحق عند الصرف" %}</span>
+    </span>
+  </div>
 </div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "الشركاء — صفٌّ لكل شريك" %}</h2></div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>{% translate "الشريك" %}</th>
+          <th class="num">{% translate "المطالبات" %}</th>
+          <th class="num">{% translate "الحصة" %}</th>
+          <th class="num">{% translate "الحسومات" %}</th>
+          <th class="num">{% translate "صافي المستحق" %}</th>
+          <th class="num">{% translate "المصروف" %}</th>
+          <th class="num">{% translate "رصيد المخالصات" %}</th>
+          <th class="num">{% translate "التزامات" %}</th>
+          <th>{% translate "آخر مخالصة" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in report.partners %}
+          <tr>
+            <td>
+              {% if may_open_partner and p.code %}
+                <a href="{% url 'partners:partner-detail' p.code %}"><strong>{{ p.name_ar }}</strong></a>
+              {% else %}
+                <strong>{{ p.name_ar }}</strong>
+              {% endif %}
+            </td>
+            <td class="num">{{ p.claim_count }}</td>
+            <td class="num amt">{% money p.partner_share %}</td>
+            <td class="num amt">{% if p.deductions %}−{% money p.deductions %}{% else %}—{% endif %}</td>
+            <td class="num amt"><strong>{% money p.net_payable %}</strong></td>
+            <td class="num amt">{% money p.settled %}</td>
+            <td class="num amt">{% money p.settlement_balance %}</td>
+            <td class="num amt">{% if p.obligations_outstanding %}{% money p.obligations_outstanding %}{% else %}—{% endif %}</td>
+            <td>
+              {% if p.last_settlement %}
+                <span class="chip {{ p.last_settlement.status|status_tone }}">{{ p.last_settlement.status_display }}</span>
+                <br><small class="muted" dir="ltr">{{ p.last_settlement.period_from }} — {{ p.last_settlement.period_to }}</small>
+              {% else %}
+                <span class="muted">{% translate "لم تجرِ بعد" %}</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9" class="empty">
+            <span class="empty-title">{% translate "لا شركاء لهم مطالبات" %}</span>
+            <span class="empty-body">
+              {% translate "المستحق يُنشأ من مطالبة على اتفاقية سارية." %}
+              {% if report.any_cohort_has_agreement %}
+                {% translate "فإن كان الشريك متعاقداً ولا مطالبة له، فالمطالبة هي ما لم يُنشأ بعد." %}
+              {% else %}
+                {% translate "والسبب هنا أعلى من التقرير: لا دفعة مرتبطة باتفاقية شريك، فلا شيء تُبنى عليه مطالبة. تُربط الدفعة باتفاقيتها من «الدفعات المُشغّلة»." %}
+              {% endif %}
+            </span>
+            {% if may_open_cohorts and not report.any_cohort_has_agreement %}
+              <a class="btn2 ghost" href="{% url 'operations:cohorts' %}">{% translate "افتح الدفعات المُشغّلة" %}</a>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+      {% if report.partners %}
+        <tfoot>
+          <tr>
+            <td colspan="4">{% translate "الإجمالي" %}</td>
+            <td class="num amt">{% money report.claims_total %}</td>
+            <td class="num amt">{% money report.settled_total %}</td>
+            <td></td>
+            <td class="num amt">{% money report.obligations_outstanding %}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "المطالبات" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
       <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الفترة" %}</th>
-        <th>{% translate "الحصة" %}</th><th>{% translate "الحسومات" %}</th><th>{% translate "الصافي" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+        <th class="num">{% translate "الحصة" %}</th><th class="num">{% translate "الحسومات" %}</th>
+        <th class="num">{% translate "الصافي" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
       <tbody>
         {% for c in report.claims %}
-          <tr><td dir="ltr">{{ c.code }}</td><td>{{ c.partner_name }}</td>
-              <td class="num">{{ c.period_from }} — {{ c.period_to }}</td>
-              <td class="num">{{ c.partner_share }}</td><td class="num">{{ c.total_deductions }}</td>
-              <td class="num">{{ c.net_payable }}</td><td>{{ c.status_display }}</td></tr>
-        {% empty %}<tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا مطالبات" %}</span></td></tr>{% endfor %}
+          <tr>
+            <td dir="ltr">{{ c.code }}</td>
+            <td>{{ c.partner_name }}</td>
+            <td><small dir="ltr">{{ c.period_from }} — {{ c.period_to }}</small></td>
+            <td class="num amt">{% money c.partner_share %}</td>
+            <td class="num amt">{% money c.total_deductions %}</td>
+            <td class="num amt">{% money c.net_payable %}</td>
+            <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا مطالبات" %}</span></td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
+  {% include "reporting/_pager.html" with page=pages.page param="page" qs=params_qs %}
 </div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "المخالصات" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الفترة" %}</th><th>{% translate "المستحق" %}</th>
-        <th>{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "الفترة" %}</th>
+        <th class="num">{% translate "المستحق" %}</th><th class="num">{% translate "المدفوع" %}</th>
+        <th class="num">{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
       <tbody>
         {% for s in report.settlements %}
-          <tr><td dir="ltr">{{ s.code }}</td><td class="num">{{ s.period_from }} — {{ s.period_to }}</td>
-              <td class="num">{{ s.total_due }}</td><td class="num">{{ s.total_paid }}</td>
-              <td class="num">{{ s.balance }}</td><td>{{ s.status_display }}</td></tr>
-        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا مخالصات" %}</span></td></tr>{% endfor %}
+          <tr>
+            <td dir="ltr">{{ s.code }}</td>
+            <td>{{ s.partner_name }}</td>
+            <td><small dir="ltr">{{ s.period_from }} — {{ s.period_to }}</small></td>
+            <td class="num amt">{% money s.total_due %}</td>
+            <td class="num amt">{% money s.total_paid %}</td>
+            <td class="num amt">{% money s.balance %}</td>
+            <td><span class="chip {{ s.status|status_tone }}">{{ s.status_display }}</span></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا مخالصات" %}</span></td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "الالتزامات" %}</h2></div>
+  <div class="card2-head"><h2>{% translate "الالتزامات على الشركاء" %}</h2></div>
+  <div class="card2-body tight">
+    <p class="hint">{% translate "تُحسم من المستحق عند الصرف ولا تُطرح من الحصة عند الاحتساب: التزامٌ على شريك دَينٌ عليه، لا نقصٌ في استحقاقه." %}</p>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "النوع" %}</th><th>{% translate "المبلغ" %}</th>
-        <th>{% translate "المُستوفى" %}</th><th>{% translate "المتبقّي" %}</th><th>{% translate "البيان" %}</th></tr></thead>
+      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "الشريك" %}</th><th>{% translate "النوع" %}</th>
+        <th class="num">{% translate "المبلغ" %}</th><th class="num">{% translate "المُستوفى" %}</th>
+        <th class="num">{% translate "المتبقّي" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
       <tbody>
         {% for o in report.obligations %}
-          <tr><td dir="ltr">{{ o.code }}</td><td>{{ o.obligation_type_display }}</td>
-              <td class="num">{{ o.amount }}</td><td class="num">{{ o.recovered_amount }}</td>
-              <td class="num">{{ o.outstanding }}</td><td>{{ o.statement_reference }}</td></tr>
-        {% empty %}<tr><td colspan="6" class="empty"><span class="empty-title">{% translate "لا التزامات" %}</span></td></tr>{% endfor %}
+          <tr>
+            <td dir="ltr">{{ o.code }}</td>
+            <td>{{ o.partner_name }}</td>
+            <td>{{ o.obligation_type_display }}</td>
+            <td class="num amt">{% money o.amount %}</td>
+            <td class="num amt">{% money o.recovered_amount %}</td>
+            <td class="num amt">{% money o.outstanding %}</td>
+            <td><span class="chip {{ o.status|status_tone }}">{{ o.status_display }}</span></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا التزامات قائمة" %}</span></td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

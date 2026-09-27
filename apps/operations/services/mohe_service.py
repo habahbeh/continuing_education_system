@@ -140,9 +140,20 @@ def submit_to_mohe(
 def _submit(
     *, actor: Any, submission: MoheSubmission, submitted_on: date, request: Any
 ) -> MoheSubmission:
+    from apps.operations.models import CohortStatus
+
     submission.status = MoheStatus.SUBMITTED
     submission.submitted_on = submitted_on
     submission.save()
+
+    # The cohort is now waiting on someone outside the centre, and the register
+    # says so: PENDING_MOHE was in the vocabulary from the start with nothing
+    # ever setting it, so «مخطَّطة» covered both "nobody has asked the ministry"
+    # and "the file is with the ministry".
+    cohort = submission.cohort
+    if cohort.status == CohortStatus.PLANNED:
+        cohort.status = CohortStatus.PENDING_MOHE
+        cohort.save(update_fields=["status"])
 
     write_audit(
         action="UPDATE",
@@ -334,15 +345,21 @@ def list_submissions(
     if status:
         queryset = queryset.filter(status=status)
     if query:
-        queryset = queryset.filter(cohort__code__icontains=query) | queryset.filter(
-            cohort__name_ar__icontains=query
+        # The programme is on every row and was not searchable: a reader looking
+        # for «هندسة الشبكات» had to know which cohort codes carry it. Same
+        # defect the catalogue's link to the cohorts register had.
+        from django.db.models import Q
+
+        queryset = queryset.filter(
+            Q(cohort__code__icontains=query)
+            | Q(cohort__name_ar__icontains=query)
+            | Q(cohort__program__code__icontains=query)
+            | Q(cohort__program__name_ar__icontains=query)
         )
 
     as_of = timezone.localdate()
     alert_days = deadline_alert_days(as_of=as_of)
-    return [
-        _row(s, as_of=as_of, alert_days=alert_days) for s in queryset.order_by("-created_at")
-    ]
+    return [_row(s, as_of=as_of, alert_days=alert_days) for s in queryset.order_by("-created_at")]
 
 
 def get_submission(*, actor: Any, submission_id: int, request: Any = None) -> dict[str, Any]:
@@ -417,6 +434,83 @@ def submittable_cohort_choices(*, actor: Any, request: Any = None) -> list[tuple
         for c in Cohort.objects.select_related("program").order_by("-starts_on")
         if c.pk not in busy
     ]
+
+
+def submittable_cohort_options(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """
+    The same set as ``submittable_cohort_choices``, as rows the submission
+    form can draw a summary from and pre-fill the trainer and the place with.
+    Nothing commercial: the programme, the term, the dates, the trainer, the
+    place — what the ministry's own form asks about.
+    """
+    policy.require(actor, Screen.MOHE_SUBMIT, Action.VIEW, request=request)
+
+    offered = {code for code, _label in submittable_cohort_choices(actor=actor, request=request)}
+    return [
+        {
+            "code": c.code,
+            "label": f"{c.code} — {c.name_ar}",
+            "program_name": c.program.name_ar,
+            "program_type": c.program.get_program_type_display(),
+            "semester": str(c.semester),
+            "starts_on": c.starts_on,
+            "ends_on": c.ends_on,
+            "capacity": c.capacity,
+            "delivery": c.get_delivery_method_display(),
+            "trainer_name": c.trainer_name,
+            "location": c.location,
+            "status_display": c.get_status_display(),
+        }
+        for c in Cohort.objects.select_related("program", "semester").order_by("-starts_on")
+        if c.code in offered
+    ]
+
+
+def live_file_for_code(
+    *, actor: Any, cohort_code: str, request: Any = None
+) -> dict[str, Any] | None:
+    """
+    The file that keeps ``cohort_code`` off the submit list, if any — so the
+    page can point at it instead of showing an empty list to someone who
+    arrived with that cohort in hand.
+    """
+    policy.require(actor, Screen.MOHE_SUBMIT, Action.VIEW, request=request)
+    sub = (
+        MoheSubmission.objects.filter(
+            cohort__code=cohort_code,
+            status__in=(MoheStatus.DRAFT, MoheStatus.SUBMITTED, MoheStatus.APPROVED),
+        )
+        .order_by("-pk")
+        .first()
+    )
+    if sub is None:
+        return None
+    return {"id": sub.pk, "status": sub.status, "status_display": sub.get_status_display()}
+
+
+def submission_suggestions(*, actor: Any, request: Any = None) -> dict[str, list[str]]:
+    """
+    What earlier files said — offered in the form's pick-lists, never
+    required. Trainers and places from cohorts and files alike; the
+    responsible entity is the centre itself unless a file said otherwise.
+    """
+    policy.require(actor, Screen.MOHE_SUBMIT, Action.VIEW, request=request)
+
+    def _distinct(model: Any, field: str) -> set[str]:
+        return {v for v in model.objects.exclude(**{field: ""}).values_list(field, flat=True) if v}
+
+    trainers = _distinct(Cohort, "trainer_name") | _distinct(MoheSubmission, "trainer_name")
+    places = _distinct(Cohort, "location") | _distinct(MoheSubmission, "training_location")
+    entities = {"مركز التعليم المستمر وخدمة المجتمع — جامعة البترا"} | _distinct(
+        MoheSubmission, "responsible_entity"
+    )
+    return {
+        "trainers": sorted(trainers),
+        "locations": sorted(places),
+        "entities": sorted(entities),
+        "qualifications": sorted(_distinct(MoheSubmission, "trainer_qualifications")),
+        "audiences": sorted(_distinct(MoheSubmission, "target_audience_ar")),
+    }
 
 
 def attach_document(

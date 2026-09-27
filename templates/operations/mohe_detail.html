@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui %}
 
 {% block title %}{{ title }} — {{ submission.cohort_code }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -31,7 +31,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ title }} — <span dir="ltr" translate="no">{{ submission.cohort_code }}</span></h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }} — <span dir="ltr" translate="no">{{ submission.cohort_code }}</span></h1>
     <p class="sub">{% translate "ملف دفعة واحدة لدى الوزارة: محتواه ومرفقاته الإلزامية وما جرى عليه. لا يُسجَّل مشارك على دفعة لم تُعتمد (BR-013)، ولا يُرسَل الملف قبل استكمال مرفقيه (BR-016)." %}</p>
   </div>
   <div class="acts">
@@ -39,10 +39,40 @@
   </div>
 </div>
 
-{% guided_help "mohe-detail" %}
 
+{# مسار الملف: المحطة الحالية مضاءة من رايات الخدمة (`stage`)، وما سبقها منجَز. #}
+<ol class="stepper flow-strip">
+  <li class="tone-violet on is-done">
+    <span class="stop" data-tip="{% translate 'فُتح الملف مسودةً وحُفظ نصّ النموذج.' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc-plus"/></svg><span class="n">1</span></span>
+      <span class="txt"><span class="t">{% translate "فتح الملف" %}</span><span class="w">{{ submission.created_by }}</span></span>
+    </span>
+  </li>
+  <li class="tone-info on{% if stage == 2 %} is-here{% elif stage > 2 %} is-done{% endif %}">
+    <span class="stop" data-tip="{% translate 'السيرة الذاتية للمدرّب ورخصة الجهة، PDF (BR-016).' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg><span class="n">2</span></span>
+      <span class="txt"><span class="t">{% translate "المرفقان" %}</span><span class="w">{% if submission.missing_attachments %}{% translate "ناقص" %}: <span class="num">{{ submission.missing_attachments|length }}</span>{% else %}{% translate "مرفوعان" %}{% endif %}</span></span>
+    </span>
+  </li>
+  <li class="tone-amber on{% if stage == 3 %} is-here{% elif stage > 3 %} is-done{% endif %}">
+    <span class="stop" data-tip="{% translate 'الإرسال لمدير المركز وحده، ويُسجَّل تاريخه.' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-globe"/></svg><span class="n">3</span></span>
+      <span class="txt"><span class="t">{% translate "الإرسال" %}</span><span class="w">{% if submission.submitted_on %}<span dir="ltr" class="num">{{ submission.submitted_on|date:"Y/m/d" }}</span>{% elif stage == 3 %}{% translate "جاهز" %}{% else %}{% translate "بعد المرفقين" %}{% endif %}</span></span>
+    </span>
+  </li>
+  <li class="{% if submission.status == 'APPROVED' %}tone-ok is-done{% elif submission.status == 'REJECTED' %}tone-danger is-done{% else %}tone-ok{% endif %} on{% if stage == 4 and submission.status == 'SUBMITTED' %} is-here{% endif %}">
+    <span class="stop" data-tip="{% translate 'يُسجَّل القرار كما ورد: اعتماد برقم وزاري أو ردّ بسبب.' %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg><span class="n">4</span></span>
+      <span class="txt"><span class="t">{% translate "قرار الوزارة" %}</span><span class="w">{% if submission.decided_on %}{{ submission.status_display }} · <span dir="ltr" class="num">{{ submission.decided_on|date:"Y/m/d" }}</span>{% elif submission.status == "SUBMITTED" %}{% translate "بانتظار الوزارة" %}{% else %}{% translate "بعد الإرسال" %}{% endif %}</span></span>
+    </span>
+  </li>
+</ol>
+
+<div class="dash-cols">
+<div class="dash-main">
 <div class="card2">
   <div class="card2-head">
+    <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc"/></svg></span>
     <h2>{% translate "حالة الملف" %}</h2>
     <div class="acts">
       <span class="chip {{ submission.status|status_tone }} dot">{{ submission.status_display }}</span>
@@ -99,7 +129,7 @@
 
 {% if submission.rejection_reason_ar or submission.status == "APPROVED" %}
   <div class="card2">
-    <div class="card2-head"><h2>{% translate "قرار الوزارة" %}</h2></div>
+    <div class="card2-head"><span class="head-ico {% if submission.status == 'APPROVED' %}tone-ok{% else %}tone-danger{% endif %}" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg></span><h2>{% translate "قرار الوزارة" %}</h2></div>
     <div class="card2-body">
       {% if submission.rejection_reason_ar %}
         <p class="hint boxed">
@@ -123,7 +153,7 @@
 {% endif %}
 
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "محتوى النموذج" %}</h2></div>
+  <div class="card2-head"><span class="head-ico tone-brand" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-book"/></svg></span><h2>{% translate "محتوى النموذج" %}</h2></div>
   <div class="card2-body">
     <dl class="dl">
       <dt>{% translate "محاور التدريب" %}</dt>
@@ -146,6 +176,7 @@
 
 <div class="card2">
   <div class="card2-head">
+    <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span>
     <h2>{% translate "المرفقات الإلزامية" %}</h2>
     <div class="acts">
       <span class="chip">{% translate "يطلبه النظام" %}: <span class="num">{{ submission.required_purposes|length }}</span></span>
@@ -202,22 +233,48 @@
         {% translate "لا ينقص الملف مستند: مكتملٌ ويقبل الإرسال. والإرسال نفسه لمدير المركز وحده." %}
       </p>
     {% endif %}
+  </div>
+</div>
 
-    {% if can_attach %}
+</div>
+<div class="dash-side">
+{# الإجراء التالي في العمود الجانبي: زرّ واحد لما تسمح به الحالة والصلاحية. #}
+{% if can_attach and submission.missing_attachments %}
+  <div class="card2 next-card tone-info">
+    <div class="card2-head"><span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span><h2>{% translate "الخطوة التالية: المرفقان" %}</h2></div>
+    <div class="card2-body">
+      <ol class="todo">
+        {% for p in submission.required_purposes %}
+          <li>{% if p in submission.missing_attachments %}<span class="n">{{ forloop.counter }}</span>{{ p.label }} <span class="chip warn">{% translate "ناقص" %}</span>{% else %}<span class="n done">✓</span>{{ p.label }} <span class="chip ok">{% translate "مرفوع" %}</span>{% endif %}</li>
+        {% endfor %}
+      </ol>
+      <form method="post" enctype="multipart/form-data">{% csrf_token %}
+        <input type="hidden" name="action" value="attach">
+        {% include "partials/_form.html" with form=attachment_form %}
+        <button class="btn2 primary" type="submit">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-upload"/></svg>
+          {% translate "رفع المستند" %}
+        </button>
+      </form>
+    </div>
+  </div>
+{% elif can_attach %}
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "مرفق إضافي" %}</h2></div>
+    <div class="card2-body">
       <form method="post" enctype="multipart/form-data">{% csrf_token %}
         <input type="hidden" name="action" value="attach">
         {% include "partials/_form.html" with form=attachment_form %}
         <button class="btn2" type="submit">{% translate "رفع المستند" %}</button>
       </form>
-    {% elif submission.status == "DRAFT" %}
-      <p class="hint">{% translate "رفع المستندات لموظف التسجيل أو مدير المركز (§3.3/15)." %}</p>
-    {% endif %}
+    </div>
   </div>
-</div>
-
+{% elif submission.status == "DRAFT" %}
+  <div class="card2"><div class="card2-body"><p class="hint">{% translate "رفع المستندات لموظف التسجيل أو مدير المركز (§3.3/15)." %}</p></div></div>
+{% endif %}
 {% if can_send %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "إرسال الملف إلى الوزارة" %}</h2></div>
+  <div class="card2 next-card tone-amber">
+    <div class="card2-head"><span class="head-ico tone-amber" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-globe"/></svg></span><h2>{% translate "إرسال الملف إلى الوزارة" %}</h2></div>
     <div class="card2-body">
       <p class="hint boxed">
         {% translate "الملف يغادر المركز باسمه — الإرسال لمدير المركز وحده، والمسودة لموظف التسجيل." %}
@@ -229,9 +286,9 @@
       </form>
     </div>
   </div>
-{% elif send_blocked_by_documents %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "إرسال الملف إلى الوزارة" %}</h2></div>
+{% elif send_blocked_by_documents and not can_attach %}
+  <div class="card2 next-card tone-info">
+    <div class="card2-head"><span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span><h2>{% translate "الخطوة التالية: المرفقان" %}</h2></div>
     <div class="card2-body">
       <p class="hint boxed">
         {% translate "زر الإرسال يظهر بعد استكمال المرفقين الإلزاميين (BR-016). النقص مذكور أعلاه بالاسم." %}
@@ -241,8 +298,8 @@
 {% endif %}
 
 {% if can_decide %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "تسجيل قرار الوزارة" %}</h2></div>
+  <div class="card2 next-card tone-ok">
+    <div class="card2-head"><span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg></span><h2>{% translate "تسجيل قرار الوزارة" %}</h2></div>
     <div class="card2-body">
       <p class="hint boxed">
         {% translate "الاعتماد يتطلب الرقم الوزاري (C-16)، والرفض يتطلب سببه نصاً كما ورد (BR-014). القرار يُسجَّل كما وصل، ولا تصدره هذه الشاشة." %}
@@ -257,8 +314,8 @@
 {% endif %}
 
 {% if can_resubmit %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "إعادة الإرسال" %}</h2></div>
+  <div class="card2 next-card tone-danger">
+    <div class="card2-head"><span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span><h2>{% translate "إعادة الإرسال" %}</h2></div>
     <div class="card2-body">
       <p class="hint boxed">
         {% translate "يُفتح ملف جديد يحمل ما عُدِّل، ويبقى الرفض وسببه مقروءين — فهما سجلّ ما اعترضت عليه الوزارة." %}
@@ -271,4 +328,15 @@
     </div>
   </div>
 {% endif %}
+{% if submission.status == "APPROVED" %}
+  <div class="card2 next-card tone-ok">
+    <div class="card2-head"><span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-shield-check"/></svg></span><h2>{% translate "الدفعة معتمدة" %}</h2></div>
+    <div class="card2-body">
+      <p class="hint">{% translate "يجوز التسجيل على هذه الدفعة (BR-013)، ويُوثَّق رفع أسماء المعتمدين إلى نظام الوزارة من سجل اعتماد الوزارة." %}</p>
+      <a class="btn2 primary" href="{% url 'operations:enrollments' %}?cohort={{ submission.cohort_code }}">{% translate "التسجيلات على الدفعة" %}</a>
+    </div>
+  </div>
+{% endif %}
+</div>
+</div>
 {% endblock %}

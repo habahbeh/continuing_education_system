@@ -102,6 +102,103 @@ def requested(client: Client, registrar: User, enrollment: Any, target: Any) -> 
 # ---------------------------------------------------------------------------
 # Who may open what
 # ---------------------------------------------------------------------------
+def test_the_row_is_one_line_and_what_left_it_is_a_click_away(
+    client: Client, manager: User, requested: Transfer
+) -> None:
+    """
+    Four cells carried two and three lines each — «من» and «إلى» three apiece —
+    so the row stood at 79px on a 1440 screen and **183px on 1024**: fewer than
+    three requests visible at once on a register meant to be scanned.
+
+    Nothing was deleted. Everything that left the line is in the detail row
+    beneath it, in the page and readable to a screen reader before any click.
+    """
+    import re
+
+    client.force_login(manager)
+    html = client.get(reverse("operations:transfers")).content.decode()
+    row = html.split(f'>{requested.code}<', 1)[0].rsplit("<tr>", 1)[1] + html.split(
+        f'>{requested.code}<', 1
+    )[1].split("</tr>", 1)[0]
+    visible = re.sub(r"<[^>]+>", " ", row)
+
+    assert "<br>" not in row, "a cell that breaks its line is a cell with two lines"
+    assert str(requested.requested_on) not in visible, "the date moved to the detail row"
+
+    detail = html.split(f'id="trd-{requested.code}"', 1)[1].split("</tr>", 1)[0]
+    for label in ("تاريخ الطلب", "الرقم الجامعي", "سبب النقل", "المحاضرات عند الطلب"):
+        assert label in detail, f"«{label}» left the row without arriving anywhere"
+
+
+def test_the_detail_row_is_hidden_by_the_markup_and_not_by_a_stylesheet(
+    client: Client, manager: User, requested: Transfer
+) -> None:
+    """
+    ``hidden`` rather than a CSS rule: what the markup hides the button shows,
+    so the detail works on a page whose stylesheet never arrived.
+    """
+    client.force_login(manager)
+    html = client.get(reverse("operations:transfers")).content.decode()
+
+    opened = html.split(f'id="trd-{requested.code}"', 1)[1].split(">", 1)[0]
+    assert "hidden" in opened
+    assert f'data-expands="trd-{requested.code}"' in html
+    assert 'aria-expanded="false"' in html
+    assert "js/ui.js" in html, "the opener is declared but nothing would answer it"
+
+
+def test_the_spans_are_counted_off_the_header_that_is_drawn(
+    client: Client, manager: User, seeded_settings: None
+) -> None:
+    """
+    A hard-coded span goes stale the moment a column moves — and one just did,
+    here and on the enrolment register within the same day.
+    """
+    import re
+
+    client.force_login(manager)
+    html = client.get(reverse("operations:transfers")).content.decode()
+    head = html.split("<thead>", 1)[1].split("</thead>", 1)[0]
+
+    assert re.search(rf'colspan="{head.count("<th")}"[^>]*class="empty"', html)
+
+
+def test_the_register_pages_and_counts_the_whole_result(
+    client: Client, manager: User, requested: Transfer
+) -> None:
+    """
+    The list drew every request the centre had ever raised, and its counter
+    named the rows on screen. Paged in the view over the list the service
+    returns — ``list_transfers`` is read by the detail screen too, so a limit
+    pushed into it would answer their question wrongly.
+    """
+    client.force_login(manager)
+    response = client.get(reverse("operations:transfers"))
+
+    page = response.context["page"]
+    assert page["total"] == 1
+    assert page["number"] == 1
+    # A page number is never trusted: it arrives from a URL anyone can edit.
+    url = reverse("operations:transfers")
+    assert client.get(url, {"page": "abc"}).context["page"]["number"] == 1
+    assert client.get(url, {"page": "99"}).context["page"]["number"] == 1
+
+
+def test_the_search_is_live_and_keeps_its_filters(
+    client: Client, manager: User, requested: Transfer
+) -> None:
+    """The house pattern: the register redraws as it is typed into."""
+    client.force_login(manager)
+    html = client.get(reverse("operations:transfers")).content.decode()
+
+    assert 'hx-get="' + reverse("operations:transfers") in html
+    assert 'hx-target="#tr-results"' in html
+    assert 'id="tr-results"' in html
+    # The counter and the clear link are replaced out of band, so they must be
+    # wrappers that never disappear — what vanishes cannot be swapped.
+    assert 'id="tr-count"' in html and 'id="tr-clear"' in html
+
+
 @pytest.mark.parametrize("role", TRANSFER_READERS)
 def test_the_transfers_list_opens_for_every_role_that_reads_it(
     client: Client, priced_catalog: Any, role: str
@@ -690,3 +787,169 @@ def test_the_transfer_views_read_through_the_service_layer() -> None:
     }
     assert not [m for m in module_level if m.startswith("apps.") and ".models" in m]
     assert "apps.operations.services" in module_level
+
+
+# ---------------------------------------------------------------------------
+# The request form — what it may put in front of which hand (Sprint 8L)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("role", "drawn"),
+    [
+        (Role.CENTER_MANAGER, True),
+        (Role.REGISTRATION_OFFICER, False),
+        (Role.AUDIT_ACCOUNT, False),
+    ],
+)
+def test_the_waiver_is_drawn_for_the_hand_that_may_grant_it_and_no_other(
+    client: Client, seeded_settings: Any, role: str, drawn: bool
+) -> None:
+    """
+    §3.2/6 ``A`` — and the screen was offering it to everybody.
+
+    ``_transfer_inputs`` asks for APPROVE before it supplies a ``waiver_by``,
+    so a registrar who ticked the box lost a filled form to a 403 page and
+    earned a DENIED_ATTEMPT for pressing a control this screen had put in
+    front of them (BR-085). The check has not moved — the test below still
+    POSTs the field and still gets its 403 — but the control is no longer
+    drawn for a hand that would be refused for using it.
+    """
+    client.force_login(_user(role, f"waiver.probe.{role.lower()}"))
+
+    body = client.get(reverse("operations:transfer-new")).content.decode("utf-8")
+
+    assert ('name="grant_category_waiver"' in body) is drawn
+    assert ('name="category_waiver_reason_ar"' in body) is drawn
+
+
+def test_the_reason_for_the_waiver_waits_until_the_waiver_is_ticked(
+    client: Client, manager: User
+) -> None:
+    """A field that is required only on a condition is not shown before it."""
+    client.force_login(manager)
+
+    body = client.get(reverse("operations:transfer-new")).content.decode("utf-8")
+
+    assert 'id="waiver-why"' in body
+    assert 'data-expands="waiver-why"' in body, "the tick is what reveals it (static/js/ui.js)"
+    assert '<div id="waiver-why" hidden>' in body
+
+
+def test_the_destination_list_never_offers_the_cohort_the_participant_is_on(
+    client: Client, registrar: User, enrollment: Any, target: Any
+) -> None:
+    """
+    ``destination_cohort_choices`` has always taken ``from_code`` and the view
+    was passing none, so the source cohort sat in the list and the only answer
+    it could produce was «الدفعة الهدف هي الدفعة نفسها».
+    """
+    client.force_login(registrar)
+
+    body = client.get(
+        f"{reverse('operations:transfer-new')}?enrollment={enrollment.code}"
+    ).content.decode("utf-8")
+
+    assert f'value="{target.code}"' in body
+    assert f'value="{enrollment.cohort.code}"' not in body
+
+
+def test_arriving_from_a_row_fills_the_enrolment_in(
+    client: Client, registrar: User, enrollment: Any, target: Any
+) -> None:
+    """The request starts at an enrolment; the operator should not re-find it."""
+    client.force_login(registrar)
+
+    body = client.get(
+        f"{reverse('operations:transfer-new')}?enrollment={enrollment.code}"
+    ).content.decode("utf-8")
+
+    assert f'value="{enrollment.code}" selected' in body
+
+
+def test_a_link_naming_an_enrolment_that_cannot_move_says_so(
+    client: Client, registrar: User, target: Any
+) -> None:
+    """Silence would leave the reader in front of a form with no idea why."""
+    client.force_login(registrar)
+
+    body = client.get(
+        f"{reverse('operations:transfer-new')}?enrollment=EN-NOT-A-ROW"
+    ).content.decode("utf-8")
+
+    assert "غير قابل للنقل" in body
+    assert "BR-060" in body
+
+
+def test_the_register_offers_the_transfer_only_on_a_row_the_form_would_accept(
+    client: Client, registrar: User, enrollment: Any, target: Any
+) -> None:
+    """
+    The row link and the form's own list are filled from one function, so no
+    row can offer a link the next screen refuses (BR-085 · §3.4).
+    """
+    client.force_login(registrar)
+
+    body = client.get(reverse("operations:enrollments")).content.decode("utf-8")
+
+    assert f'{reverse("operations:transfer-new")}?enrollment={enrollment.code}' in body
+
+
+def test_a_reader_who_may_not_request_gets_no_transfer_link_on_the_row(
+    client: Client, cashier: User, enrollment: Any
+) -> None:
+    """§3.2/7 gives the till nothing here, so the row offers it nothing."""
+    client.force_login(cashier)
+
+    body = client.get(reverse("operations:enrollments")).content.decode("utf-8")
+
+    assert "transfers/new/?enrollment=" not in body
+
+
+def test_an_empty_source_list_explains_itself_instead_of_standing_blank(
+    client: Client, registrar: User
+) -> None:
+    """§8 — an empty control says what would fill it and where that starts."""
+    client.force_login(registrar)
+
+    body = client.get(reverse("operations:transfer-new")).content.decode("utf-8")
+
+    assert "لا تسجيل قابل للنقل" in body
+    assert reverse("operations:enrollments") in body
+
+
+def test_a_code_already_used_is_answered_with_a_sentence_not_a_500(
+    client: Client, registrar: User, enrollment: Any, target: Any, make_enrollment: Any,
+    charge_and_pay: Any, documented_attendance: Any, source: Any
+) -> None:
+    """
+    ``Transfer.code`` is unique and the operator types it, so the second use
+    of a code reached the database as an IntegrityError and came back a 500
+    with the filled form gone.
+    """
+    client.force_login(registrar)
+    client.post(reverse("operations:transfer-new"), _request_payload(enrollment, target))
+
+    second = make_enrollment(source, index=11)
+    charge_and_pay(second, amount="270.000")
+    documented_attendance(second, 1)
+    second.refresh_from_db()
+
+    response = client.post(
+        reverse("operations:transfer-new"),
+        _request_payload(second, target),  # the same TR-8H-1
+        follow=True,
+    )
+
+    assert response.status_code == 200
+    assert "مستعمل لطلب آخر" in response.content.decode("utf-8")
+    assert Transfer.objects.count() == 1
+
+
+def test_the_form_screen_carries_no_script_of_its_own(client: Client, manager: User) -> None:
+    """§7 — the shared behaviours live in ``static/js/ui.js``."""
+    client.force_login(manager)
+
+    body = client.get(reverse("operations:transfer-new")).content.decode("utf-8")
+    main = body.split('id="main"', 1)[1].split("</main>", 1)[0]
+
+    assert "<script" not in main
+    assert "style=" not in main

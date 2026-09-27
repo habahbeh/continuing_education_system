@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "الفترات المالية — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  حارسٌ قائم لم يكن له ما يحرسه.
+
+  D-23 يشترط أن تقع كل حركة مالية في فترةٍ غير مقفلة، وتسعة مواضع في النظام
+  تسأل `period_service.require_open` هذا السؤال: سند القبض، إلغاؤه، تنفيذ
+  الاسترداد، ردّ الفائض، ردّ التأمين ومصادرته، والمصروف. ولا شاشة واحدة كانت
+  تستطيع فتح فترةٍ ولا إقفالها — لوحة إدارة Django وحدها، وهي تكتب في الجدول
+  بلا صفٍّ في سجل التدقيق الذي يُحتجّ به يوم يُسأل «من قيَّد في شهرٍ أُقفل؟».
+
+  والعطل كان صامتاً لا صارخاً، وهذا أسوأ: `period_for` يُرجع None لتاريخٍ لا
+  يقع في أي فترة، والحركة تُقبل — قرارٌ مقصود ليعمل النظام قبل تعريف أوّل
+  فترة. فعلى قاعدةٍ بلا فترات يبقى كل شهر مفتوحاً إلى الأبد، ويدخل سندٌ مؤرَّخ
+  بالماضي في شهرٍ صدر تقريره واعتُمد، ولا شيء على أي شاشة يقول ذلك.
+
+  ولذلك أوّل ما تقوله الشاشة: هل تاريخ اليوم مغطّى بفترة أصلاً.
+
+  و«الفجوة» تُعلَن: يومٌ بين فترتين لا تغطّيه أيّهما هو يومٌ لا يبلغه إقفال
+  أبداً، وهو غير مرئيّ في قائمة أزواج تواريخ كلٌّ منها معقول وحده.
+
+  وإعادة الفتح غائبة عن عمد: هي الفعل الوحيد الذي يُلغي ما تحرسه هذه الشاشة،
+  ومن يملك إعادة فتح شهرٍ مُقفل سؤالٌ للمركز لا لهذا القالب. فالتأكيد يسمّي ما
+  سيُرفَض قبل أن يحدث، لأن «بعد الإقفال» متأخّرٌ عن السؤال.
+{% endcomment %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "النظام" %}</span>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "الفترة المالية هي الشهر الذي تُقيَّد فيه الحركات. وإقفالها يمنع أي قيد بتاريخٍ داخلها بعد ذلك، فلا يُعاد كتابة تقرير صدر واعتُمد (D-23)." %}</p>
+  </div>
+  <div class="acts">
+    {% if can_edit %}
+      <button class="btn2 primary" type="button" data-opens="per-new">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+        {% translate "فترة جديدة" %}
+      </button>
+    {% endif %}
+    <a class="btn2 ghost" href="{% url 'people:semesters' %}">{% translate "الفصول الدراسية" %}</a>
+  </div>
+</div>
+
+{% if error_fields %}
+  <div class="note danger err-summary" role="alert" tabindex="-1" id="err-summary" data-autofocus>
+    <div>
+      <strong>{% blocktranslate count total=error_fields|length %}حقلٌ واحد يحتاج تصحيحاً:{% plural %}{{ total }} حقول تحتاج تصحيحاً:{% endblocktranslate %}</strong>
+      <div class="err-links">
+        {% for field in error_fields %}<a href="#{{ field.id }}">{{ field.label }}</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if not can_edit %}
+  <div class="note">
+    <div>{% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — فتح الفترات وإقفالها لمدير المركز." %}</div>
+  </div>
+{% endif %}
+
+{# الحالة قبل الجدول، وبصراحة: تاريخٌ بلا فترة مسموحٌ به ولا يُرفض — لكنه غير #}
+{# مضبوط، وهذا قولٌ مختلف عن «ممنوع» ولا يجوز أن تخلطه الشاشة. #}
+{% if today_covered %}
+  <div class="note ok">
+    <div>{% translate "تاريخ اليوم يقع داخل فترة مفتوحة — والقيد فيه مضبوط بها." %}</div>
+  </div>
+{% else %}
+  <div class="note warn">
+    <div>
+      <strong>{% translate "تاريخ اليوم لا يقع في أي فترة مالية." %}</strong>
+      {% translate "والقيد اليوم لا يُرفض — تاريخٌ بلا فترة مسموحٌ به ليعمل النظام قبل تعريف أوّل فترة. لكنّه غير مضبوط: لا شيء يمنع قيداً مؤرَّخاً بالماضي في شهرٍ صدر تقريره." %}
+      {% if can_edit %}{% translate "افتح فترة هذا الشهر ليصير الضبط قائماً." %}{% endif %}
+    </div>
+  </div>
+{% endif %}
+
+<div class="kpi-grid tiles">
+  {% for t in tiles %}
+    <div class="kpi tile{% if forloop.first %} is-lead{% endif %}">
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.count }}</span>
+      </span>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="card2">
+  <div class="card2-head">
+    <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-vault"/></svg></span>
+    <h2>{% translate "الفترات المعرَّفة" %}</h2>
+    <div class="acts">
+      <span class="chip">{{ page.total }}</span>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>{% translate "تبدأ في" %}</th>
+          <th>{% translate "تنتهي في" %}</th>
+          <th>{% translate "الأيام" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          <th>{% translate "أقفلها" %}</th>
+          <th>{% translate "وقت الإقفال" %}</th>
+          {% if can_edit %}<th aria-label="{% translate 'إجراءات' %}"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td dir="ltr" translate="no"><strong class="num">{{ row.starts_on|date:"Y-m-d" }}</strong></td>
+            <td dir="ltr" translate="no"><span class="num">{{ row.ends_on|date:"Y-m-d" }}</span></td>
+            <td class="num">{{ row.days }}</td>
+            <td>
+              {% if row.is_open %}<span class="chip ok">{% translate "مفتوحة" %}</span>
+              {% else %}<span class="chip info">{% translate "مقفلة" %}</span>{% endif %}
+              {% if row.covers_today %}<br><span class="chip brand">{% translate "تغطّي اليوم" %}</span>{% endif %}
+              {% if row.gap_before %}<br><span class="chip warn">{% translate "فجوة قبلها" %}</span>{% endif %}
+            </td>
+            <td>{% if row.closed_by %}<span dir="ltr" translate="no">{{ row.closed_by }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if row.closed_at %}<span class="num" dir="ltr" translate="no">{{ row.closed_at|date:"Y-m-d H:i" }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+            {% if can_edit %}
+              <td class="acts">
+                {% if row.is_open %}
+                  <button class="btn2 sm danger-ghost" type="button" data-opens="per-close-{{ row.id }}">{% translate "إقفال" %}</button>
+                {% else %}
+                  <span class="muted">{% translate "لا تُعاد" %}</span>
+                {% endif %}
+              </td>
+            {% endif %}
+          </tr>
+          {% if row.gap_before %}
+            <tr class="row-detail">
+              <td colspan="{% if can_edit %}7{% else %}6{% endif %}">
+                <span class="note warn">
+                  <span>{% blocktranslate with a=row.gap_from|date:"Y-m-d" b=row.gap_to|date:"Y-m-d" %}من {{ a }} إلى {{ b }} لا تغطّيه فترة — وهي أيامٌ لا يبلغها إقفال أبداً. افتح فترةً تغطّيها أو صحّح تاريخ بداية هذه.{% endblocktranslate %}</span>
+                </span>
+              </td>
+            </tr>
+          {% endif %}
+        {% empty %}
+          <tr><td colspan="{% if can_edit %}7{% else %}6{% endif %}" class="empty">
+            <span class="empty-title">{% translate "لا فترة مالية معرَّفة بعد" %}</span>
+            <span class="empty-body">{% translate "فكل شهر مفتوحٌ إلى الأبد: لا شيء يمنع سنداً مؤرَّخاً بالماضي من الدخول في شهرٍ صدر تقريره واعتُمد (D-23)." %}</span>
+            {% if can_edit %}
+              <button class="btn2 primary empty-act" type="button" data-opens="per-new">{% translate "فتح فترة هذا الشهر" %}</button>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted">{{ page.start }}–{{ page.end }} {% translate "من" %} {{ page.total }}</span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?page={{ page.prev }}">‹ {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?page={{ page.next }}">{% translate "التالي" %} ›</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "الفترة المقفلة لا تُعاد فتحها من هذه الشاشة: هي الفعل الوحيد الذي يُلغي ما تحرسه، ومن يملكه قرارٌ إداري لا زرّ. فراجع تواريخ الفترة قبل إقفالها، ولا تُقفل شهراً قبل أن تُطابق إقفالاته اليومية." %}
+    </p>
+  </div>
+</div>
+
+{% if can_edit %}
+  <dialog class="modal confirm-modal" id="per-new" dir="rtl" aria-labelledby="per-new-t"{% if form.errors and posted_action == "create" %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+    <form method="post" novalidate>{% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2 id="per-new-t">{% translate "فتح فترة مالية" %}</h2>
+      </div>
+      <div class="modal-body">
+        {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "partials/_form.html" %}
+        <p class="hint">{% translate "التاريخان مقترحان على الشهر التالي لآخر فترة، فلا يبقى يومٌ بين فترتين بلا تغطية. وفترتان لا تتقاطعان: تاريخٌ في فترتين سؤالٌ بلا جواب." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "فتح الفترة" %}</button>
+        <button class="btn2 ghost" type="button" data-closes="per-new">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  {% for row in rows %}
+    {% if row.is_open %}
+      <dialog class="modal confirm-modal" id="per-close-{{ row.id }}" dir="rtl" aria-labelledby="per-close-{{ row.id }}-t">
+        <form method="post">{% csrf_token %}
+          <input type="hidden" name="action" value="close">
+          <input type="hidden" name="period" value="{{ row.id }}">
+          <div class="modal-head">
+            <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+            <h2 id="per-close-{{ row.id }}-t">{% translate "إقفال فترة مالية" %}</h2>
+          </div>
+          <div class="modal-body">
+            <p>{% blocktranslate with a=row.starts_on|date:"Y-m-d" b=row.ends_on|date:"Y-m-d" %}إقفال الفترة {{ a }} — {{ b }}؟{% endblocktranslate %}</p>
+            <p class="hint">{% translate "بعد الإقفال يُرفض كل ما يلي بتاريخٍ داخل الفترة (D-23):" %}</p>
+            <ul class="dl">
+              {% for what in refuses %}<li>{{ what }}</li>{% endfor %}
+            </ul>
+            {% if row.covers_today %}
+              <div class="note danger">
+                <div>{% translate "وهذه الفترة تغطّي تاريخ اليوم: الإقفال يوقف قبض الصندوق فوراً." %}</div>
+              </div>
+            {% endif %}
+            <div class="note warn">
+              <div>{% translate "ولا تُعاد فتحها من هذه الشاشة — يُسجَّل اسمك ووقت الإقفال في سجل التدقيق." %}</div>
+            </div>
+          </div>
+          <div class="modal-acts">
+            <button class="btn2 danger" type="submit">{% translate "إقفال الفترة" %}</button>
+            <button class="btn2 ghost" type="button" data-closes="per-close-{{ row.id }}">{% translate "رجوع" %}</button>
+          </div>
+        </form>
+      </dialog>
+    {% endif %}
+  {% endfor %}
+{% endif %}
+{% endblock %}

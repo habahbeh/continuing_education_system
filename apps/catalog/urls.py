@@ -9,6 +9,11 @@ from apps.catalog import views
 app_name = "catalog"
 
 urlpatterns = [
+    # مجالات الدورات: بيانات الكتالوج المرجعية التي كانت تُدخَل من لوحة
+    # الإدارة وحدها — أي بلا خدمة وبلا سجل تدقيق (BR-061).
+    path("deposit-policies/", views.deposit_policies_view, name="deposit-policies"),
+    path("course-categories/", views.course_categories_view, name="course-categories"),
+    path("knowledge-fields/", views.knowledge_fields_view, name="knowledge-fields"),
     path("programs/", views.diplomas_view, name="programs"),
     path("short-courses/", views.short_courses_view, name="short-courses"),
     path("online-courses/", views.online_courses_view, name="online-courses"),

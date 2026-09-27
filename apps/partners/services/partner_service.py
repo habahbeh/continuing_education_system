@@ -42,6 +42,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.core.display import text_of
@@ -72,35 +73,107 @@ VALUE_FIELDS: tuple[str, ...] = (
 )
 
 
-def list_partners(*, actor: Any, query: str = "", request: Any = None) -> list[dict[str, Any]]:
-    """Partners as rows, with how many agreements each holds."""
-    from apps.partners.models import Partner
+def _partner_row(partner: Any) -> dict[str, Any]:
+    """One partner as the screens read it.
+
+    ``agreement_count`` is read off the annotation rather than counted per
+    row: the projection used to issue one ``COUNT(*)`` per partner, so the
+    register's cost followed the size of the register.
+    """
+    return {
+        "code": partner.code,
+        "name_ar": partner.name_ar,
+        "name_en": partner.name_en,
+        "partner_type": partner.partner_type,
+        "partner_type_display": partner.get_partner_type_display(),
+        "status": partner.status,
+        "status_display": partner.get_status_display(),
+        "registry_number": partner.registry_number,
+        "registry_date": partner.registry_date,
+        "contact_name": partner.contact_name,
+        "phone": partner.phone,
+        "email": partner.email,
+        "agreement_count": partner.agreement_count,
+        # §3.4 of the client's requirements makes «فترة السريان من / إلى» a
+        # term of the contract, and §5.4 makes entitlement conditional. So a
+        # register that prints one number for «holds a live contract», «holds
+        # a draft nobody approved» and «holds one whose term ran out» is
+        # hiding a term the client themselves enumerated.
+        "live_agreement_count": partner.live_agreement_count,
+    }
+
+
+def list_partners(
+    *,
+    actor: Any,
+    query: str = "",
+    status: str = "",
+    partner_type: str = "",
+    request: Any = None,
+) -> list[dict[str, Any]]:
+    """
+    Partners as rows, with how many agreements each holds.
+
+    The search matches what the register PRINTS — the code, the Arabic and
+    English names and the registry number. It used to match the Arabic name
+    and the code alone while the box promised «بالاسم أو الرمز» and the table
+    showed a registry column nobody could search by.
+
+    ``status`` and ``partner_type`` narrow the list the way the two columns
+    that carry them read: a register holding former partners beside active
+    ones is read by filtering, not by scanning.
+    """
+    from apps.partners.models import AgreementStatus, Partner
 
     policy.require(actor, Screen.PARTNERS, Action.VIEW, request=request)
 
-    queryset = Partner.objects.all()
+    today = timezone.localdate()
+    queryset = Partner.objects.annotate(
+        agreement_count=Count("agreements", distinct=True),
+        # In force TODAY: ACTIVE and inside its signed window — exactly the
+        # pair ``Agreement.is_available_on`` asks for, asked of the database
+        # so the register still costs one query (Sprint 8F-1).
+        live_agreement_count=Count(
+            "agreements",
+            filter=Q(
+                agreements__status=AgreementStatus.ACTIVE,
+                agreements__valid_from__lte=today,
+                agreements__valid_to__gte=today,
+            ),
+            distinct=True,
+        ),
+    )
     if query:
-        queryset = queryset.filter(name_ar__icontains=query) | queryset.filter(
-            code__icontains=query
+        queryset = queryset.filter(
+            Q(name_ar__icontains=query)
+            | Q(name_en__icontains=query)
+            | Q(code__icontains=query)
+            | Q(registry_number__icontains=query)
         )
+    if status:
+        queryset = queryset.filter(status=status)
+    if partner_type:
+        queryset = queryset.filter(partner_type=partner_type)
 
-    return [
-        {
-            "code": p.code,
-            "name_ar": p.name_ar,
-            "partner_type": p.partner_type,
-            "partner_type_display": p.get_partner_type_display(),
-            "status": p.status,
-            "status_display": p.get_status_display(),
-            "registry_number": p.registry_number,
-            "registry_date": p.registry_date,
-            "contact_name": p.contact_name,
-            "phone": p.phone,
-            "email": p.email,
-            "agreement_count": p.agreements.count(),
-        }
-        for p in queryset.order_by("code")
-    ]
+    return [_partner_row(p) for p in queryset.order_by("code")]
+
+
+def partner_filter_choices() -> dict[str, list[tuple[str, Any]]]:
+    """
+    The vocabularies the register filters by (A-05).
+
+    Handed over by the service rather than imported from the models by the
+    view: the screen draws the two columns it can narrow, and it is the
+    service that knows what values those columns may hold.
+
+    The labels are lazy translation proxies, not ``str`` — they must stay
+    lazy so the language is decided when the page renders, not when this
+    module is imported. Hence ``Any`` on the second element rather than a
+    ``str`` the values are not.
+    """
+    from apps.partners.models import PartnerStatus, PartnerType
+
+    return {"statuses": list(PartnerStatus.choices), "types": list(PartnerType.choices)}
 
 
 def list_agreements(
@@ -536,11 +609,39 @@ def partner_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]
 
 
 def get_partner(*, actor: Any, code: str, request: Any = None) -> dict[str, Any]:
-    """One partner with the agreements held under them."""
-    rows = list_partners(actor=actor, request=request)
-    partner = next((r for r in rows if r["code"] == code), {})
-    if partner:
-        partner["agreements"] = list_agreements(actor=actor, partner_code=code, request=request)
+    """
+    One partner with the agreements held under them.
+
+    Asked of the database by code. It used to build the WHOLE register and
+    then pick one row out of it in Python, which made opening a single
+    partner card cost the register's every row and every count.
+    """
+    from apps.partners.models import AgreementStatus, Partner
+
+    policy.require(actor, Screen.PARTNERS, Action.VIEW, request=request)
+
+    today = timezone.localdate()
+    found = (
+        Partner.objects.annotate(
+            agreement_count=Count("agreements", distinct=True),
+            live_agreement_count=Count(
+                "agreements",
+                filter=Q(
+                    agreements__status=AgreementStatus.ACTIVE,
+                    agreements__valid_from__lte=today,
+                    agreements__valid_to__gte=today,
+                ),
+                distinct=True,
+            ),
+        )
+        .filter(code=code)
+        .first()
+    )
+    if not found:
+        return {}
+
+    partner = _partner_row(found)
+    partner["agreements"] = list_agreements(actor=actor, partner_code=code, request=request)
     return partner
 
 
@@ -576,6 +677,7 @@ __all__ = [
     "list_agreements",
     "list_partners",
     "partner_choices",
+    "partner_filter_choices",
     "partner_instance",
     "supersede_agreement",
 ]

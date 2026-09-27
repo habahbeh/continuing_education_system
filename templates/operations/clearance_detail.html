@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ clearance.code }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -46,13 +46,13 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الإنهاء والشهادات" %}</span>
-    <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ clearance.code }}</span></h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }} <span class="code" dir="ltr" translate="no">{{ clearance.code }}</span></h1>
     {% comment %}
       السطر يصف ما تحته، والعدّ من الخطوات المرسومة نفسها لا من نوع الحالة،
       فلا يفترق النصّ عن الجدول.
     {% endcomment %}
     <p class="sub">{{ clearance.participant_name }} —
-      {% blocktranslate count n=clearance.steps|length %}خطوة واحدة، ولا تكتمل البراءة قبل إتمامها.{% plural %}{{ n }} خطوات لا يُعاد ترتيبها، ولا تكتمل البراءة قبل إتمامها كلّها.{% endblocktranslate %}
+      {{ clearance.steps|length|ar_count:"خطوة واحدة، ولا تكتمل البراءة قبل إتمامها.|خطوتان لا يُعاد ترتيبهما، ولا تكتمل البراءة قبل إتمامهما.|خطوات لا يُعاد ترتيبها، ولا تكتمل البراءة قبل إتمامها كلّها.|خطوة لا يُعاد ترتيبها، ولا تكتمل البراءة قبل إتمامها كلّها." }}
     </p>
   </div>
   <div class="acts">
@@ -62,7 +62,6 @@
   </div>
 </div>
 
-{% guided_help "clearance" %}
 
 <div class="card2"><div class="card2-body">
   <dl class="dl">
@@ -83,7 +82,7 @@
       {% if clearance.status == "BLOCKED" %}{% translate "البراءة موقوفة: يُسدَّد الرصيد في الصندوق أولاً، ثم تُعاد المصادقة المالية فتُستأنف البراءة (BR-073)." %}{% endif %}</div>
     <div class="form-acts">
       <a class="btn2" href="{% url 'operations:account' clearance.enrollment_code %}">{% translate "فتح كشف الحساب" %}</a>
-      <a class="btn2 ghost" href="{% url 'cashbox:payment-new' %}">{% translate "تسديد الرصيد من الصندوق" %}</a>
+      <a class="btn2 ghost" href="{% url 'cashbox:payment-new' %}?enrollment={{ clearance.enrollment_code }}">{% translate "تسديد الرصيد من الصندوق" %}</a>
     </div>
   </div>
 {% elif clearance.centre_owes %}
@@ -191,7 +190,7 @@
           {# Clicking would only re-block and write another denied attempt; the way out is the cashbox. #}
           <div class="form-acts">
             <button class="btn2 primary" type="button" disabled>{% translate "المصادقة المالية الأولى" %}</button>
-            <a class="btn2" href="{% url 'cashbox:payment-new' %}">{% translate "تسديد الرصيد من الصندوق" %}</a>
+            <a class="btn2" href="{% url 'cashbox:payment-new' %}?enrollment={{ clearance.enrollment_code }}">{% translate "تسديد الرصيد من الصندوق" %}</a>
           </div>
           <p class="hint">{% translate "سدّد الرصيد أولاً ثم أعد المحاولة." %}</p>
         {% elif not step.certified_by and can_certify %}
@@ -205,7 +204,7 @@
           {% if can_second_certify and clearance.status == "BLOCKED" and clearance.participant_owes %}
             <div class="form-acts">
               <button class="btn2 primary" type="button" disabled>{% translate "المصادقة الثانية" %}</button>
-              <a class="btn2" href="{% url 'cashbox:payment-new' %}">{% translate "تسديد الرصيد من الصندوق" %}</a>
+              <a class="btn2" href="{% url 'cashbox:payment-new' %}?enrollment={{ clearance.enrollment_code }}">{% translate "تسديد الرصيد من الصندوق" %}</a>
             </div>
             <p class="hint">{% translate "سدّد الرصيد أولاً ثم أعد المحاولة." %}</p>
           {% elif can_second_certify %}

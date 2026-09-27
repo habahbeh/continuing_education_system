@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -49,12 +49,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الإنهاء والشهادات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "الشهادات الصادرة بأرقامها وتقاديرها، وما سُلّم منها وما استُبدل." %}</p>
   </div>
 </div>
 
-{% guided_help "certificates" %}
 
 <p class="hint boxed">
   {% translate "تصدرها الجامعة لا الشريك · بلا رسوم · بدل الفاقد 15 ديناراً ولا يصدر قبل قبضه · رقم تلقائي من عشر خانات · التقدير يُكتب يدوياً فالنظام لا يحتسبه · إعادة الطباعة لا تُغيّر الرقم." %}
@@ -72,7 +71,7 @@
   <div class="card2-head">
     <h2>{% translate "الشهادات الصادرة" %}</h2>
     <div class="acts">
-      <span class="count muted">{% blocktranslate count n=certificates|length %}شهادة واحدة{% plural %}{{ n }} شهادات{% endblocktranslate %}</span>
+      <span class="count muted">{{ certificates|length|ar_count:"شهادة واحدة|شهادتان|شهادات|شهادة" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">

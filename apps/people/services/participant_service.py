@@ -24,6 +24,8 @@ from typing import Any
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import OperationalError, transaction
+from django.db.models import Count, F, Q, Value
+from django.db.models.functions import Replace
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -33,7 +35,7 @@ from apps.core.services.settings_service import get_setting
 from apps.people.constants import Action, Screen
 from apps.people.models import Participant, ParticipantCategory, Role
 from apps.people.permissions import policy
-from apps.people.services import participant_numbering
+from apps.people.services import participant_numbering, reference_data
 
 ENTITY = "people.Participant"
 
@@ -81,6 +83,42 @@ RESTRICTED_FIELDS: tuple[str, ...] = ("participant_number", "name_ar")
 RESTRICTED_ROLES = frozenset({Role.CASHIER, Role.FINANCE_MANAGER})
 
 
+#: Arabic spelling variants that a registry clerk does not distinguish and a
+#: database collation does not fold. ``utf8mb4_0900_ai_ci`` is accent-
+#: insensitive for Latin only: «أحمد» and «احمد» are two different strings to
+#: it, so a name search for one missed the other — and a clerk who cannot find
+#: a participant creates a second file for them. Folding both the column and
+#: the term to one spelling is what makes the search find the person rather
+#: than the keystrokes.
+#:
+#: Deliberately narrow: the two alef/ya families, ta marbuta, and the tatweel
+#: that padded justified text in imported records. Hamza on waw and ya (ؤ ئ)
+#: is left alone — folding it merges names that really are different.
+ARABIC_FOLDINGS: tuple[tuple[str, str], ...] = (
+    ("أ", "ا"),
+    ("إ", "ا"),
+    ("آ", "ا"),
+    ("ٱ", "ا"),
+    ("ى", "ي"),
+    ("ة", "ه"),
+    ("ـ", ""),
+)
+
+
+def fold_arabic(text: str) -> str:
+    """The search term in the one spelling both sides of the comparison use."""
+    for variant, plain in ARABIC_FOLDINGS:
+        text = text.replace(variant, plain)
+    return text
+
+
+def _folded(expression: Any) -> Any:
+    """``fold_arabic`` as SQL, so the stored name is compared the same way."""
+    for variant, plain in ARABIC_FOLDINGS:
+        expression = Replace(expression, Value(variant), Value(plain))
+    return expression
+
+
 def visible_fields_for(user: Any) -> tuple[str, ...]:
     """The field set this role may see on a participant (BR-101)."""
     role = getattr(user, "role", "") or ""
@@ -123,13 +161,35 @@ def list_participants(
         if getattr(actor, "role", "") in RESTRICTED_ROLES:
             rows = rows.filter(participant_number__startswith=query)
         else:
-            rows = (
-                rows.filter(name_ar__icontains=query)
-                | rows.filter(participant_number__startswith=query)
-                | rows.filter(phone__startswith=query)
-                | rows.filter(id_document_number__startswith=query)
+            # One Q instead of four ORed querysets: same set, one query, and
+            # the name half now matches through the spelling (see below).
+            rows = rows.annotate(name_folded=_folded(F("name_ar"))).filter(
+                Q(name_folded__icontains=fold_arabic(query))
+                | Q(participant_number__startswith=query)
+                | Q(phone__startswith=query)
+                | Q(id_document_number__startswith=query)
             )
-    return [project(row, actor) for row in rows.distinct()[:200]]
+    # How many enrolments each participant has, in the same query. A count is
+    # not one of the projected personal fields: it is the number of rows the
+    # enrolments screen already shows this role, so it goes to every role.
+    rows = rows.distinct().annotate(enrollment_count=Count("enrollments"))
+    # A listing is ordered or it is arbitrary; there is no third state. The
+    # registry used to be sliced to two hundred rows with no ORDER BY at all,
+    # which made «the first two hundred» mean two hundred rows the database
+    # happened to hand back — a different two hundred between two identical
+    # requests. Newest first is the order the work happens in: the application
+    # entered minutes ago is the one being looked for.
+    #
+    # The slice is gone with it. A cap nobody is told about is a lie the page
+    # cannot detect, and the caller pages the result instead — so the count it
+    # prints is the count of the registry, not of a window onto it.
+    rows = rows.order_by("-registered_on", "-participant_number")
+    result = []
+    for row in rows:
+        projected = project(row, actor)
+        projected["enrollment_count"] = row.enrollment_count
+        result.append(projected)
+    return result
 
 
 def get_participant(*, actor: Any, participant_number: str, request: Any = None) -> dict[str, Any]:
@@ -209,6 +269,13 @@ def _readable(participant: Participant, name: str) -> Any:
         return display()
 
     value = getattr(participant, name)
+    # City and qualification have no model choices — their lists are settings
+    # (reference_data) — so the page was printing AMMAN and BACHELOR. Same
+    # labels the admission form offers; an unknown code stays as it is.
+    if name == "city" and value:
+        return reference_data.label_for(reference_data.cities(), value)
+    if name == "qualification" and value:
+        return reference_data.label_for(reference_data.qualifications(), value)
     if isinstance(value, bool):
         return _("نعم") if value else _("لا")
     return value

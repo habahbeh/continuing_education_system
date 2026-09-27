@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -24,7 +24,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "تسجيل الطرف المتعاقد باسمه وبياناته التعريفية. بعد الحفظ تُفتح بطاقته، ومنها تُسجَّل اتفاقيته الموقّعة." %}</p>
   </div>
   <div class="acts">
@@ -32,7 +32,6 @@
   </div>
 </div>
 
-{% guided_help "partner-new" %}
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "بيانات الشريك" %}</h2></div>

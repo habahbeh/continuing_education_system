@@ -48,6 +48,53 @@ def _receipt_partition(received_on: date) -> str:
     return str(received_on.year)
 
 
+def is_first_payment(enrollment: Any) -> bool:
+    """No issued receipt has yet been allocated to this enrolment."""
+    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
+
+    return not PaymentAllocation.objects.filter(
+        enrollment=enrollment, receipt__status=ReceiptStatus.ISSUED
+    ).exists()
+
+
+def first_payment_minimum(*, enrollment: Any, as_of: date) -> Decimal | None:
+    """
+    BR-020's floor for THIS enrolment on THIS date, or ``None`` when the rule
+    does not apply — a course, or a diploma that already took a payment.
+
+    The one place the rule is read: :func:`check_minimum_first_payment`
+    enforces it and the till repeats it, both through this function, so the
+    figure the screen quotes is the figure the save refuses below (Q-15:
+    programme override before the effective-dated setting).
+    """
+    from apps.catalog.models import ProgramType
+
+    program = enrollment.cohort.program
+    if program.program_type != ProgramType.DIPLOMA:
+        return None
+    if not is_first_payment(enrollment):
+        return None  # The rule governs the FIRST payment only.
+
+    minimum = program.minimum_first_payment_override
+    if minimum is None:
+        configured = get_setting(MIN_FIRST_PAYMENT_KEY, as_of=as_of, default="400")
+        minimum = Decimal(str(configured))
+    return minimum
+
+
+def default_breakdown_text(*, enrollment: Any) -> str:
+    """
+    The statement a receipt carries when the cashier types none.
+
+    Named from the enrolment so the printed receipt reads on its own: what
+    was paid for, on which cohort, and whether it opened the account.
+    """
+    cohort = enrollment.cohort
+    program = cohort.program
+    what = "رسوم تسجيل ودفعة أولى" if is_first_payment(enrollment) else "دفعة على حساب"
+    return f"{what} — {program.name_ar} / {cohort.name_ar or cohort.code}"
+
+
 def check_minimum_first_payment(*, enrollment: Any, amount: Decimal, as_of: date) -> None:
     """
     BR-020 — the first payment on a diploma must clear a minimum.
@@ -56,22 +103,9 @@ def check_minimum_first_payment(*, enrollment: Any, amount: Decimal, as_of: date
     (Q-15), because the rule is "registration plus the first subject" and the
     centre may price that differently per diploma.
     """
-    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
-    from apps.catalog.models import ProgramType
-
-    program = enrollment.cohort.program
-    if program.program_type != ProgramType.DIPLOMA:
-        return
-
-    already_paid = PaymentAllocation.objects.filter(
-        enrollment=enrollment, receipt__status=ReceiptStatus.ISSUED
-    ).exists()
-    if already_paid:
-        return  # The rule governs the FIRST payment only.
-
-    minimum = program.minimum_first_payment_override
+    minimum = first_payment_minimum(enrollment=enrollment, as_of=as_of)
     if minimum is None:
-        minimum = Decimal(str(get_setting(MIN_FIRST_PAYMENT_KEY, as_of=as_of, default="400")))
+        return
 
     if amount < minimum:
         raise ValidationError(
@@ -238,10 +272,10 @@ def take_payment(
 
     check_minimum_first_payment(enrollment=enrollment, amount=amount, as_of=received_on)
 
-    external_required = get_setting(EXTERNAL_REF_REQUIRED_KEY, as_of=received_on, default=False)
-    if external_required and not external_receipt_ref.strip():
+    if external_ref_required(as_of=received_on) and not external_receipt_ref.strip():
         raise ValidationError(
-            "رقم السند الخارجي إلزامي بالإعداد الحالي (Q-03) — external_receipt_required."
+            "لا يصدر سند بلا رقم سند الدائرة المالية: القبض هناك والمركز يسجّل وصله "
+            "(§5.2 · Q-03 — external_receipt_required)."
         )
 
     ensure_sequence(RECEIPT_SCOPE, _receipt_partition(received_on), padding=5)
@@ -257,6 +291,103 @@ def take_payment(
         breakdown_text_ar=breakdown_text_ar,
         request=request,
     )
+
+
+def external_ref_required(*, as_of: date) -> bool:
+    """§5.2 / Q-03 — must a receipt carry the finance department's voucher number?"""
+    return bool(get_setting(EXTERNAL_REF_REQUIRED_KEY, as_of=as_of, default=False))
+
+
+def voucher_addable(receipt: Any) -> bool:
+    """
+    May the finance-department voucher number still be written on this receipt?
+
+    Only while it is EMPTY (a number once written is never changed — the
+    correction is a void and a new receipt, BR-025), on an issued receipt,
+    and before the day it belongs to is approved (BR-026).
+    """
+    from apps.cashbox.models import ClosingStatus, DailyClosing, ReceiptStatus
+
+    if receipt.external_receipt_ref or receipt.status != ReceiptStatus.ISSUED:
+        return False
+    return not DailyClosing.objects.filter(
+        cashier_id=receipt.cashier_id,
+        closing_date=receipt.received_on,
+        status=ClosingStatus.RECONCILED,
+    ).exists()
+
+
+def record_external_ref(
+    *, actor: Any, receipt: Any, external_receipt_ref: str, request: Any = None
+) -> Any:
+    """
+    Complete a receipt with the finance department's voucher number (§5.2).
+
+    The till often issues the receipt before the paper voucher is in hand;
+    the closing then lists the receipt as «بلا وصل» until this is done. It is
+    a completion, not an edit: refused once a number exists, once the receipt
+    is voided, or once its day is approved. A day still open or pending is
+    re-counted so the closing's «بلا وصل» figure follows the receipt, and a
+    pending day that is now clean is promoted to OPEN.
+    """
+    from apps.cashbox.models import ClosingStatus, DailyClosing, Receipt
+
+    # Whoever may record a payment (§3.4/17: the finance officer and the
+    # cashier) may complete its voucher number; nobody else.
+    policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
+
+    ref = external_receipt_ref.strip()
+    if not ref:
+        raise ValidationError("اكتب رقم سند الدائرة المالية.")
+    if receipt.external_receipt_ref:
+        raise ValidationError(
+            "هذا السند يحمل رقم سند من الدائرة المالية بالفعل ولا يُغيَّر؛ "
+            "التصحيح بإلغاء السند وإصدار سند جديد (BR-025)."
+        )
+    if receipt.status != "ISSUED":
+        raise ValidationError("السند ملغى؛ لا يُستكمل رقم وصل على سند ملغى.")
+    if Receipt.objects.filter(external_ref_key=ref).exclude(pk=receipt.pk).exists():
+        other = Receipt.objects.filter(external_ref_key=ref).values_list(
+            "internal_receipt_number", flat=True
+        )[0]
+        raise ValidationError(f"رقم سند الدائرة المالية {ref} مسجَّل على السند {other}.")
+
+    with transaction.atomic():
+        closing = (
+            DailyClosing.objects.select_for_update()
+            .filter(cashier_id=receipt.cashier_id, closing_date=receipt.received_on)
+            .first()
+        )
+        if closing is not None and closing.status == ClosingStatus.RECONCILED:
+            raise ValidationError(
+                f"يوم هذا السند مُقفل ومعتمد ({closing.code}) ولا يُعدَّل بعده (BR-026)."
+            )
+
+        receipt.external_receipt_ref = ref
+        receipt.save(update_fields=["external_receipt_ref", "external_ref_key"])
+
+        write_audit(
+            action="UPDATE",
+            entity_type=RECEIPT_ENTITY,
+            entity_id=str(receipt.pk),
+            reference=receipt.internal_receipt_number,
+            summary_ar=f"استكمال رقم سند الدائرة المالية — {ref}",
+            actor=actor,
+            changes={"external_receipt_ref": ref},
+            request=request,
+        )
+
+        if closing is not None:
+            from apps.cashbox.services import closing_service
+
+            summary = closing_service.day_summary(
+                cashier=receipt.cashier, closing_date=receipt.received_on
+            )
+            closing.unvouched_count = summary["unvouched_count"]
+            if closing.unvouched_count == 0 and closing.variance == ZERO:
+                closing.status = ClosingStatus.OPEN
+            closing.save(update_fields=["unvouched_count", "status"])
+    return receipt
 
 
 def request_void(*, actor: Any, receipt: Any, reason_ar: str, request: Any = None) -> Any:
@@ -279,9 +410,26 @@ def request_void(*, actor: Any, receipt: Any, reason_ar: str, request: Any = Non
         raise ValidationError("سبب الإلغاء إلزامي (BR-025).")
 
     with transaction.atomic():
-        record = ReceiptVoid.objects.create(
-            receipt=receipt, requested_by=actor, reason_ar=reason_ar.strip()
-        )
+        existing = ReceiptVoid.objects.filter(receipt=receipt).first()
+        if existing is not None and existing.approved_by_id is not None:
+            raise ValidationError("هذا السند ملغى أصلاً.")
+        if existing is not None and existing.rejected_by_id is None:
+            raise ValidationError("على هذا السند طلب إلغاء معلّق بالفعل.")
+        if existing is not None:
+            # A rejected request may be raised again; the earlier decision
+            # stays in the audit trail, the row carries the new ask.
+            existing.requested_by = actor
+            existing.requested_at = timezone.now()
+            existing.reason_ar = reason_ar.strip()
+            existing.rejected_by = None
+            existing.rejected_at = None
+            existing.rejection_reason_ar = ""
+            existing.save()
+            record = existing
+        else:
+            record = ReceiptVoid.objects.create(
+                receipt=receipt, requested_by=actor, reason_ar=reason_ar.strip()
+            )
         write_audit(
             action="VOID",
             entity_type=RECEIPT_ENTITY,
@@ -326,11 +474,18 @@ def approve_void(*, actor: Any, void_record: Any, request: Any = None) -> Any:
 
     if void_record.approved_by_id is not None:
         raise ValidationError("هذا الطلب معتمد سلفاً.")
+    if void_record.rejected_by_id is not None:
+        raise ValidationError("هذا الطلب مرفوض؛ يُطلب الإلغاء من جديد إن لزم.")
     if void_record.requested_by_id == getattr(actor, "pk", None):
         # Also a database constraint; refused here for a readable message.
         raise PermissionDenied("لا يجوز اعتماد إلغاء طلبتَه بنفسك (D-18 · Δ-06).")
 
+    blockers = void_blockers(void_record)
+    if blockers:
+        raise ValidationError(blockers)
+
     receipt = void_record.receipt
+    consequences = void_consequences(void_record)
 
     with transaction.atomic():
         originals = list(
@@ -356,6 +511,26 @@ def approve_void(*, actor: Any, void_record: Any, request: Any = None) -> Any:
         void_record.approved_at = timezone.now()
         void_record.save(update_fields=["approved_by", "approved_at"])
 
+        # The cascade: an enrolment that stood on this money alone goes back
+        # to waiting for it — recorded as a status change with its reason,
+        # never silently. Whoever approved the void is the actor.
+        from apps.operations.services import enrollment_service
+
+        reverted = []
+        for item in consequences["reverting"]:
+            enrollment = item["enrollment"]
+            enrollment_service.record_status_change(
+                actor=actor,
+                enrollment=enrollment,
+                to_status=item["to_status"],
+                reason_ar=(
+                    f"أُلغي السند {receipt.internal_receipt_number} الذي اعتُمد التسجيل عليه — "
+                    f"{void_record.reason_ar}"
+                )[:255],
+                reference=receipt.internal_receipt_number,
+            )
+            reverted.append(enrollment.code)
+
         write_audit(
             action="VOID",
             entity_type=RECEIPT_ENTITY,
@@ -363,10 +538,206 @@ def approve_void(*, actor: Any, void_record: Any, request: Any = None) -> Any:
             reference=receipt.internal_receipt_number,
             summary_ar=f"اعتماد إلغاء سند — {len(originals)} تخصيصاً عكسياً",
             actor=actor,
-            changes={"reversed_allocations": len(originals), "amount": str(receipt.amount)},
+            changes={
+                "reversed_allocations": len(originals),
+                "amount": str(receipt.amount),
+                "reverted_enrollments": reverted,
+            },
             request=request,
         )
     return void_record
+
+
+def reject_void(*, actor: Any, void_record: Any, reason_ar: str, request: Any = None) -> Any:
+    """
+    Turn a void request down. Same hands as approving (``X``), never the
+    requester (D-18), always with a reason. The receipt stays issued.
+    """
+    policy.require(actor, Screen.PAYMENTS, Action.VOID, request=request)
+
+    if void_record.approved_by_id is not None:
+        raise ValidationError("هذا الطلب معتمد سلفاً ولا يُرفض.")
+    if void_record.rejected_by_id is not None:
+        raise ValidationError("هذا الطلب مرفوض سلفاً.")
+    if void_record.requested_by_id == getattr(actor, "pk", None):
+        raise PermissionDenied("لا يجوز البتّ في طلب إلغاء قدّمتَه بنفسك (D-18 · Δ-06).")
+    if not reason_ar.strip():
+        raise ValidationError("سبب الرفض إلزامي.")
+
+    receipt = void_record.receipt
+    with transaction.atomic():
+        void_record.rejected_by = actor
+        void_record.rejected_at = timezone.now()
+        void_record.rejection_reason_ar = reason_ar.strip()
+        void_record.save(update_fields=["rejected_by", "rejected_at", "rejection_reason_ar"])
+        write_audit(
+            action="VOID",
+            entity_type=RECEIPT_ENTITY,
+            entity_id=str(receipt.pk),
+            reference=receipt.internal_receipt_number,
+            summary_ar=f"رفض طلب إلغاء سند — {reason_ar.strip()}",
+            actor=actor,
+            request=request,
+        )
+    return void_record
+
+
+#: Enrolment states that were reached on the strength of a payment and fall
+#: back to waiting for one when that payment is voided. Final states and the
+#: pre-payment states are left alone.
+_REVERTIBLE_ON_VOID = ("PENDING_APPROVAL", "ACTIVE", "PAYMENT_OVERDUE")
+
+
+def _settled_enrollments(receipt: Any) -> list[Any]:
+    from apps.cashbox.models import PaymentAllocation
+
+    seen: dict[int, Any] = {}
+    for allocation in (
+        PaymentAllocation.objects.filter(receipt=receipt, enrollment__isnull=False)
+        .select_related("enrollment__cohort__program")
+        .order_by("id")
+    ):
+        seen.setdefault(allocation.enrollment_id, allocation.enrollment)
+    return list(seen.values())
+
+
+def void_blockers(void_record: Any) -> list[str]:
+    """
+    Why this void may NOT be approved — each a sentence the screen shows
+    before the button and the service raises after it.
+
+    A void says «this receipt was a mistake». Once the day's cash has been
+    counted, or a clearance or certificate was built on the money, it is no
+    longer a mistake to undo but money to hand back: the instrument is then
+    a refund (BR-033), not a void.
+    """
+    from apps.cashbox.models import DailyClosing
+    from apps.operations.models import ClearanceStatus
+
+    receipt = void_record.receipt
+    reasons: list[str] = []
+
+    closing = DailyClosing.objects.filter(
+        cashier=receipt.cashier, closing_date=receipt.received_on
+    ).first()
+    if closing is not None:
+        reasons.append(
+            f"يوم السند ({receipt.received_on:%Y/%m/%d}) دخل في إقفال يومي ({closing.code}) "
+            "وعُدّ ماله؛ لا يُلغى سند بعد الإقفال — يُعالَج بالاسترداد الرسمي أو بسند تصحيحي."
+        )
+
+    for enrollment in _settled_enrollments(receipt):
+        for clearance in enrollment.clearances.exclude(status=ClearanceStatus.CANCELLED):
+            finance_certified = clearance.steps.filter(
+                step_number=2, certified_by__isnull=False
+            ).exists()
+            if finance_certified or clearance.status == ClearanceStatus.COMPLETED:
+                reasons.append(
+                    f"على التسجيل {enrollment.code} براءة ذمة ({clearance.code}) صودق مالياً "
+                    "على رصيدها بهذا السند؛ لا يُلغى سند بُنيت عليه براءة — يُعالَج بالاسترداد."
+                )
+                break
+        if (
+            getattr(enrollment, "certificates", None) is not None
+            and enrollment.certificates.exists()
+        ):
+            reasons.append(
+                f"للتسجيل {enrollment.code} شهادة صادرة؛ لا يُلغى سند سبق شهادة — يُعالَج بالاسترداد."
+            )
+    return reasons
+
+
+def void_consequences(void_record: Any) -> dict[str, Any]:
+    """
+    What approving this void will do beyond the reversal, for the dialog
+    and for the cascade: enrolments that would be left with nothing paid
+    against a live charge go back to «بانتظار الدفع».
+    """
+    from apps.billing.services.account_service import get_account_state
+
+    receipt = void_record.receipt
+    reverting: list[dict[str, Any]] = []
+    remaining: list[dict[str, Any]] = []
+    for enrollment in _settled_enrollments(receipt):
+        state = get_account_state(enrollment)
+        paid_by_this = sum(
+            (
+                a.amount
+                for a in receipt.allocations.filter(enrollment=enrollment, reversed_by__isnull=True)
+            ),
+            ZERO,
+        )
+        paid_after = state.total_paid - paid_by_this
+        if (
+            enrollment.status in _REVERTIBLE_ON_VOID
+            and paid_after <= ZERO
+            and state.total_due > ZERO
+        ):
+            reverting.append(
+                {
+                    "enrollment": enrollment,
+                    "code": enrollment.code,
+                    "from_status": enrollment.get_status_display(),
+                    "to_status": "PENDING_FINANCE",
+                    "balance_after": state.balance + paid_by_this,
+                }
+            )
+        else:
+            remaining.append(
+                {
+                    "code": enrollment.code,
+                    "status": enrollment.get_status_display(),
+                    "paid_after": paid_after,
+                    "balance_after": state.balance + paid_by_this,
+                }
+            )
+    return {"reverting": reverting, "remaining": remaining}
+
+
+def pending_voids_by_enrollment(enrollments: list[Any]) -> dict[int, str]:
+    """{enrollment pk: receipt number} for every enrolment with a void
+    request still undecided on one of its issued receipts."""
+    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
+
+    ids = [e.pk for e in enrollments]
+    if not ids:
+        return {}
+    rows = (
+        PaymentAllocation.objects.filter(
+            enrollment_id__in=ids,
+            receipt__status=ReceiptStatus.ISSUED,
+            receipt__void_record__isnull=False,
+            receipt__void_record__approved_by__isnull=True,
+            receipt__void_record__rejected_by__isnull=True,
+        )
+        .values_list("enrollment_id", "receipt__internal_receipt_number")
+        .distinct()
+    )
+    return dict(rows)
+
+
+def pending_void_for(enrollment: Any) -> str:
+    """The receipt number under a pending void on this enrolment, or ''."""
+    return pending_voids_by_enrollment([enrollment]).get(enrollment.pk, "")
+
+
+def require_no_pending_void(enrollment: Any, *, what_ar: str) -> None:
+    """
+    A step that stands on money paid may not be taken while a request to
+    take that money back is undecided — approve or reject it first.
+    """
+    number = pending_void_for(enrollment)
+    if number:
+        raise ValidationError(
+            f"لا يمكن {what_ar} والسند {number} عليه طلب إلغاء معلّق؛ "
+            "يُبتّ في الطلب (اعتماداً أو رفضاً) أولاً."
+        )
+
+
+#: The register's status filter — each a question the reader asks, not a
+#: column value: «ملغى» is a status, «إلغاء معلّق» and «لم يدخل إقفالاً»
+#: are conditions on an issued receipt.
+RECEIPT_FILTERS = ("issued", "voided", "void_pending", "unclosed")
 
 
 def list_receipts(
@@ -375,23 +746,73 @@ def list_receipts(
     query: str = "",
     on_date: date | None = None,
     cashier_id: int | None = None,
+    participant_number: str = "",
+    since: date | None = None,
+    until: date | None = None,
+    status: str = "",
+    method: str = "",
     request: Any = None,
 ) -> list[dict[str, Any]]:
-    """Receipts as rows for the payments screen (PERMISSIONS row 15)."""
-    from apps.cashbox.models import Receipt
+    """
+    Receipts as rows for the payments screen (PERMISSIONS row 15).
+
+    ``since``/``until`` bound the date — the dashboard's week chart in one
+    read instead of one read per day, and the register's range. ``status``
+    is one of :data:`RECEIPT_FILTERS`; ``method`` a payment-method code.
+
+    ``participant_number`` narrows to one participant exactly — the
+    participant file reads its receipts through here rather than scanning
+    the register. ``query`` matches a name, a receipt number, a participant
+    number, a phone or the finance department's own reference.
+    """
+    from django.db.models import Q
+
+    from apps.cashbox.models import Receipt, ReceiptStatus, ReceiptVoid
 
     policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
 
     queryset = Receipt.objects.select_related("participant", "payment_method", "cashier")
     if query:
-        queryset = queryset.filter(internal_receipt_number__icontains=query) | queryset.filter(
-            participant__name_ar__icontains=query
+        queryset = queryset.filter(
+            Q(internal_receipt_number__icontains=query)
+            | Q(external_receipt_ref__icontains=query)
+            | Q(participant__name_ar__icontains=query)
+            | Q(participant__name_en__icontains=query)
+            | Q(participant__participant_number__startswith=query)
+            | Q(participant__phone__icontains=query)
         )
     if on_date is not None:
         queryset = queryset.filter(received_on=on_date)
     if cashier_id is not None:
         queryset = queryset.filter(cashier_id=cashier_id)
+    if participant_number:
+        queryset = queryset.filter(participant__participant_number=participant_number)
+    if since is not None:
+        queryset = queryset.filter(received_on__gte=since)
+    if until is not None:
+        queryset = queryset.filter(received_on__lte=until)
+    if method:
+        queryset = queryset.filter(payment_method__code=method)
+    if status == "issued":
+        queryset = queryset.filter(status=ReceiptStatus.ISSUED)
+    elif status == "voided":
+        queryset = queryset.exclude(status=ReceiptStatus.ISSUED)
+    elif status == "unclosed":
+        queryset = queryset.filter(status=ReceiptStatus.ISSUED, daily_closing__isnull=True)
+    elif status == "void_pending":
+        queryset = queryset.filter(
+            status=ReceiptStatus.ISSUED,
+            void_record__approved_by__isnull=True,
+            void_record__rejected_by__isnull=True,
+            void_record__isnull=False,
+        )
 
+    receipts = list(queryset.order_by("-received_on", "-id"))
+    pending = set(
+        ReceiptVoid.objects.filter(
+            receipt__in=receipts, approved_by__isnull=True, rejected_by__isnull=True
+        ).values_list("receipt_id", flat=True)
+    )
     return [
         {
             "internal_receipt_number": r.internal_receipt_number,
@@ -401,25 +822,59 @@ def list_receipts(
             "received_on": r.received_on,
             "amount": r.amount,
             "payment_method": r.payment_method.name_ar,
+            "payment_method_code": r.payment_method.code,
             "cashier": person_name(r.cashier),
             "status": r.status,
             "status_display": r.get_status_display(),
             "breakdown_text_ar": r.breakdown_text_ar,
             "is_closed": r.daily_closing_id is not None,
+            "void_pending": r.pk in pending,
         }
-        for r in queryset.order_by("-received_on", "-id")
+        for r in receipts
     ]
+
+
+def receipts_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    What the register's cards and its footer say about a set of rows: the
+    money actually taken (issued receipts only), the counts by condition,
+    and the take per payment method — computed once, from the rows shown.
+    """
+    issued = [r for r in rows if r["status"] == "ISSUED"]
+    by_method: dict[str, dict[str, Any]] = {}
+    for r in issued:
+        slot = by_method.setdefault(
+            r["payment_method_code"],
+            {
+                "code": r["payment_method_code"],
+                "name": r["payment_method"],
+                "amount": ZERO,
+                "count": 0,
+            },
+        )
+        slot["amount"] += r["amount"]
+        slot["count"] += 1
+    return {
+        "total": sum((r["amount"] for r in issued), ZERO),
+        "count": len(rows),
+        "issued": len(issued),
+        "voided": len(rows) - len(issued),
+        "void_pending": sum(1 for r in issued if r["void_pending"]),
+        "unclosed": sum(1 for r in issued if not r["is_closed"]),
+        "by_method": sorted(by_method.values(), key=lambda m: -m["amount"]),
+    }
 
 
 def get_receipt(*, actor: Any, number: str, request: Any = None) -> dict[str, Any]:
     """One receipt with its allocations and any void request against it."""
     from apps.cashbox.models import PaymentAllocation, Receipt, ReceiptVoid
+    from apps.cashbox.services.amount_words import amount_in_words_ar
 
     policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
 
-    receipt = Receipt.objects.select_related("participant", "payment_method", "cashier").get(
-        internal_receipt_number=number
-    )
+    receipt = Receipt.objects.select_related(
+        "participant", "payment_method", "cashier", "daily_closing"
+    ).get(internal_receipt_number=number)
 
     allocations = [
         {
@@ -434,14 +889,32 @@ def get_receipt(*, actor: Any, number: str, request: Any = None) -> dict[str, An
             "manual_reason_ar": a.manual_reason_ar,
         }
         for a in PaymentAllocation.objects.filter(receipt=receipt)
-        .select_related("enrollment", "charge_line")
+        .select_related("enrollment__cohort__program", "charge_line")
         .order_by("id")
     ]
+    # The enrolment the receipt settles — one per receipt in practice; named
+    # once at the head of the screen and of the paper, not on every line.
+    settled = next(
+        (
+            a.enrollment
+            for a in PaymentAllocation.objects.filter(receipt=receipt)
+            .select_related("enrollment__cohort__program")
+            .exclude(enrollment__isnull=True)
+            .order_by("id")[:1]
+        ),
+        None,
+    )
 
     void = ReceiptVoid.objects.filter(receipt=receipt).order_by("-id").first()
     return {
         "internal_receipt_number": receipt.internal_receipt_number,
+        "amount_words": amount_in_words_ar(receipt.amount),
+        "enrollment_code": settled.code if settled else "",
+        "cohort_name": (settled.cohort.name_ar or settled.cohort.code) if settled else "",
+        "program_name": settled.cohort.program.name_ar if settled else "",
+        "is_voided": receipt.status != "ISSUED",
         "external_receipt_ref": receipt.external_receipt_ref,
+        "voucher_addable": voucher_addable(receipt),
         "participant_name": receipt.participant.name_ar,
         "participant_number": receipt.participant.participant_number,
         "received_on": receipt.received_on,
@@ -456,7 +929,33 @@ def get_receipt(*, actor: Any, number: str, request: Any = None) -> dict[str, An
         "void_id": void.pk if void else None,
         "void_reason_ar": void.reason_ar if void else "",
         "void_is_approved": bool(void and void.approved_by_id),
+        "void_requested_by_id": void.requested_by_id if void else None,
+        "void_requested_by": person_name(void.requested_by) if void else "",
+        "void_is_rejected": bool(void and void.rejected_by_id),
+        "void_is_pending": bool(void and void.is_pending),
+        "void_rejected_by": person_name(void.rejected_by) if void and void.rejected_by_id else "",
+        "void_approved_by": person_name(void.approved_by) if void and void.approved_by_id else "",
+        "void_approved_at": void.approved_at if void else None,
+        "closing_code": receipt.daily_closing.code if receipt.daily_closing_id else "",
+        "void_rejection_reason_ar": void.rejection_reason_ar if void else "",
+        "void_blockers": void_blockers(void) if void and void.is_pending else [],
+        "void_consequences": (
+            void_consequences(void)
+            if void and void.is_pending
+            else {"reverting": [], "remaining": []}
+        ),
     }
+
+
+def receipt_document(*, actor: Any, number: str, request: Any = None) -> dict[str, Any]:
+    """
+    The printed receipt: the screen's receipt plus the letterhead. A voided
+    receipt prints as voided, never hidden (BR-025). Same door as the screen.
+    """
+    from apps.core.services import document_settings
+
+    receipt = get_receipt(actor=actor, number=number, request=request)
+    return {**receipt, "chrome": document_settings.chrome(as_of=receipt["received_on"])}
 
 
 def payment_method_choices() -> list[tuple[str, str]]:
@@ -488,19 +987,35 @@ def void_instance(*, actor: Any, number: str, request: Any = None) -> Any:
 
     policy.require(actor, Screen.PAYMENTS, Action.VIEW, request=request)
     receipt = Receipt.objects.get(internal_receipt_number=number)
-    return ReceiptVoid.objects.filter(receipt=receipt, approved_by__isnull=True).latest("id")
+    return ReceiptVoid.objects.filter(
+        receipt=receipt, approved_by__isnull=True, rejected_by__isnull=True
+    ).latest("id")
 
 
 __all__ = [
     "allocate",
     "approve_void",
     "check_minimum_first_payment",
+    "default_breakdown_text",
+    "external_ref_required",
+    "first_payment_minimum",
     "get_receipt",
+    "is_first_payment",
     "list_receipts",
     "method_by_code",
     "payment_method_choices",
+    "pending_void_for",
+    "pending_voids_by_enrollment",
+    "receipt_document",
     "receipt_instance",
+    "receipts_summary",
+    "record_external_ref",
+    "reject_void",
     "request_void",
+    "require_no_pending_void",
     "take_payment",
+    "void_blockers",
+    "void_consequences",
     "void_instance",
+    "voucher_addable",
 ]

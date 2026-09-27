@@ -27,6 +27,7 @@ PASSWORD = "probe-password-1234"
 def signed_in(client):
     def _in(user):
         client.force_login(user)
+        client._actor = user
         return client
 
     return _in
@@ -60,16 +61,13 @@ def _url(code: str) -> str:
 
 
 def _open(client, enrollment, code="CLR-DOC-1"):
-    return client.post(
-        reverse("operations:clearances"),
-        {
-            "action": "open",
-            "enrollment_code": enrollment.code,
-            "case_type": "GRADUATION",
-            "code": code,
-            "opened_on": TERM_START.isoformat(),
-        },
-        follow=True,
+    from apps.operations.services import clearance_service
+
+    return clearance_service.open_clearance(
+        actor=client._actor,
+        enrollment=enrollment,
+        opened_on=date(2026, 9, 15),
+        code=code,
     )
 
 

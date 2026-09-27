@@ -1,178 +1,475 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n l10n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  شاشتان في صفحة واحدة: الاسترداد الاستثنائي (§5.3) وردّ الرصيد الدائن
-  (BR-071). وهما جدولان ونموذجان منفصلان لا نموذج واحد — فالأول يعكس إيراداً
-  ويحتاج كتاباً رسمياً وموافقة الرئيس، والثاني يعيد مبلغاً لم يكن إيراداً قط.
-  دمجهما يدعو المسار الثقيل إلى الحالة الخفيفة أو العكس.
+  حركتان في صفحة واحدة: الاسترداد الاستثنائي (§5.3) وردّ الرصيد الدائن (BR-071)
+  — سجلان على اليمين، ونموذجاهما على تبويبين في بطاقة لاصقة على اليسار. لم
+  يُدمجا: الأول يعكس إيراداً ويحتاج كتاباً رسمياً وموافقة الرئيس، والثاني يعيد
+  مبلغاً لم يكن إيراداً قط.
 
-  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا حارس ولا مرشّح، ولا عمود بدّل
-  موضعه. الأزرار الأربعة هي نفسها خلف الرايات نفسها — «اعتماد» و«رفض» خلف
-  `can_approve` وشرط أن يكون القارئ غير طالب الاسترداد (D-18)، و«تنفيذ» خلف
-  `can_execute`، والنموذجان خلف `can_create` — وكلها تُفحص ثانيةً في
-  `policy.require` عند الإرسال.
+  كل نموذج يعرض ما تقبله خدمته وحدها: للاسترداد تسجيلات لها مقبوض، ولردّ الرصيد
+  تسجيلات لها رصيد دائن — وكل خيار يحمل رقمه على data-* فتُعرض المعاينة قبل
+  الحفظ: المقبوض فعلياً، والباقي بعد الاسترداد، وما يعود من الشريك؛ أو الرصيد
+  الذي سيُردّ كاملاً (BR-073). «كامل» يملأ المبلغ ويقفله.
 
-  الجملة التي كانت في `.note warn` انقسمت نصفين ونزلت إلى `.hint`: الأصفر
-  للحظة رفض، وشرحُ قاعدةٍ ليس رفضاً (قواعد التحسين §6.5). ونصفها الأول تحت
-  جدول الاستردادات ونصفها الثاني تحت جدول الأرصدة — فالفرق بين الحركتين هو
-  سبب فصلهما، ويُقرأ عند كلٍّ منهما لا فوق الصفحة مرة واحدة.
+  الرمز لا يُكتب: تسلسل سنوي للنظام (RF-… / CR-…) كأرقام السندات.
 
-  عمود الإجراء كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
-  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
-  أفقياً. وحقل سبب الرفض كان صندوقاً بلا اسم يقرؤه قارئ الشاشة — أُعطي
-  `aria-label` بالصياغة نفسها المستقرّة في إقفال الصندوق.
+  الأفعال الأربعة — طلب، اعتماد، رفض بسبب، تنفيذ — خلف حوارات؛ التنفيذ يُخرج
+  مالاً فيقول كم ولمن وما يعود من الشريك. لا تنبيه متصفح. الأزرار خلف الرايات
+  نفسها (`can_create` · `can_approve` وغيرُ الطالب D-18 · `can_execute`)، وتُفحص
+  ثانيةً في `policy.require` عند الإرسال.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "حركتان مختلفتان في صفحة واحدة: الاسترداد الاستثنائي بوثائقه الخارجية ومراحله الثلاث، وردّ الرصيد الدائن المستقل عنه." %}</p>
   </div>
 </div>
 
-{% guided_help "refunds" %}
+<div class="kpi-grid tiles rf-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
 
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "الاستردادات" %}</h2>
-    <div class="acts">
-      <span class="count">{% blocktranslate count n=refunds|length %}استرداد واحد{% plural %}{{ n }} استردادات{% endblocktranslate %}</span>
+<div class="dash-cols rf-cols">
+  <div class="dash-main">
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+        <h2>{% translate "الاستردادات" %}</h2>
+        <div class="acts">
+          <span class="count">{{ refunds|length|ar_count:"استرداد واحد|استردادان|استردادات|استرداداً" }}</span>
+        </div>
+      </div>
+
+      {# البحث فوري: كل تغيير يعيد رسم الجدولين (htmx)؛ وبلا JS يعمل بمفتاح Enter. #}
+      <form method="get" class="filterbar rf-filters" role="search" id="rf-form"
+            hx-get="{% url 'billing:refunds' %}" hx-target="#rf-results" hx-select="#rf-results" hx-swap="outerHTML"
+            hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status" hx-push-url="true" hx-indicator="#rf-busy">
+        {% if enrollment_code %}<input type="hidden" name="enrollment" value="{{ enrollment_code }}">{% endif %}
+        <div class="fld grow">
+          <label for="f_q">{% translate "بحث" %}</label>
+          <input type="search" name="q" value="{{ query }}" id="f_q" spellcheck="false" placeholder="{% translate 'رمز الاسترداد، التسجيل، اسم المشارك أو رقمه، الكتاب، موافقة الرئيس…' %}">
+        </div>
+        <div class="fld">
+          <label for="f_status">{% translate "الحالة" %}</label>
+          <select name="status" id="f_status">
+            <option value="">{% translate "الكل" %}</option>
+            <option value="REQUESTED"{% if status == "REQUESTED" %} selected{% endif %}>{% translate "مطلوب" %}</option>
+            <option value="APPROVED"{% if status == "APPROVED" %} selected{% endif %}>{% translate "معتمد" %}</option>
+            <option value="EXECUTED"{% if status == "EXECUTED" %} selected{% endif %}>{% translate "منفَّذ" %}</option>
+            <option value="REJECTED"{% if status == "REJECTED" %} selected{% endif %}>{% translate "مرفوض" %}</option>
+          </select>
+        </div>
+        <span class="busy" id="rf-busy" aria-hidden="true"></span>
+        {% if is_filtered %}<a class="btn2 ghost" href="{% url 'billing:refunds' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
+      </form>
+
+      <div id="rf-results">
+        {% if enrollment_code %}
+          <p class="hint boxed rf-scope">{% translate "حركات التسجيل" %} <span class="num" dir="ltr">{{ enrollment_code }}</span> {% translate "وحده" %} — <a class="row-link" href="{% url 'billing:refunds' %}">{% translate "كل الحركات" %}</a></p>
+        {% endif %}
+        <div class="tbl-wrap">
+          <table class="tbl rf-tbl">
+            <thead>
+              <tr>
+                <th>{% translate "الرمز" %}</th>
+                <th>{% translate "التسجيل" %}</th>
+                <th>{% translate "المشارك" %}</th>
+                <th class="num">{% translate "المبلغ" %}</th>
+                <th>{% translate "المستندات" %}</th>
+                <th>{% translate "الحالة" %}</th>
+                <th aria-label="{% translate 'الإجراء' %}"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in refunds %}
+                <tr>
+                  <td class="code-cell"><strong class="num" dir="ltr" translate="no">{{ r.code }}</strong><small class="muted sub-line">{{ r.refund_type_display }} · <span dir="ltr">{{ r.requested_at|date:"Y/m/d" }}</span></small></td>
+                  <td class="code-cell"><a class="row-link num" dir="ltr" translate="no" href="{% url 'operations:account' r.enrollment_code %}">{{ r.enrollment_code }}</a><small class="muted sub-line">{{ r.program_name }}</small></td>
+                  <td class="who-cell">{{ r.participant_name }}<small class="muted num sub-line" dir="ltr">{{ r.participant_number }}</small></td>
+                  <td class="num amt">{{ r.amount }}{% if r.partner_recovery_amount %}<small class="muted sub-line">{% translate "من الشريك" %} {{ r.partner_recovery_amount }}</small>{% endif %}</td>
+                  <td class="docs"><span class="num" dir="ltr" translate="no">{{ r.official_letter_ref }}</span> <small class="muted">{% translate "كتاب" %}</small><small class="muted sub-line"><span class="num" dir="ltr" translate="no">{{ r.president_approval_ref }}</span> {% translate "رئيس" %}{% if r.president_approval_date %} · <span dir="ltr">{{ r.president_approval_date|date:"Y/m/d" }}</span>{% endif %}</small></td>
+                  <td class="rf-state">
+                    <span class="chip {{ r.status|status_tone }} dot">{{ r.status_display }}</span>
+                    <small class="muted sub-line">
+                      {% if r.status == "REQUESTED" %}{{ r.requested_by }}
+                      {% elif r.status == "APPROVED" %}{{ r.approved_by }} · <span dir="ltr">{{ r.approved_at|date:"Y/m/d" }}</span>
+                      {% elif r.status == "EXECUTED" %}{{ r.executed_by }} · <span dir="ltr">{{ r.executed_at|date:"Y/m/d" }}</span>
+                      {% else %}{{ r.rejected_by }}{% if r.rejection_reason_ar %} — {{ r.rejection_reason_ar }}{% endif %}{% endif %}
+                    </small>
+                  </td>
+                  <td class="acts rf-acts">
+                    {% if r.status == "REQUESTED" and can_approve and r.requested_by_id != current_user_id %}
+                      <button class="btn2" type="button" @click="document.getElementById('ra-{{ r.code }}').showModal()">{% translate "اعتماد…" %}</button>
+                      <button class="btn2 ghost danger-ghost" type="button" @click="document.getElementById('rr-{{ r.code }}').showModal()">{% translate "رفض…" %}</button>
+                      <dialog class="modal confirm-modal" id="ra-{{ r.code }}" dir="rtl" aria-labelledby="ra-{{ r.code }}-t">
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="approve">
+                          <input type="hidden" name="code" value="{{ r.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+                            <h2 id="ra-{{ r.code }}-t">{% translate "اعتماد الاسترداد" %} <span class="num" dir="ltr">{{ r.code }}</span></h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ r.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <dl class="dl">
+                              <dt>{% translate "المشارك" %}</dt><dd>{{ r.participant_name }} — <span class="num" dir="ltr">{{ r.enrollment_code }}</span></dd>
+                              <dt>{% translate "النوع" %}</dt><dd>{{ r.refund_type_display }}</dd>
+                              <dt>{% translate "طلبه" %}</dt><dd>{{ r.requested_by }} · <span class="num" dir="ltr">{{ r.requested_at|date:"Y/m/d" }}</span></dd>
+                              <dt>{% translate "السبب" %}</dt><dd>{{ r.reason_ar }}</dd>
+                              <dt>{% translate "الكتاب الرسمي" %}</dt><dd><span class="num" dir="ltr">{{ r.official_letter_ref }}</span>{% if r.official_letter_date %} · <span class="num" dir="ltr">{{ r.official_letter_date|date:"Y/m/d" }}</span>{% endif %}</dd>
+                              <dt>{% translate "موافقة الرئيس" %}</dt><dd><span class="num" dir="ltr">{{ r.president_approval_ref }}</span>{% if r.president_approval_date %} · <span class="num" dir="ltr">{{ r.president_approval_date|date:"Y/m/d" }}</span>{% endif %}</dd>
+                            </dl>
+                            <p class="hint">{% translate "الاعتماد لا يُخرج مالاً؛ التنفيذ خطوة الموظف المالي بعده (§8). راجع الكتاب والموافقة قبل الاعتماد." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('ra-{{ r.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                      <dialog class="modal confirm-modal" id="rr-{{ r.code }}" dir="rtl" aria-labelledby="rr-{{ r.code }}-t"{% if posted_action == "reject" and posted_code == r.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="reject">
+                          <input type="hidden" name="code" value="{{ r.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+                            <h2 id="rr-{{ r.code }}-t">{% translate "رفض الاسترداد" %} <span class="num" dir="ltr">{{ r.code }}</span></h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ r.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <div class="fld">
+                              <label for="rr-{{ r.code }}-reason">{% translate "سبب الرفض" %}<span class="req" aria-hidden="true">*</span></label>
+                              <textarea id="rr-{{ r.code }}-reason" name="reason_ar" rows="2" required></textarea>
+                            </div>
+                            <p class="hint">{% translate "الرفض قرار يُسجَّل باسمك وسببه، ويبقى الطلب في السجل مرفوضاً." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "تسجيل الرفض" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('rr-{{ r.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                    {% elif r.status == "REQUESTED" and can_approve %}
+                      <small class="muted">{% translate "طلبته أنت؛ يعتمده غيرك (D-18)" %}</small>
+                    {% elif r.status == "APPROVED" and can_execute %}
+                      <button class="btn2 primary" type="button" @click="document.getElementById('rx-{{ r.code }}').showModal()">{% translate "تنفيذ…" %}</button>
+                      <dialog class="modal confirm-modal" id="rx-{{ r.code }}" dir="rtl" aria-labelledby="rx-{{ r.code }}-t">
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="execute">
+                          <input type="hidden" name="code" value="{{ r.code }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+                            <h2 id="rx-{{ r.code }}-t">{% translate "تنفيذ الاسترداد" %} <span class="num" dir="ltr">{{ r.code }}</span></h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ r.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <dl class="dl">
+                              <dt>{% translate "يُصرف لـ" %}</dt><dd>{{ r.participant_name }} — <span class="num" dir="ltr">{{ r.enrollment_code }}</span></dd>
+                              <dt>{% translate "اعتمده" %}</dt><dd>{{ r.approved_by }} · <span class="num" dir="ltr">{{ r.approved_at|date:"Y/m/d" }}</span></dd>
+                              <dt>{% translate "تاريخ التنفيذ" %}</dt><dd><span class="num" dir="ltr">{{ today|date:"Y/m/d" }}</span> <span class="muted">({% translate "اليوم" %})</span></dd>
+                            </dl>
+                            <p class="hint">{% translate "التنفيذ يعكس التخصيصات ويُخرج المال من حساب التسجيل، وإن كان الشريك قد قُبض له عن هذا التسجيل يُسجَّل ما يعود منه حسماً من مطالبته اللاحقة (BR-035). لا يُعاد بعده." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "تنفيذ الصرف" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('rx-{{ r.code }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="7" class="empty">
+                  <span class="empty-title">{% if is_filtered %}{% translate "لا استردادات تطابق التصفية" %}{% else %}{% translate "لا استردادات" %}{% endif %}</span>
+                  <span class="empty-body">{% if is_filtered %}{% translate "وسّع البحث أو ألغِ التصفية." %}{% else %}{% translate "الاسترداد استثناء يُطلب بكتاب رسمي وموافقة رئيس الجامعة معاً، ثم يعتمده غير طالبه، ثم يُنفَّذ (BR-034 · §5.3)." %}{% endif %}</span>
+                  {% if is_filtered %}<a class="btn2 ghost empty-act" href="{% url 'billing:refunds' %}">{% translate "كل الحركات" %}</a>{% endif %}
+                </td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card2-body">
+          <p class="hint">{% translate "الأصل لا استرداد. الاستثناء بكتاب رسمي وموافقة رئيس الجامعة معاً، ويُنفَّذ بعد الاعتماد من شخص آخر. وما سبق أن قُبض للشريك يعود بالحسم من مطالباته اللاحقة، لا بمطالبة نقدية." %}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-wallet"/></svg></span>
+        <h2>{% translate "ردّ الأرصدة الدائنة" %}</h2>
+        <div class="acts">
+          <span class="count">{{ credit_returns|length|ar_count:"حركة واحدة|حركتان|حركات|حركة" }}</span>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl rf-tbl">
+          <thead>
+            <tr>
+              <th>{% translate "الرمز" %}</th>
+              <th>{% translate "التسجيل" %}</th>
+              <th>{% translate "المشارك" %}</th>
+              <th class="num">{% translate "المبلغ" %}</th>
+              <th class="num">{% translate "التاريخ" %}</th>
+              <th>{% translate "السبب" %}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in credit_returns %}
+              <tr>
+                <td class="code-cell"><strong class="num" dir="ltr" translate="no">{{ c.code }}</strong><small class="muted sub-line">{{ c.returned_by }}</small></td>
+                <td class="code-cell"><a class="row-link num" dir="ltr" translate="no" href="{% url 'operations:account' c.enrollment_code %}">{{ c.enrollment_code }}</a></td>
+                <td class="who-cell">{{ c.participant_name }}<small class="muted num sub-line" dir="ltr">{{ c.participant_number }}</small></td>
+                <td class="num amt">{{ c.amount }}</td>
+                <td class="num"><span dir="ltr">{{ c.returned_on|date:"Y/m/d" }}</span></td>
+                <td class="rf-reason">{{ c.reason_ar }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="6" class="empty">
+                <span class="empty-title">{% translate "لا حركات ردّ رصيد" %}</span>
+                <span class="empty-body">{% translate "الرصيد الدائن ينشأ حين يزيد المقبوض عن المستحق — بعد نقل إلى دورة أقل رسماً مثلاً — ويُردّ حركةً مستقلة عند براءة الذمة (BR-071 · BR-064)." %}</span>
+              </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card2-body">
+        <p class="hint">{% translate "ردّ الرصيد الدائن ليس استرداداً: لا يعكس إيراداً ولا يحتاج موافقة رئيس الجامعة، ولذلك له جدوله ونموذجه لا نموذج الاسترداد." %}</p>
+      </div>
     </div>
   </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "الرمز" %}</th>
-          <th>{% translate "التسجيل" %}</th>
-          <th>{% translate "المشارك" %}</th>
-          <th class="num">{% translate "المبلغ" %}</th>
-          <th>{% translate "الكتاب" %}</th>
-          <th>{% translate "موافقة الرئيس" %}</th>
-          <th class="num">{% translate "استرجاع الشريك" %}</th>
-          <th>{% translate "الحالة" %}</th>
-          <th aria-label="{% translate 'الإجراء' %}"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in refunds %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ r.code }}</strong></td>
-            <td dir="ltr" translate="no">{{ r.enrollment_code }}</td>
-            <td>{{ r.participant_name }}</td>
-            <td class="num">{{ r.amount }}</td>
-            <td dir="ltr" translate="no">{{ r.official_letter_ref|default:"—" }}</td>
-            <td dir="ltr" translate="no">{{ r.president_approval_ref|default:"—" }}</td>
-            <td class="num">{{ r.partner_recovery_amount }}</td>
-            <td><span class="chip {{ r.status|status_tone }} dot">{{ r.status_display }}</span></td>
-            <td class="acts">
-              {% if r.status == "REQUESTED" and can_approve and r.requested_by_id != current_user_id %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="approve">
-                  <input type="hidden" name="code" value="{{ r.code }}">
-                  <button class="btn2" type="submit">{% translate "اعتماد" %}</button>
-                </form>
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="reject">
-                  <input type="hidden" name="code" value="{{ r.code }}">
-                  <input name="reason_ar" aria-label="{% translate 'سبب الرفض' %}" placeholder="{% translate 'سبب الرفض…' %}">
-                  <button class="btn2" type="submit">{% translate "رفض" %}</button>
-                </form>
-              {% elif r.status == "APPROVED" and can_execute %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="execute">
-                  <input type="hidden" name="code" value="{{ r.code }}">
-                  <button class="btn2 primary" type="submit">{% translate "تنفيذ" %}</button>
-                </form>
+
+  <div class="dash-side">
+    {% if can_create %}
+      <div class="card2 next-card tone-danger rf-side" id="request" x-data="{ tab: '{{ tab }}' }">
+        <div class="card2-head rf-tabs" role="tablist">
+          <button type="button" class="rf-tab" :class="{ 'is-on': tab === 'refund' }" role="tab" :aria-selected="tab === 'refund'" @click="tab = 'refund'">{% translate "طلب استرداد" %}</button>
+          <button type="button" class="rf-tab" :class="{ 'is-on': tab === 'credit' }" role="tab" :aria-selected="tab === 'credit'" @click="tab = 'credit'">{% translate "ردّ رصيد دائن" %}</button>
+        </div>
+
+        {# ---- طلب استرداد (§5.3) ---- #}
+        <div class="card2-body" x-show="tab === 'refund'"
+             x-data="{ en: '{{ refund_form.enrollment_code.value|default:''|escapejs }}', kind: '{{ refund_form.refund_type.value|default:'FULL'|escapejs }}', amt: '{{ refund_form.amount.value|default:''|escapejs }}',
+                       paid: 0, flight: 0, ppct: 0, name: '', prog: '', confirmed: false, letter: '', ldate: '', pref: '', pdate: '',
+                       num(v) { return Number(String(v).replace(',', '.')) || 0 },
+                       pick(el) { const o = el.options[el.selectedIndex]; const d = o ? o.dataset : {}; this.en = el.value; this.paid = this.num(d.paid); this.flight = this.num(d.flight); this.ppct = this.num(d.ppct); this.name = d.name || ''; this.prog = d.prog || ''; if (this.kind === 'FULL') this.amt = this.paid ? this.paid.toFixed(3) : '' },
+                       setKind(k) { this.kind = k; if (k === 'FULL') this.amt = this.paid ? this.paid.toFixed(3) : '' },
+                       a() { return this.num(this.amt) },
+                       room() { return Math.max(this.paid - this.flight, 0) },
+                       over() { return this.a() > this.room() + 0.0005 },
+                       rest() { return this.room() - this.a() },
+                       partner() { return Math.round(this.a() * this.ppct / 100 * 1000) / 1000 },
+                       ready() { return this.en && this.a() > 0 && !this.over() },
+                       fmt(v) { return Number(v).toFixed(3) } }"
+             x-init="pick($refs.sel)">
+          <form method="post" id="refund-form" x-ref="form" @submit="if (!confirmed) { $event.preventDefault(); $refs.confirm.showModal() }">
+{% csrf_token %}
+            <input type="hidden" name="action" value="request">
+            {% for e in refund_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+
+            <div class="step-lbl"><span class="n">1</span>{% translate "التسجيل" %}</div>
+            <div class="fld{% if refund_form.enrollment_code.errors %} has-error{% endif %}">
+              <label for="id_enrollment_code">{{ refund_form.enrollment_code.label }}<span class="req" aria-hidden="true">*</span></label>
+              <select id="id_enrollment_code" name="enrollment_code" required x-ref="sel" @change="pick($el)">
+                <option value="" data-paid="0">{% translate "— اختر تسجيلاً —" %}</option>
+                {% for r in refundable %}
+                  <option value="{{ r.code }}"{% if refund_form.enrollment_code.value == r.code %} selected{% endif %}
+                          data-paid="{{ r.paid|unlocalize }}" data-flight="{{ r.in_flight|unlocalize }}" data-ppct="{{ r.partner_pct|unlocalize }}"
+                          data-name="{{ r.participant_name }}" data-prog="{{ r.program_name }}">{{ r.code }} — {{ r.participant_name }} · {{ r.program_name }} ({{ r.status_display }})</option>
+                {% endfor %}
+              </select>
+              {% for e in refund_form.enrollment_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              {% if not refundable %}
+                <div class="help">{% translate "لا تسجيل قُبض عليه مال يمكن ردّه." %}</div>
+              {% else %}
+                <div class="help live" x-cloak>
+                  <span x-show="en">{% translate "المقبوض فعلياً" %} <b class="num" x-text="fmt(paid)"></b><span x-show="flight > 0">{% translate "؛ قيد الاسترداد" %} <b class="num" x-text="fmt(flight)"></b></span><span x-show="ppct > 0"> · {% translate "قُبض للشريك عن هذا التسجيل — يعود منه" %} <b class="num" x-text="ppct"></b>%</span></span>
+                  <span x-show="!en">{% translate "تُعرض التسجيلات التي قُبض عليها مال وحدها." %}</span>
+                </div>
               {% endif %}
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="9" class="empty">
-            <span class="empty-title">{% translate "لا استردادات" %}</span>
-            <span class="empty-body">{% translate "الاسترداد استثناء يُطلب بكتاب رسمي وموافقة رئيس الجامعة معاً، ثم يعتمده غير طالبه، ثم يُنفَّذ (BR-034 · §5.3)." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card2-body">
-    <p class="hint">{% translate "الأصل لا استرداد. الاستثناء بكتاب رسمي وموافقة رئيس الجامعة معاً، ويُنفَّذ بعد الاعتماد من شخص آخر. وما سبق أن قُبض للشريك يعود بالحسم من مطالباته اللاحقة، لا بمطالبة نقدية." %}</p>
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">2</span>{% translate "النوع والمبلغ" %}</div>
+            <div class="fld{% if refund_form.refund_type.errors %} has-error{% endif %}">
+              <span class="lbl">{{ refund_form.refund_type.label }}<span class="req" aria-hidden="true">*</span></span>
+              <div class="seg-cards two" role="radiogroup" aria-label="{{ refund_form.refund_type.label }}">
+                <label class="seg-card tone-danger" :class="{ 'is-on': kind === 'FULL' }">
+                  <input type="radio" name="refund_type" value="FULL" class="seg-radio" :checked="kind === 'FULL'" @change="setKind('FULL')">
+                  <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+                  <span class="t">{% translate "كامل" %}</span>
+                </label>
+                <label class="seg-card tone-amber" :class="{ 'is-on': kind === 'PARTIAL' }">
+                  <input type="radio" name="refund_type" value="PARTIAL" class="seg-radio" :checked="kind === 'PARTIAL'" @change="setKind('PARTIAL')">
+                  <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+                  <span class="t">{% translate "جزئي" %}</span>
+                </label>
+              </div>
+            </div>
+            <div class="fld{% if refund_form.amount.errors %} has-error{% endif %}">
+              <label for="id_amount">{{ refund_form.amount.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="number" step="0.001" min="0" inputmode="decimal" id="id_amount" name="amount" dir="ltr" x-model="amt" :readonly="kind === 'FULL'" :required="kind === 'PARTIAL'" value="{{ refund_form.amount.value|default:'' }}" placeholder="0.000">
+              {% for e in refund_form.amount.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              <div class="help live" x-cloak>
+                <span x-show="kind === 'FULL'">{% translate "الاسترداد الكامل = كل ما قُبض؛ المبلغ لا يُكتب." %}</span>
+                <span x-show="kind === 'PARTIAL' && en && a() > 0 && !over()">{% translate "يبقى في حساب التسجيل" %} <b class="num" x-text="fmt(rest())"></b></span>
+                <span class="is-danger" x-show="over()">{% translate "أكثر من المقبوض الممكن ردّه" %} (<b class="num" x-text="fmt(room())"></b>) — {% translate "سيرفضه الحفظ (BR-034)." %}</span>
+              </div>
+              <div class="hint" x-cloak x-show="ppct > 0 && a() > 0">{% translate "يعود من الشريك حسماً من مطالبته اللاحقة:" %} <b class="num" x-text="fmt(partner())"></b></div>
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">3</span>{% translate "السبب" %}</div>
+            <div class="fld{% if refund_form.reason_ar.errors %} has-error{% endif %}">
+              <label for="id_reason_ar">{{ refund_form.reason_ar.label }}<span class="req" aria-hidden="true">*</span></label>
+              <textarea id="id_reason_ar" name="reason_ar" rows="2" required placeholder="{% translate 'مثال: لم يكتمل العدد وأُلغيت الدفعة' %}">{{ refund_form.reason_ar.value|default:'' }}</textarea>
+              {% for e in refund_form.reason_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">4</span>{% translate "المستندان الخارجيان" %}</div>
+            <div class="grid2">
+              <div class="fld{% if refund_form.official_letter_ref.errors %} has-error{% endif %}">
+                <label for="id_official_letter_ref">{{ refund_form.official_letter_ref.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="text" id="id_official_letter_ref" name="official_letter_ref" maxlength="64" required dir="ltr" autocomplete="off" x-model="letter" value="{{ refund_form.official_letter_ref.value|default:'' }}">
+                {% for e in refund_form.official_letter_ref.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+              <div class="fld{% if refund_form.official_letter_date.errors %} has-error{% endif %}">
+                <label for="id_official_letter_date">{{ refund_form.official_letter_date.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="date" id="id_official_letter_date" name="official_letter_date" required x-model="ldate" value="{{ refund_form.official_letter_date.value|date:'Y-m-d'|default:refund_form.official_letter_date.value|default:'' }}">
+                {% for e in refund_form.official_letter_date.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+              <div class="fld{% if refund_form.president_approval_ref.errors %} has-error{% endif %}">
+                <label for="id_president_approval_ref">{{ refund_form.president_approval_ref.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="text" id="id_president_approval_ref" name="president_approval_ref" maxlength="64" required dir="ltr" autocomplete="off" x-model="pref" value="{{ refund_form.president_approval_ref.value|default:'' }}">
+                {% for e in refund_form.president_approval_ref.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+              <div class="fld{% if refund_form.president_approval_date.errors %} has-error{% endif %}">
+                <label for="id_president_approval_date">{{ refund_form.president_approval_date.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="date" id="id_president_approval_date" name="president_approval_date" required x-model="pdate" value="{{ refund_form.president_approval_date.value|date:'Y-m-d'|default:refund_form.president_approval_date.value|default:'' }}">
+                {% for e in refund_form.president_approval_date.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="help">{% translate "الاستثناء لا يقوم إلا بالاثنين معاً: كتاب رسمي وموافقة رئيس الجامعة (BR-034 · §5.3)." %}</div>
+
+            <div class="form-acts">
+              <button class="btn2 primary" type="submit" :disabled="!ready()">{% translate "تسجيل الطلب" %}</button>
+            </div>
+          </form>
+
+          <dialog class="modal confirm-modal" x-ref="confirm" dir="rtl" aria-labelledby="rf-confirm-t" @close="confirmed = false">
+            <div class="modal-head">
+              <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-undo"/></svg></span>
+              <h2 id="rf-confirm-t">{% translate "تأكيد طلب الاسترداد" %}</h2>
+            </div>
+            <div class="modal-body">
+              <div class="confirm-amt"><b class="num" x-text="fmt(a())"></b> <small>{% translate "د.أ" %}</small></div>
+              <dl class="dl">
+                <dt>{% translate "التسجيل" %}</dt><dd><span class="num" dir="ltr" x-text="en"></span> — <span x-text="name"></span> · <span x-text="prog"></span></dd>
+                <dt>{% translate "النوع" %}</dt><dd><span x-text="kind === 'FULL' ? '{% translate "كامل" %}' : '{% translate "جزئي" %}'"></span> · {% translate "من مقبوض" %} <span class="num" x-text="fmt(paid)"></span></dd>
+                <dt>{% translate "الكتاب الرسمي" %}</dt><dd><span class="num" dir="ltr" x-text="letter"></span> · <span class="num" dir="ltr" x-text="ldate"></span></dd>
+                <dt>{% translate "موافقة الرئيس" %}</dt><dd><span class="num" dir="ltr" x-text="pref"></span> · <span class="num" dir="ltr" x-text="pdate"></span></dd>
+              </dl>
+              <p class="hint">{% translate "الطلب لا يُخرج مالاً: يعتمده مدير المركز أولاً ثم يُنفَّذ من هنا. الرمز يصدر آلياً." %}</p>
+            </div>
+            <div class="modal-acts">
+              <button class="btn2 primary" type="button" @click="confirmed = true; $refs.confirm.close(); $refs.form.requestSubmit()">{% translate "تسجيل الطلب" %}</button>
+              <button class="btn2 ghost" type="button" @click="$refs.confirm.close()">{% translate "رجوع" %}</button>
+            </div>
+          </dialog>
+        </div>
+
+        {# ---- ردّ رصيد دائن (BR-071) ---- #}
+        <div class="card2-body" x-show="tab === 'credit'" x-cloak
+             x-data="{ en: '{{ credit_form.enrollment_code.value|default:''|escapejs }}', credit: 0, name: '', prog: '', confirmed: false, why: '', on: '{{ credit_form.returned_on.value|date:'Y-m-d'|default:credit_form.returned_on.value|default:''|escapejs }}',
+                       pick(el) { const o = el.options[el.selectedIndex]; const d = o ? o.dataset : {}; this.en = el.value; this.credit = Number(d.credit) || 0; this.name = d.name || ''; this.prog = d.prog || '' },
+                       fmt(v) { return Number(v).toFixed(3) } }"
+             x-init="pick($refs.csel)">
+          <form method="post" id="credit-form" x-ref="cform" @submit="if (!confirmed) { $event.preventDefault(); $refs.cconfirm.showModal() }">
+{% csrf_token %}
+            <input type="hidden" name="action" value="return-credit">
+            {% for e in credit_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+
+            <div class="step-lbl"><span class="n">1</span>{% translate "التسجيل" %}</div>
+            <div class="fld{% if credit_form.enrollment_code.errors %} has-error{% endif %}">
+              <label for="id_c_enrollment_code">{{ credit_form.enrollment_code.label }}<span class="req" aria-hidden="true">*</span></label>
+              <select id="id_c_enrollment_code" name="enrollment_code" required x-ref="csel" @change="pick($el)">
+                <option value="" data-credit="0">{% translate "— اختر تسجيلاً —" %}</option>
+                {% for r in creditable %}
+                  <option value="{{ r.code }}"{% if credit_form.enrollment_code.value == r.code %} selected{% endif %} data-credit="{{ r.credit|unlocalize }}" data-name="{{ r.participant_name }}" data-prog="{{ r.program_name }}">{{ r.code }} — {{ r.participant_name }} · {{ r.program_name }} ({{ r.status_display }})</option>
+                {% endfor %}
+              </select>
+              {% for e in credit_form.enrollment_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              {% if not creditable %}
+                <div class="help">{% translate "لا تسجيل يحمل رصيداً دائناً الآن." %}</div>
+              {% else %}
+                <div class="help">{% translate "تُعرض التسجيلات التي لها رصيد دائن وحدها." %}</div>
+              {% endif %}
+            </div>
+            <div class="rf-credit-box" x-cloak x-show="en">
+              <span class="lbl">{% translate "الرصيد الدائن الذي سيُردّ كاملاً" %}</span>
+              <b class="num" x-text="fmt(credit)"></b> <small>{% translate "د.أ" %}</small>
+              <span class="foot">{% translate "الردّ كامل الرصيد دائماً حتى تُغلق براءة الذمة على صفر (BR-073)." %}</span>
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">2</span>{% translate "التاريخ والسبب" %}</div>
+            <div class="fld{% if credit_form.returned_on.errors %} has-error{% endif %}">
+              <label for="id_returned_on">{{ credit_form.returned_on.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="date" id="id_returned_on" name="returned_on" required x-model="on" value="{{ credit_form.returned_on.value|date:'Y-m-d'|default:credit_form.returned_on.value|default:'' }}">
+              {% for e in credit_form.returned_on.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="fld{% if credit_form.reason_ar.errors %} has-error{% endif %}">
+              <label for="id_c_reason_ar">{{ credit_form.reason_ar.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="id_c_reason_ar" name="reason_ar" maxlength="255" required x-model="why" value="{{ credit_form.reason_ar.value|default:'' }}" placeholder="{% translate 'مثال: فائض بعد النقل إلى دورة أقل رسماً' %}">
+              {% for e in credit_form.reason_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="form-acts">
+              <button class="btn2" type="submit" :disabled="!en || !why.trim()">{% translate "ردّ الرصيد" %}</button>
+            </div>
+          </form>
+
+          <dialog class="modal confirm-modal" x-ref="cconfirm" dir="rtl" aria-labelledby="cr-confirm-t" @close="confirmed = false">
+            <div class="modal-head">
+              <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-wallet"/></svg></span>
+              <h2 id="cr-confirm-t">{% translate "تأكيد ردّ الرصيد الدائن" %}</h2>
+            </div>
+            <div class="modal-body">
+              <div class="confirm-amt"><b class="num" x-text="fmt(credit)"></b> <small>{% translate "د.أ" %}</small></div>
+              <dl class="dl">
+                <dt>{% translate "التسجيل" %}</dt><dd><span class="num" dir="ltr" x-text="en"></span> — <span x-text="name"></span> · <span x-text="prog"></span></dd>
+                <dt>{% translate "التاريخ" %}</dt><dd><span class="num" dir="ltr" x-text="on"></span></dd>
+                <dt>{% translate "السبب" %}</dt><dd x-text="why"></dd>
+              </dl>
+              <p class="hint">{% translate "يُسجَّل خروج المال فوراً ويصبح رصيد التسجيل صفراً؛ لا يُعاد بعده. الرمز يصدر آلياً." %}</p>
+            </div>
+            <div class="modal-acts">
+              <button class="btn2 primary" type="button" @click="confirmed = true; $refs.cconfirm.close(); $refs.cform.requestSubmit()">{% translate "ردّ الرصيد" %}</button>
+              <button class="btn2 ghost" type="button" @click="$refs.cconfirm.close()">{% translate "رجوع" %}</button>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    {% else %}
+      <div class="card2">
+        <div class="card2-head"><h2>{% translate "طلب استرداد · ردّ رصيد" %}</h2></div>
+        <div class="card2-body">
+          <p class="hint">{% translate "الطلب والتنفيذ للموظف المالي، والاعتماد أو الرفض لمدير المركز (§3.4/20)." %}</p>
+        </div>
+      </div>
+    {% endif %}
   </div>
 </div>
-
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "ردّ الأرصدة الدائنة" %}</h2>
-    <div class="acts">
-      <span class="count">{% blocktranslate count n=credit_returns|length %}حركة واحدة{% plural %}{{ n }} حركات{% endblocktranslate %}</span>
-    </div>
-  </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "الرمز" %}</th>
-          <th>{% translate "التسجيل" %}</th>
-          <th>{% translate "المشارك" %}</th>
-          <th class="num">{% translate "المبلغ" %}</th>
-          <th class="num">{% translate "التاريخ" %}</th>
-          <th>{% translate "السبب" %}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in credit_returns %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
-            <td dir="ltr" translate="no">{{ c.enrollment_code }}</td>
-            <td>{{ c.participant_name }}</td>
-            <td class="num">{{ c.amount }}</td>
-            <td class="num"><span dir="ltr">{{ c.returned_on|date:"Y/m/d" }}</span></td>
-            <td>{{ c.reason_ar }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="6" class="empty">
-            <span class="empty-title">{% translate "لا حركات ردّ رصيد" %}</span>
-            <span class="empty-body">{% translate "الرصيد الدائن ينشأ حين يزيد المقبوض عن المستحق — بعد نقل إلى دورة أقل رسماً مثلاً — ويُردّ حركةً مستقلة عند براءة الذمة (BR-071 · BR-064)." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card2-body">
-    <p class="hint">{% translate "ردّ الرصيد الدائن ليس استرداداً: لا يعكس إيراداً ولا يحتاج موافقة رئيس الجامعة، ولذلك له جدوله ونموذجه لا نموذج الاسترداد." %}</p>
-  </div>
-</div>
-
-{% if can_create %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "طلب استرداد" %}</h2></div>
-    <div class="card2-body">
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="request">
-        {% include "partials/_form.html" with form=refund_form %}
-        <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "تسجيل الطلب" %}</button>
-        </div>
-      </form>
-    </div>
-  </div>
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "ردّ رصيد دائن" %}</h2></div>
-    <div class="card2-body">
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="return-credit">
-        {% include "partials/_form.html" with form=credit_form %}
-        <div class="form-acts">
-          <button class="btn2" type="submit">{% translate "ردّ الرصيد" %}</button>
-        </div>
-      </form>
-    </div>
-  </div>
-{% endif %}
 {% endblock %}

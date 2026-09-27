@@ -1,0 +1,13 @@
+{% load i18n %}
+{% comment %}
+  حالة الفترة المالية لتاريخ الصرف المكتوب — تُرسم داخل نموذج القيد فور تغيير
+  التاريخ (htmx): مفتوحة فيمضي القيد، أو مقفلة فيُقال قبل الحفظ لا بعده (D-23).
+{% endcomment %}
+<div id="period-check" data-open="{% if state.open %}1{% else %}0{% endif %}">
+  {% if not on %}
+  {% elif state.open %}
+    <span class="hint ok-line">✓ {% translate "الفترة المالية لهذا التاريخ مفتوحة" %}{% if state.period %} — {{ state.period }}{% endif %}.</span>
+  {% else %}
+    <span class="err">{{ state.label }}</span>
+  {% endif %}
+</div>

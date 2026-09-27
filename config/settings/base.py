@@ -118,6 +118,9 @@ TEMPLATES = [
                 # A context processor rather than a per-view context key so
                 # that no view can forget it and render a page with no way out.
                 "apps.people.nav.navigation",
+                # هوية المؤسسة: الشعار يظهر في كل صفحة — وفي صفحة الدخول
+                # وصفحات الخطأ التي لا view لها يكتب مفتاحاً في سياقها.
+                "apps.core.context_processors.branding",
             ],
         },
     },

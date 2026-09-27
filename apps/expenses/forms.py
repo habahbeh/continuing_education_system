@@ -15,9 +15,8 @@ from django.utils.translation import gettext_lazy as _
 
 
 class ExpenseForm(forms.Form):
-    """§9.7 — one outgoing payment by the centre."""
+    """§9.7 — one outgoing payment by the centre. The code is the system's sequence."""
 
-    code = forms.CharField(label=_("رمز القيد"), max_length=32)
     category = forms.ChoiceField(label=_("التصنيف"), choices=[])
     amount = forms.DecimalField(label=_("المبلغ"), max_digits=12, decimal_places=3, min_value=0)
     incurred_on = forms.DateField(label=_("تاريخ الصرف"), widget=forms.DateInput({"type": "date"}))

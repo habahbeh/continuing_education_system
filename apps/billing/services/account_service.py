@@ -71,6 +71,92 @@ class AccountState:
         return self.balance < ZERO
 
 
+def get_account_states(enrollments: list[Any]) -> dict[int, AccountState]:
+    """
+    ``get_account_state`` for many enrolments at once — the SAME nine terms,
+    each summed once for the whole set and grouped by enrolment, instead of
+    once per enrolment. A list screen of two hundred rows used to pay two
+    thousand queries here; it now pays nine whatever its length.
+
+    Every filter below mirrors its single-enrolment twin line for line, and a
+    test holds the two equal field by field. Change one, change both.
+    """
+    from apps.billing.models import (
+        ChargeLine,
+        DepositForfeiture,
+        DepositReturn,
+        Discount,
+        OpeningBalance,
+        OpeningBalanceDirection,
+        OpeningBalanceStatus,
+    )
+    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
+
+    ids = [e.pk for e in enrollments]
+    if not ids:
+        return {}
+
+    def grouped(queryset: Any, field: str) -> dict[int, Decimal]:
+        rows = queryset.values("enrollment_id").annotate(total=Sum(field))
+        return {row["enrollment_id"]: row["total"] or ZERO for row in rows}
+
+    live_lines = ChargeLine.objects.filter(enrollment_id__in=ids, voided=False)
+    live_allocations = PaymentAllocation.objects.filter(
+        enrollment_id__in=ids, receipt__status=ReceiptStatus.ISSUED
+    )
+
+    due = grouped(live_lines, "gross_amount")
+    discount = grouped(Discount.objects.filter(enrollment_id__in=ids), "amount")
+    paid = grouped(live_allocations, "amount")
+    opening_credit = grouped(
+        OpeningBalance.objects.filter(
+            enrollment_id__in=ids,
+            direction=OpeningBalanceDirection.CREDIT,
+            status=OpeningBalanceStatus.APPLIED,
+        ),
+        "amount",
+    )
+    revenue = grouped(live_lines.filter(is_revenue=True), "net_amount")
+    deposits = grouped(live_lines.filter(charge_type="DEPOSIT"), "gross_amount")
+    returned = grouped(DepositReturn.objects.filter(enrollment_id__in=ids), "amount")
+    forfeited = grouped(DepositForfeiture.objects.filter(enrollment_id__in=ids), "amount")
+    unallocated = grouped(live_allocations.filter(charge_line__isnull=True), "amount")
+
+    # BR-093 — one pass over every shareable allocation in the set.
+    partner_base: dict[int, Decimal] = {}
+    shareable = live_allocations.filter(
+        charge_line__is_partner_shareable=True, charge_line__isnull=False
+    ).select_related("charge_line")
+    for allocation in shareable:
+        line = allocation.charge_line
+        if line is None or line.gross_amount == ZERO:
+            continue
+        partner_base[allocation.enrollment_id] = partner_base.get(
+            allocation.enrollment_id, ZERO
+        ) + allocation.amount * (line.net_amount / line.gross_amount)
+
+    states: dict[int, AccountState] = {}
+    for pk in ids:
+        total_due = due.get(pk, ZERO)
+        total_discount = discount.get(pk, ZERO)
+        total_paid = paid.get(pk, ZERO)
+        credit = opening_credit.get(pk, ZERO)
+        states[pk] = AccountState(
+            total_due=total_due,
+            total_discount=total_discount,
+            total_paid=total_paid,
+            balance=total_due - total_discount - total_paid - credit,
+            partner_base=partner_base.get(pk, ZERO).quantize(Decimal("0.001")),
+            revenue=revenue.get(pk, ZERO),
+            deposit_liability=deposits.get(pk, ZERO)
+            - returned.get(pk, ZERO)
+            - forfeited.get(pk, ZERO),
+            unallocated_credit=unallocated.get(pk, ZERO),
+            opening_credit_applied=credit,
+        )
+    return states
+
+
 def _sum(queryset: Any, field: str) -> Decimal:
     return queryset.aggregate(total=Sum(field))["total"] or ZERO
 
@@ -184,6 +270,12 @@ def outstanding_for_line(charge_line: Any) -> Decimal:
     return charge_line.gross_amount - allocated
 
 
+def _pending_void_receipt(enrollment: Any) -> str:
+    from apps.cashbox.services import payment_service
+
+    return payment_service.pending_void_for(enrollment)
+
+
 def account_statement(*, actor: Any, enrollment: Any, request: Any = None) -> dict[str, Any]:
     """
     The participant's financial statement — §9 report 5, as a screen.
@@ -289,6 +381,7 @@ def account_statement(*, actor: Any, enrollment: Any, request: Any = None) -> di
         "status": enrollment.status,
         "status_display": enrollment.get_status_display(),
         "state": state,
+        "pending_void_receipt": _pending_void_receipt(enrollment),
         "charges": charges,
         "payments": payments,
         "discounts": discounts,
@@ -302,5 +395,6 @@ __all__ = [
     "AccountState",
     "account_statement",
     "get_account_state",
+    "get_account_states",
     "outstanding_for_line",
 ]

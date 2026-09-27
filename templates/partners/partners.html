@@ -1,62 +1,134 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
   سجل الشركاء المتعاقدين. العرض يقبل GET وحده: لا فعل على هذه الشاشة سوى
   رابطين — «شريك جديد» بحارسه CREATE على §3.5/23، و«عرض» على كل صف وقد مرّ
-  قارئه من بوّابة الشاشة ليصل إليها. فلا نموذج POST هنا ولا بطاقة CSRF.
+  قارئه من بوّابة الشاشة ليصل إليها. فلا نموذج POST هنا ولا بطاقة CSRF؛
+  ونموذج البحث نموذج GET كما كان.
 
-  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا مرشّح ولا حارس، ولا عمود بدّل موضعه،
-  ولا معنى تعاقدياً أو مالياً مُسّ — الصفّ يعرض ما تعطيه `list_partners` كما
-  هو، وعدّ الاتفاقيات من الخدمة لا من القالب.
+  الصفّ يعرض ما تعطيه `list_partners` كما هو، وعدّ الاتفاقيات من الخدمة لا من
+  القالب — ومن الخدمة أيضاً صار يأتي محسوباً في استعلام واحد لا استعلاماً لكل
+  صفّ.
+
+  البحث فوريّ كما في سجلّي المشاركين والسندات: `#pt2-results` هو ما يُستبدل،
+  والعدّاد و«إلغاء التصفية» يُستبدلان خارج الهدف (OOB) لأنهما في الشريط لا في
+  النتائج، وما يختفي لا يُستبدل — فغلافاهما ثابتان لا يختفيان.
+
+  و`submit` في `hx-trigger` لأن الكتابة وEnter فعلٌ واحد لا فعلان: بدونه يترك
+  htmx الإرسالَ الأصليَّ يمرّ، فتُعاد الصفحة كاملةً ويُكتب في العنوان
+  `?q=…&type=&status=` — المعاملات الفارغة نفسها التي يحذفها `config-request`
+  في المسار الآخر.
+
+  والعدّاد `aria-live="polite"`: الجدول يتبدّل تحت قارئ الشاشة بلا صوت، وعددُ
+  ما بقي هو الجملة التي تصف ما جرى. ورابط العدّ يحمل `aria-label` باسم الشريك،
+  فاسمه المقروء آلياً كان رقماً عارياً — و`title` ليس اسماً موثوقاً ولا يظهر
+  باللمس.
+
+  والحالة الفارغة حالتان لا واحدة: سجلٌّ لم يبدأ بعد، وبحثٌ لم يطابق. النصّ
+  الذي يقول «لا شركاء مسجّلون بعد» لمن أخطأ في كتابة رمز يخبره أن سجلّه ضاع،
+  و«شريك جديد» ليس جواب بحثٍ لم يطابق — الجواب هو إلغاء التصفية.
+
+  عدد الاتفاقيات رابطٌ إلى سجلّ الاتفاقيات مرشَّحاً على الشريك: المرشّح
+  `?partner=` كان مقبولاً في العرض منذ البداية ولا شاشة ترسله.
+
+  ومعه شريحةٌ تقول كم منها **نافذ اليوم**. §3.4 من متطلبات العميل تجعل «فترة
+  السريان من/إلى» بنداً من بنود العقد، و§5.4 تعلّق الاستحقاق على شروط — فرقمٌ
+  واحد يُقال لعقدٍ سارٍ ولمسودةٍ لم تُعتمد ولعقدٍ انقضت مدّته يطمس بنداً عدّده
+  العميل بنفسه. والعدّ الثاني يأتي من `annotate` مشروط في الخدمة، فيبقى
+  استعلاماً واحداً مهما كبر السجل.
+
+  و«النوع» و«السجل» ينزلان تحت الاسم دون 640px: كانا يدفعان عمود الإجراء —
+  وفيه «عرض» — خلف تمرير أفقي (قيست ١٧٩px محجوبة عند 390، و«عرض» خارج الصندوق
+  المرئي)، وهي العلّة نفسها التي عالجها سجل المشاركين حين أنزل «المدينة»
+  و«المؤهل». لم يُحجب حقل: كلاهما يُقرأ في السطر الثاني وفي بطاقة الشريك.
 
   الجملة التي كانت في `.note info` نزلت إلى `.hint` تحت الجدول: الأزرق تنبيه،
-  وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5). وكانت تقع بين كتلة الإرشاد
-  وشريط البحث، فتفصل التعليم عن أداته بكتلة مؤطَّرة ثالثة.
+  وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5).
 
   عمود الإجراء كان بلا اسم، وسُمّي بـ `aria-label` لا بـ `.sr-only`: الأخير
   `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها
   أفقياً.
 
-  والعدّ يُحصى فوق الصفوف المرسومة لا فوق السجل كلّه، فالشريحة تصف ما على
-  الشاشة — و`.filterbar > a.btn2.primary ~ .count` مكانها المعرَّف سلفاً.
+  وفعل الإنشاء انتقل من الشريط إلى ترويسة الصفحة، حيث هو في شاشة الاتفاقيات
+  الشقيقة: شاشتا قسمٍ واحد لا تضعان الزرّ نفسه في موضعين.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "الأطراف المتعاقدة كما ترد في الاتفاقيات الموقّعة، وكم اتفاقية يحمل كلٌّ منها." %}</p>
   </div>
+  {% if can_create %}
+    <div class="acts">
+      <a class="btn2 primary" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>
+    </div>
+  {% endif %}
 </div>
 
-{% guided_help "partners" %}
 
-<form method="get" class="filterbar" role="search">
-  <div class="fld">
+<form method="get" class="filterbar pt2-filters" role="search" id="pt2-form"
+      hx-get="{% url 'partners:partners' %}" hx-target="#pt2-results" hx-select="#pt2-results" hx-swap="outerHTML"
+      hx-select-oob="#pt2-count,#pt2-clear"
+      hx-trigger="submit, input changed delay:350ms from:#f_q, change from:#f_status, change from:#f_type"
+      hx-push-url="true" hx-indicator="#pt2-busy"
+      hx-on::config-request="for (const k of ['q','type','status']) if (!event.detail.parameters[k]) delete event.detail.parameters[k]">
+  <div class="fld grow">
     <label for="f_q">{% translate "بحث" %}</label>
-    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'بالاسم أو الرمز…' %}" spellcheck="false" id="f_q">
+    <input type="search" name="q" value="{{ query }}" id="f_q"
+           placeholder="{% translate 'الاسم، الرمز، أو رقم السجل التجاري…' %}"
+           spellcheck="false" autocomplete="off">
+  </div>
+  <div class="fld">
+    <label for="f_type">{% translate "النوع" %}</label>
+    <select name="type" id="f_type">
+      <option value="">{% translate "كل الأنواع" %}</option>
+      {% for value, label in types %}
+        <option value="{{ value }}"{% if partner_type == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="fld">
+    <label for="f_status">{% translate "الحالة" %}</label>
+    <select name="status" id="f_status">
+      <option value="">{% translate "كل الحالات" %}</option>
+      {% for value, label in statuses %}
+        <option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
   </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if can_create %}
-    <a class="btn2 primary" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>
-  {% endif %}
-  <span class="count">{% blocktranslate count n=partners|length %}شريك واحد{% plural %}{{ n }} شركاء{% endblocktranslate %}</span>
+  <span class="busy" id="pt2-busy" aria-hidden="true"></span>
+  {# غلافان ثابتان لا يختفيان: البحث الفوري يستبدلهما خارج الهدف (OOB). #}
+  <span id="pt2-clear">{% if is_filtered %}<a class="btn2 ghost" href="{% url 'partners:partners' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}</span>
+  <span class="count" id="pt2-count" aria-live="polite">{{ page.total|ar_count:"شريك واحد|شريكان|شركاء|شريكاً" }}</span>
 </form>
 
+<div id="pt2-results">
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "الشركاء" %}</h2></div>
+  <div class="card2-head">
+    <span class="head-ico tone-brand" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-building"/></svg></span>
+    <h2>{% translate "الشركاء" %}</h2>
+    {% if is_filtered %}
+      <div class="acts">
+        {% if query %}<span class="chip">{% translate "بحث" %}: {{ query }}</span>{% endif %}
+        {% if type_label %}<span class="chip">{% translate "النوع" %}: {{ type_label }}</span>{% endif %}
+        {% if status_label %}<span class="chip">{% translate "الحالة" %}: {{ status_label }}</span>{% endif %}
+      </div>
+    {% endif %}
+  </div>
   <div class="tbl-wrap">
-    <table class="tbl">
+    <table class="tbl pt2-tbl">
       <thead>
         <tr>
           <th>{% translate "الرمز" %}</th>
           <th>{% translate "الاسم" %}</th>
-          <th>{% translate "النوع" %}</th>
-          <th>{% translate "السجل" %}</th>
+          <th class="col-sm-off">{% translate "النوع" %}</th>
+          <th class="col-sm-off">{% translate "السجل" %}</th>
           <th class="num">{% translate "الاتفاقيات" %}</th>
           <th>{% translate "الحالة" %}</th>
           <th aria-label="{% translate 'الإجراء' %}"></th>
@@ -66,10 +138,29 @@
         {% for p in partners %}
           <tr>
             <td dir="ltr" translate="no"><strong class="num">{{ p.code }}</strong></td>
-            <td>{{ p.name_ar }}</td>
-            <td>{{ p.partner_type_display }}</td>
-            <td dir="ltr" translate="no">{{ p.registry_number|default:"—" }}</td>
-            <td class="num">{{ p.agreement_count }}</td>
+            <td>
+              {{ p.name_ar }}
+              {# على الهاتف ينزل «النوع» و«السجل» إلى هنا بدل أن يدفعا عمود الإجراء خلف تمرير أفقي. #}
+              <span class="row-sub">{{ p.partner_type_display }} ·
+                {% translate "السجل" %}
+                <span dir="ltr" translate="no">{{ p.registry_number|default:"—" }}</span></span>
+            </td>
+            <td class="col-sm-off">{{ p.partner_type_display }}</td>
+            <td class="col-sm-off" dir="ltr" translate="no">{{ p.registry_number|default:"—" }}</td>
+            <td class="num">
+              {% if p.agreement_count %}
+                <a href="{% url 'partners:agreements' %}?partner={{ p.code|urlencode }}"
+                   title="{% translate 'اتفاقيات هذا الشريك' %}"
+                   aria-label="{% blocktranslate with name=p.name_ar %}اتفاقيات {{ name }}{% endblocktranslate %}">{{ p.agreement_count }}</a>
+                {% if p.live_agreement_count %}
+                  <span class="chip ok dot">{{ p.live_agreement_count }} {% translate "نافذة" %}</span>
+                {% else %}
+                  <span class="chip dot">{% translate "لا نافذة" %}</span>
+                {% endif %}
+              {% else %}
+                <span class="muted">{{ p.agreement_count }}</span>
+              {% endif %}
+            </td>
             <td><span class="chip {{ p.status|status_tone }} dot">{{ p.status_display }}</span></td>
             <td class="acts">
               <a class="btn2 ghost" href="{% url 'partners:partner-detail' p.code %}">{% translate "عرض" %}</a>
@@ -77,16 +168,33 @@
           </tr>
         {% empty %}
           <tr><td colspan="7" class="empty">
-            <span class="empty-title">{% translate "لا شركاء مسجّلون بعد" %}</span>
-            <span class="empty-body">{% translate "الشريك هو الطرف المتعاقد كما يرد في الاتفاقية. سجّله أولاً ثم سجّل اتفاقيته الموقّعة." %}</span>
-            {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>{% endif %}
+            {% if is_filtered %}
+              <span class="empty-title">{% translate "لا شريك يطابق التصفية" %}</span>
+              <span class="empty-body">{% translate "البحث يطابق الاسم والرمز ورقم السجل التجاري. جرّب جزءاً من الاسم، أو وسّع النوع والحالة إلى «الكل»." %}</span>
+              <a class="btn2 empty-act" href="{% url 'partners:partners' %}">{% translate "عرض كل الشركاء" %}</a>
+            {% else %}
+              <span class="empty-title">{% translate "لا شركاء مسجّلون بعد" %}</span>
+              <span class="empty-body">{% translate "الشريك هو الطرف المتعاقد كما يرد في الاتفاقية. سجّله أولاً ثم سجّل اتفاقيته الموقّعة." %}</span>
+              {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:partner-new' %}">{% translate "شريك جديد" %}</a>{% endif %}
+            {% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted"><span class="num">{{ page.start }}</span>–<span class="num">{{ page.end }}</span> {% translate "من" %} <span class="num">{{ page.total }}</span></span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.prev }}">‹ {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.next }}">{% translate "التالي" %} ›</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
   <div class="card2-body">
     <p class="hint">{% translate "الاتفاقيات تُوقَّع على الورق ويحمل النظام بنودها كما وردت — لا يؤلّفها ولا يعدّلها بعد سريانها." %}</p>
   </div>
+</div>
 </div>
 {% endblock %}

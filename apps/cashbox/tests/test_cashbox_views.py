@@ -57,6 +57,7 @@ def test_a_payment_issues_a_receipt_and_allocates_it(
     response = signed_in(cashier).post(
         reverse("cashbox:payment-new"),
         {
+            "participant_number": enrollment.participant.participant_number,
             "enrollment_code": enrollment.code,
             "amount": str(total),
             "payment_method": cash_method.code,
@@ -86,6 +87,7 @@ def test_the_minimum_first_payment_is_refused_on_screen(
     response = signed_in(cashier).post(
         reverse("cashbox:payment-new"),
         {
+            "participant_number": enrollment.participant.participant_number,
             "enrollment_code": enrollment.code,
             "amount": "300.000",
             "payment_method": cash_method.code,
@@ -113,6 +115,7 @@ def test_the_centre_manager_may_not_take_money(signed_in, enrolled, cash_method,
     response = signed_in(manager).post(
         reverse("cashbox:payment-new"),
         {
+            "participant_number": enrollment.participant.participant_number,
             "enrollment_code": enrollment.code,
             "amount": "100.000",
             "payment_method": cash_method.code,
@@ -212,6 +215,7 @@ def test_whoever_held_the_cash_cannot_certify_the_count(
         amount=quote.course_fee,
         payment_method=cash_method,
         received_on=TERM_START,
+        external_receipt_ref="FIN-1",
     )
     closing = closing_service.open_closing(
         actor=finance,

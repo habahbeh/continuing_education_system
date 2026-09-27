@@ -1,0 +1,76 @@
+{% load i18n %}
+{% comment %}
+  حقول حوار التعديل: النموذج نفسه بلا حقل الرمز (`editing=True` يحذفه)، ومعه
+  المجموعة المستقلّة لحالات المصادرة. مكتوبٌ مرّةً هنا لا في كل حوارٍ من
+  حوارات الصفوف.
+
+  والقيم الابتدائية تُملأ من الصفّ المرسوم لا من النموذج: حوارٌ لكل صفّ ونموذجٌ
+  واحد في السياق، فلو قُرئت من النموذج لظهرت قيم صفٍّ واحد في كل الحوارات.
+{% endcomment %}
+{% for e in edit_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+<div class="grid2">
+  <div class="fld">
+    <label for="ed-name-{{ row.code }}">{% translate "اسم السياسة" %}<span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="ed-name-{{ row.code }}" name="name_ar" maxlength="150" required value="{{ row.name_ar }}">
+  </div>
+  <div class="fld is-check">
+    <div class="check-row">
+      <input type="checkbox" id="ed-req-{{ row.code }}" name="is_required"{% if row.is_required %} checked{% endif %}>
+      <label for="ed-req-{{ row.code }}">{% translate "إلزامي على المشارك" %}</label>
+    </div>
+  </div>
+  <div class="fld">
+    <label for="ed-trg-{{ row.code }}">{% translate "مُحفّز الاسترداد" %}<span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="ed-trg-{{ row.code }}" name="refund_trigger" maxlength="32" required dir="ltr" value="{{ row.refund_trigger }}">
+    <div class="help">{% translate "نصّ حرّ بقرار العميل (Q-30)." %}</div>
+  </div>
+  <div class="fld">
+    <label for="ed-dl-{{ row.code }}">{% translate "مهلة المطالبة بالأيام" %}</label>
+    <input type="number" id="ed-dl-{{ row.code }}" name="claim_deadline_days" min="1" value="{{ row.claim_deadline_days|default_if_none:'' }}">
+    <div class="help">{% translate "تُترك فارغةً إن لم تكن هناك مهلة سقوط." %}</div>
+  </div>
+</div>
+<fieldset class="check-set">
+  <legend>{% translate "حالات المصادرة" %}</legend>
+  <div class="check-list">
+    {% for value, label in edit_form.fields.forfeit_on.choices %}
+      <label for="ed-f-{{ row.code }}-{{ forloop.counter0 }}">
+        <input type="checkbox" id="ed-f-{{ row.code }}-{{ forloop.counter0 }}" name="forfeit_on" value="{{ value }}"{% if value in row.forfeit_known %} checked{% endif %}>
+        {{ label }}
+      </label>
+    {% endfor %}
+  </div>
+  <div class="help">{% translate "تُترك فارغةً إن كان التأمين يُسترد دائماً." %}</div>
+  {# ما كان مخزَّناً خارج الاثنتي عشرة يظهر هنا لا يضيع: سياسةٌ تُفتح للتعديل #}
+  {# ثم تُحفظ كانت ستفقد «CONFIRMED» بلا أن ينتبه أحد. #}
+  <div class="fld fld-other">
+    <label for="ed-other-{{ row.code }}">{% translate "حالات أخرى" %}</label>
+    <input type="text" id="ed-other-{{ row.code }}" name="forfeit_other" dir="ltr"
+           list="forfeit-seen" value="{{ row.forfeit_extra_text }}">
+    <div class="help">{% translate "لحالةٍ ليست من القائمة، مثل CONFIRMED — بفاصلة بين كل حالتين (Q-30)." %}</div>
+  </div>
+</fieldset>
+<div class="grid2">
+  <div class="fld is-check">
+    <div class="check-row">
+      <input type="checkbox" id="ed-tax-{{ row.code }}" name="is_taxable"{% if row.is_taxable %} checked{% endif %}>
+      <label for="ed-tax-{{ row.code }}">{% translate "خاضع للضريبة" %}</label>
+    </div>
+  </div>
+  <div class="fld is-check">
+    <div class="check-row">
+      <input type="checkbox" id="ed-part-{{ row.code }}" name="allows_partial_deduction"{% if row.allows_partial_deduction %} checked{% endif %}>
+      <label for="ed-part-{{ row.code }}">{% translate "يسمح بحسم جزئي" %}</label>
+    </div>
+  </div>
+  <div class="fld is-check">
+    <div class="check-row">
+      <input type="checkbox" id="ed-act-{{ row.code }}" name="is_active"{% if row.is_active %} checked{% endif %}>
+      <label for="ed-act-{{ row.code }}">{% translate "نشطة" %}</label>
+    </div>
+  </div>
+  <div class="fld">
+    <label for="ed-note-{{ row.code }}">{% translate "ملاحظات" %}</label>
+    <textarea id="ed-note-{{ row.code }}" name="notes_ar" rows="3">{{ row.notes_ar }}</textarea>
+  </div>
+</div>

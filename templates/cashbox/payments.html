@@ -1,23 +1,21 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  سجل السندات الصادرة. العرض يقبل GET وحده: الأفعال كلّها — طلب الإلغاء
-  واعتماده — على صفحة السند الواحد، ولكلٍّ منها حارسه هناك. فلا يُرسم هنا زرّ
-  فعل واحد؛ الرابطان الوحيدان هما «استيفاء دفعة» بحارسه CREATE على §3.4/17،
-  و«عرض» على كل صف، وقد مرّ قارئه من بوّابة هذه الشاشة ليصل إليها.
+  سجل السندات الصادرة، يجيب أوّلاً عن سؤال أمين الصندوق «كم قبضت اليوم؟»:
+  الدخول الحرّ يفتح على اليوم، وبطاقات الأعلى هي المجاميع وهي المرشّح نفسه
+  (المقبوض، الصادر، ما لم يدخل إقفالاً، إلغاء معلّق، الملغى). أزرار المدى
+  (اليوم/أمس/الأسبوع/الشهر/الكل) أو من–إلى، والطريقة بطاقات.
 
-  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا مرشّح ولا حارس، ولا عمود بدّل موضعه.
+  العرض يقبل GET وحده: الأفعال كلّها — طلب الإلغاء واعتماده — على صفحة السند
+  الواحد، ولكلٍّ منها حارسه هناك. فلا يُرسم هنا زرّ فعل واحد؛ الروابط: «استيفاء
+  دفعة» بحارسه CREATE على §3.4/17، ورقم السند و«عرض» و«طباعة» على كل صف، وقد
+  مرّ قارئها من بوّابة هذه الشاشة ليصل إليها.
 
-  `<span class="spacer">` حُذف: `.spacer` معرَّفة لـ `.toolbar` و`.action-bar`
-  ولا أثر لها داخل `.filterbar` — والدفع إلى الطرف يفعله النظام نفسه بـ
-  `.filterbar > a.btn2.primary { margin-inline-start: auto }`. صنفٌ لا يعمل
-  أسوأ من غيابه لأنه يوهم من يقرأ القالب أن الإزاحة منه.
-
-  والعدّ يُحصى فوق الصفوف المرسومة لا فوق السجل كلّه، فالشريحة تصف ما على
-  الشاشة — و`.filterbar > a.btn2.primary ~ .count` مكانها المعرَّف سلفاً.
+  الصف الملغى باهت ومبلغه مشطوب: لا يُخفى ولا يُحسب. الإجمالي في ذيل الجدول
+  من الصادر وحده، مقسوماً على الطرق كما يحتاجه الإقفال.
 
   اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
   `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
@@ -27,38 +25,90 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "السندات الصادرة بقيمها وحالاتها. السند لا يُعدَّل من هنا ولا من صفحته: التصحيح بإلغاء يُطلب ويُعتمد، أو بسند جديد." %}</p>
   </div>
+  {% if can_create %}
+    <div class="acts">
+      <a class="btn2 primary" href="{% url 'cashbox:payment-new' %}">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-coins"/></svg>
+        {% translate "استيفاء دفعة" %}
+      </a>
+    </div>
+  {% endif %}
 </div>
 
-{% guided_help "payments" %}
 
-<form method="get" class="filterbar" role="search">
-  <div class="fld">
+{# البحث فوري: كل تغيير في الحقول يعيد رسم البطاقات والجدول (htmx) ويحدّث العنوان؛ وبلا JS يعمل النموذج بمفتاح Enter وأزرار المدى. #}
+<form method="get" class="filterbar reg-filters" role="search" id="reg-form"
+      hx-get="{% url 'cashbox:payments' %}" hx-target="#reg-results" hx-select="#reg-results" hx-swap="outerHTML"
+      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_from, change from:#f_to, change from:#f_method"
+      hx-push-url="true" hx-indicator="#reg-busy">
+  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+  <div class="fld grow">
     <label for="f_q">{% translate "بحث" %}</label>
-    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رقم السند أو اسم المشارك…' %}" spellcheck="false" id="f_q">
+    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رقم السند، اسم المشارك، رقمه الجامعي، هاتفه، أو سند الدائرة المالية…' %}" spellcheck="false" id="f_q">
   </div>
   <div class="fld">
-    <label for="f_on">{% translate "التاريخ" %}</label>
-    <input type="date" name="on" value="{{ on_date }}" id="f_on">
+    <span class="lbl">{% translate "المدى" %}</span>
+    <div class="seg-btns" role="group" aria-label="{% translate 'مدى التاريخ' %}">
+      {% for key, label in ranges %}
+        <button type="submit" name="pick" value="{{ key }}" class="seg-btn{% if range_key == key %} is-on{% endif %}"{% if range_key == key %} aria-pressed="true"{% endif %}>{{ label }}</button>
+      {% endfor %}
+    </div>
   </div>
-  <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if can_create %}<a class="btn2 primary" href="{% url 'cashbox:payment-new' %}">{% translate "استيفاء دفعة" %}</a>{% endif %}
-  <span class="count">{% blocktranslate count n=receipts|length %}سند واحد{% plural %}{{ n }} سندات{% endblocktranslate %}</span>
+  <div class="fld">
+    <label for="f_from">{% translate "من" %}</label>
+    <input type="date" name="from" value="{% if range_key == 'custom' and since %}{{ since|date:'Y-m-d' }}{% endif %}" id="f_from">
+  </div>
+  <div class="fld">
+    <label for="f_to">{% translate "إلى" %}</label>
+    <input type="date" name="to" value="{% if range_key == 'custom' and until %}{{ until|date:'Y-m-d' }}{% endif %}" id="f_to">
+  </div>
+  <div class="fld">
+    <label for="f_method">{% translate "الطريقة" %}</label>
+    <select name="method" id="f_method">
+      <option value="">{% translate "الكل" %}</option>
+      {% for m in methods %}<option value="{{ m.code }}"{% if method == m.code %} selected{% endif %}>{{ m.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <input type="hidden" name="range" value="{% if range_key == 'custom' %}custom{% elif query or method %}all{% else %}{{ range_key }}{% endif %}" id="f_range">
+  <span class="busy" id="reg-busy" aria-hidden="true"></span>
+  {% if is_filtered %}<a class="btn2 ghost" href="{% url 'cashbox:payments' %}?range=all">{% translate "إلغاء التصفية" %}</a>{% endif %}
+  <span class="count">{{ page.total|ar_count:"سند واحد|سندان|سندات|سنداً" }}</span>
 </form>
 
+<div id="reg-results">
+<div class="kpi-grid tiles reg-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
+
 <div class="card2">
-  <div class="card2-head"><h2>{% translate "سندات القبض" %}</h2></div>
+  <div class="card2-head">
+    <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-receipt"/></svg></span>
+    <h2>{% translate "سندات القبض" %}</h2>
+    <div class="acts">
+      <span class="chip">
+        {% if range_key == "today" %}{% translate "اليوم" %}{% elif range_key == "yesterday" %}{% translate "أمس" %}{% elif range_key == "week" %}{% translate "آخر ٧ أيام" %}{% elif range_key == "month" %}{% translate "هذا الشهر" %}{% elif range_key == "all" %}{% translate "كل السندات" %}{% else %}{% if since %}<span class="num" dir="ltr">{{ since|date:"Y/m/d" }}</span>{% endif %} — {% if until %}<span class="num" dir="ltr">{{ until|date:"Y/m/d" }}</span>{% endif %}{% endif %}
+      </span>
+    </div>
+  </div>
   <div class="tbl-wrap">
-    <table class="tbl">
+    <table class="tbl reg-tbl">
       <thead>
         <tr>
           <th>{% translate "رقم السند" %}</th>
-          <th>{% translate "سند الدائرة المالية" %}</th>
           <th>{% translate "المشارك" %}</th>
-          <th>{% translate "التاريخ" %}</th>
-          <th>{% translate "المبلغ" %}</th>
+          <th class="num">{% translate "التاريخ" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
           <th>{% translate "الطريقة" %}</th>
           <th>{% translate "الصندوق" %}</th>
           <th>{% translate "الحالة" %}</th>
@@ -67,30 +117,62 @@
       </thead>
       <tbody>
         {% for r in receipts %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ r.internal_receipt_number }}</strong></td>
-            <td dir="ltr" translate="no">{{ r.external_receipt_ref|default:"—" }}</td>
-            <td>{{ r.participant_name }}</td>
+          <tr{% if r.status != "ISSUED" %} class="is-void"{% endif %}>
+            <td dir="ltr" translate="no" class="num">
+              <a class="row-link" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}">{{ r.internal_receipt_number }}</a>
+              {% if r.external_receipt_ref %}<small class="muted sub-line">{{ r.external_receipt_ref }}</small>{% endif %}
+            </td>
+            <td class="who-cell">{{ r.participant_name }} <small class="muted num" dir="ltr">{{ r.participant_number }}</small></td>
             <td class="num"><span dir="ltr">{{ r.received_on|date:"Y/m/d" }}</span></td>
-            <td class="num">{{ r.amount }}</td>
+            <td class="num amt">{{ r.amount }}</td>
             <td>{{ r.payment_method }}</td>
             <td>{{ r.cashier }}</td>
             <td>
               <span class="chip {{ r.status|status_tone }} dot">{{ r.status_display }}</span>
               {% if r.is_closed %}<span class="chip ok">{% translate "مقفل" %}</span>{% endif %}
+              {% if r.void_pending %}<span class="chip warn dot">{% translate "طلب إلغاء معلّق" %}</span>{% endif %}
             </td>
             <td class="acts">
-              <a class="btn2 ghost" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}">{% translate "عرض" %}</a>
+              <a class="btn2 ghost ico-btn" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}" title="{% translate 'عرض السند' %}" aria-label="{% translate 'عرض السند' %}">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg>
+              </a>
+              <a class="btn2 ghost ico-btn" href="{% url 'cashbox:receipt-print' r.internal_receipt_number %}" title="{% translate 'طباعة السند' %}" aria-label="{% translate 'طباعة السند' %}">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc"/></svg>
+              </a>
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="9" class="empty">
+          <tr><td colspan="8" class="empty">
             <span class="empty-title">{% translate "لا سندات قبض في هذا النطاق" %}</span>
-            <span class="empty-body">{% translate "السند يصدر عند استيفاء دفعة، ويوزّعها آلياً على رسم التسجيل والرسوم الدراسية (BR-022)." %}</span>
+            <span class="empty-body">{% if is_filtered %}{% translate "وسّع المدى أو ألغِ التصفية." %}{% else %}{% translate "السند يصدر عند استيفاء دفعة، ويوزّعها آلياً على رسم التسجيل والرسوم الدراسية (BR-022)." %}{% endif %}</span>
+            {% if is_filtered %}<a class="btn2 ghost empty-act" href="{% url 'cashbox:payments' %}?range=all">{% translate "كل السندات" %}</a>{% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
+      {% if receipts %}
+        <tfoot>
+          <tr>
+            <td colspan="3">{% translate "إجمالي المقبوض في النطاق" %} <span class="muted">({% translate "الصادر وحده" %})</span></td>
+            <td class="num amt"><strong>{{ summary.total }}</strong></td>
+            <td colspan="4" class="by-method">
+              {% for m in summary.by_method %}<span class="chip">{{ m.name }} <span class="num">{{ m.amount }}</span></span> {% endfor %}
+            </td>
+          </tr>
+        </tfoot>
+      {% endif %}
     </table>
   </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted">{{ page.start }}–{{ page.end }} {% translate "من" %} {{ page.total }}</span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?{{ params_qs }}&amp;page={{ page.prev }}">‹ {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?{{ params_qs }}&amp;page={{ page.next }}">{% translate "التالي" %} ›</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+</div>
+</div>
 </div>
 {% endblock %}

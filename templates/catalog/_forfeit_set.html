@@ -1,0 +1,36 @@
+{% load i18n form_ui %}
+{% comment %}
+  حالات المصادرة في مجموعةٍ تحمل عنوانها.
+
+  كانت تُرسم عبر `partials/_form.html` كحقلٍ عادي، فوقع عليها عطلان:
+
+  * `<label for="">` فارغ — `id_for_label` لا قيمة له في `CheckboxSelectMultiple`،
+    فالعنوان يشير إلى لا شيء ولا يسمع قارئ الشاشة اسم المجموعة. و`<fieldset>`
+    مع `<legend>` هو ما تُسمّى به مجموعةُ خانات، لا `<label>`.
+  * كل خانةٍ ورثت `w-full` من `.fld input` فصارت صندوقاً مؤطَّراً بعرض العمود:
+    قياس فعلي 543px عند 1440 و463 عند 1280 و335 عند 1024، اثنتا عشرة مرّة
+    بارتفاع 571px في خليّة واحدة — وهو وحده سبب بلوغ الصفحة 2539px.
+
+  و`.check-list` شبكةٌ تنساب مع العرض بلا نقطة انكسار مكتوبة باليد.
+{% endcomment %}
+<fieldset class="check-set">
+  <legend>{{ field.label }}</legend>
+  <div class="check-list">{{ field }}</div>
+  {% if field.help_text %}<div class="help" id="{% field_help_id field %}">{{ field.help_text }}</div>{% endif %}
+  {% if field.errors %}<div class="err" id="{% field_error_id field %}">{{ field.errors|join:" · " }}</div>{% endif %}
+
+  {# والقائمة ليست مغلقة: سياسة العميل الموثّقة تُصادر على CONFIRMED، وهي ليست #}
+  {# من حالات التسجيل الاثنتي عشرة — تسمّي لحظة التأكيد لا حالةً مخزَّنة. فقائمةٌ #}
+  {# مغلقة كانت تعجز عن تمثيل السياسة الوحيدة التي حدّدها العميل (Q-30). #}
+  <div class="fld fld-other">
+    <label for="{{ other.id_for_label }}">{{ other.label }}</label>
+    {{ other }}
+    {% if suggestions %}
+      <datalist id="forfeit-seen">
+        {% for value in suggestions %}<option value="{{ value }}"></option>{% endfor %}
+      </datalist>
+    {% endif %}
+    <div class="help">{{ other.help_text }}</div>
+    {% if other.errors %}<div class="err">{{ other.errors|join:" · " }}</div>{% endif %}
+  </div>
+</fieldset>

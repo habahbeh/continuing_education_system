@@ -1,33 +1,141 @@
 {% extends "base.html" %}
-{% load i18n status_ui %}
+{% load i18n money_ui status_ui chart_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.7 — المصروفات (Sprint 8L).
+
+  مصروفات المركز وحدها: لا التزامات الشريك (تلك في التقرير الثالث، وهي دَينٌ
+  عليه لا نفقةٌ للمركز)، ولا مستهلكات محمَّلة على المشارك (تلك رسمٌ عليه).
+
+  والمعتمَد يُفصل عن المنتظر: التقرير الثاني يطرح المعتمَد وحده، لأن قيداً لم
+  يعتمده أحد نفقةٌ لم يوافق عليها أحد. وهذا موضعٌ يسبق فيه المشروعُ الديمو،
+  الذي يعرض المصروفات رقماً واحداً.
+{% endcomment %}
+
 {% block content %}
 {% include "reporting/_shell.html" %}
-<div class="note info">
-  {% translate "مصروفات المركز وحدها — لا التزامات الشريك ولا المستهلكات المحمَّلة على المشارك. ولا يُطرح من صافي الدخل إلا المعتمَد." %}
+
+<div class="kpi-grid tiles">
+  <div class="kpi tile is-lead">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc-check"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "المعتمَد" %}</span>
+      <span class="value num">{% money report.approved_total %}</span>
+      <span class="foot">{% translate "هو وحده ما يُطرح من صافي الدخل" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-clock"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "بانتظار الاعتماد" %}</span>
+      <span class="value num">{% money report.pending_total %}</span>
+      <span class="foot">{% translate "قيدٌ لم يوافق عليه أحد بعد" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-wallet"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "إجمالي القيود المعروضة" %}</span>
+      <span class="value num">{% money report.grand_total %}</span>
+      <span class="foot">{{ report.rows|length }} {% translate "قيد" %}</span>
+    </span>
+  </div>
 </div>
-<div class="grid2">
-  {% for t in report.totals %}
-    <div class="kpi"><div class="label">{{ t.label }}</div><div class="value num">{{ t.total }}</div>
-      <div class="muted">{{ t.count }} {% translate "قيد" %}</div></div>
-  {% endfor %}
-  <div class="kpi"><div class="label">{% translate "المعتمَد" %}</div><div class="value num">{{ report.approved_total }}</div></div>
-  <div class="kpi"><div class="label">{% translate "بانتظار الاعتماد" %}</div><div class="value num">{{ report.pending_total }}</div>
-    <div class="muted">{% translate "لا يُطرح بعد" %}</div></div>
-</div>
+
 <div class="card2">
+  <div class="card2-head"><h2>{% translate "حسب التصنيف" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "التصنيف" %}</th>
-        <th>{% translate "البيان" %}</th><th>{% translate "الدفعة" %}</th><th>{% translate "المبلغ" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{% translate "التصنيف" %}</th>
+          <th class="num">{% translate "القيود" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th>{% translate "حصّته من الإجمالي" %}</th>
+        </tr>
+      </thead>
       <tbody>
-        {% for e in report.rows %}
-          <tr><td dir="ltr">{{ e.code }}</td><td class="num">{{ e.incurred_on }}</td>
-              <td>{{ e.category_label }}</td><td>{{ e.description_ar }}</td>
-              <td dir="ltr">{{ e.cohort_code|default:"—" }}</td><td class="num">{{ e.amount }}</td>
-              <td><span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span></td></tr>
-        {% empty %}<tr><td colspan="7" class="empty"><span class="empty-title">{% translate "لا مصروفات" %}</span></td></tr>{% endfor %}
+        {% for t in report.totals %}
+          <tr>
+            <td><strong>{{ t.label }}</strong></td>
+            <td class="num">{{ t.count }}</td>
+            <td class="num amt">{% money t.total %}</td>
+            <td>
+              {% percent_bar t.total report.approved_total %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="empty">
+            <span class="empty-title">{% translate "لا مصروفات معتمَدة في هذا المدى" %}</span>
+            <span class="empty-body">{% translate "التصنيفات تُقرأ من إعداد `expense_categories`، والقيد المنتظر لا يظهر هنا لأن النسب تُقاس على المعتمَد." %}</span>
+          </td></tr>
+        {% endfor %}
       </tbody>
+      {% if report.totals %}
+        <tfoot>
+          <tr>
+            <td colspan="2">{% translate "الإجمالي المعتمَد" %}</td>
+            <td class="num amt">{% money report.approved_total %}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      {% endif %}
     </table>
   </div>
+</div>
+
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "القيود" %}</h2></div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>{% translate "الرمز" %}</th>
+          <th class="num">{% translate "التاريخ" %}</th>
+          <th>{% translate "التصنيف" %}</th>
+          <th>{% translate "البيان" %}</th>
+          <th>{% translate "الدفعة" %}</th>
+          <th>{% translate "المرجع" %}</th>
+          <th class="num">{% translate "المبلغ" %}</th>
+          <th>{% translate "الحالة" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in report.rows %}
+          <tr>
+            <td dir="ltr">{{ e.code }}</td>
+            <td class="num"><span dir="ltr">{{ e.incurred_on }}</span></td>
+            <td><span class="chip">{{ e.category_label }}</span></td>
+            <td>{{ e.description_ar }}</td>
+            <td>{% if e.cohort_code %}{{ e.cohort_name }}<br><small class="muted" dir="ltr">{{ e.cohort_code }}</small>{% else %}<span class="muted">{% translate "عام" %}</span>{% endif %}</td>
+            <td dir="ltr">{{ e.reference|default:"—" }}</td>
+            <td class="num amt">{% money e.amount %}</td>
+            <td><span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا قيود في هذا المدى" %}</span>
+            <span class="empty-body">{% translate "غيّر المدى أو التصنيف أعلاه. الفراغ نتيجة صحيحة: لم يُقيَّد في المدى المختار مصروف." %}</span>
+          </td></tr>
+        {% endfor %}
+      </tbody>
+      {% if report.rows %}
+        <tfoot>
+          <tr>
+            <td colspan="6">{% translate "الإجمالي المعروض" %}</td>
+            <td class="num amt">{% money report.grand_total %}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      {% endif %}
+    </table>
+  </div>
+  {% include "reporting/_pager.html" with page=pages.page param="page" qs=params_qs %}
+</div>
+
+<div class="note info">
+  {% translate "مصروفات المركز وحدها: لا التزامات الشريك — وتلك في التقرير الثالث لأنها دَينٌ عليه لا نفقةٌ للمركز — ولا مستهلكات محمَّلة على المشارك، وتلك رسمٌ عليه." %}
 </div>
 {% endblock %}

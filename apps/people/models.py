@@ -49,6 +49,10 @@ class Role(models.TextChoices):
     CASHIER = "CASHIER", _("الصندوق")
     AUDIT_ACCOUNT = "AUDIT_ACCOUNT", _("حساب التدقيق")
     SYSTEM_ADMINISTRATOR = "SYSTEM_ADMINISTRATOR", _("مدير النظام")
+    #: Full authority on every screen, every action and every report — the
+    #: account the client runs the system with. Outside the business matrix
+    #: like SYSTEM_ADMINISTRATOR, but the opposite grant: everything.
+    SUPER_ADMIN = "SUPER_ADMIN", _("صلاحيات كاملة")
 
 
 class User(AbstractUser):

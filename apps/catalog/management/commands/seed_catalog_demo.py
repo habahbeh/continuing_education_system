@@ -105,6 +105,8 @@ PROGRAMS: list[tuple[str, str, str, str | None, bool, int | None, str]] = [
     ("SC-DRUG", ProgramType.SHORT_COURSE, "تسجيل الدواء", "CAT-HLTH", False, None, "0.000"),
     ("SC-QA", ProgramType.SHORT_COURSE, "التدقيق الداخلي للجودة", "CAT-BUS", False, None, "0.000"),
     ("ON-GENAI", ProgramType.ONLINE_COURSE, "Generative AI", None, False, None, "0.000"),
+    # §4.3 — online prices range 100–200, so the screen carries both ends.
+    ("ON-DM", ProgramType.ONLINE_COURSE, "التسويق الرقمي", None, False, None, "0.000"),
 ]
 
 #: BR-006 worked example: 1700 − 50 consumables = 1650 across four subjects.
@@ -126,6 +128,7 @@ PRICE_ITEMS: list[tuple[str, int | None, str, str | None]] = [
     ("SC-DRUG", None, "300.000", None),
     ("SC-QA", None, "200.000", None),
     ("ON-GENAI", None, "200.000", None),
+    ("ON-DM", None, "100.000", None),
 ]
 
 #: (program_code|None, category, fee|None, note) — QA T-096…T-099.

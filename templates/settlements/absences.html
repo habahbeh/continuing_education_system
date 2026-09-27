@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -45,12 +45,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "غياب مدرّبي الشريك عن محاضراته: ما يُحتسب منه، وما أُعفي بموافقة خطية، وما رُفعت عنه غرامة." %}</p>
   </div>
 </div>
 
-{% guided_help "absences" %}
 
 <p class="hint">{% blocktranslate %}غرامة الغياب = {{ multiplier }} أضعاف نفقة المحاضرة عن كل غياب غير معفى. والحالة الطارئة تُعفى بموافقة خطية فلا تُغرَّم ولا تُحتسب. ويحق استبدال المدرب عند تجاوز {{ replace_limit }} غيابات — أي عند الخامس لا الرابع، وفق نصّ الاتفاقية الموقّعة.{% endblocktranslate %}</p>
 
@@ -94,7 +93,7 @@
   <div class="card2-head">
     <h2>{% translate "الغيابات المسجّلة" %}</h2>
     <div class="acts">
-      <span class="count muted">{% blocktranslate count n=absences|length %}غياب واحد{% plural %}{{ n }} غيابات{% endblocktranslate %}</span>
+      <span class="count muted">{{ absences|length|ar_count:"غياب واحد|غيابان|غيابات|غياباً" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">

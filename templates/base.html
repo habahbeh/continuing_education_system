@@ -19,10 +19,89 @@
 </head>
 <body class="bg-surface text-ink"
       x-data="{ nav: false }"
-      @keydown.escape.window="if (nav) { nav = false; $refs.navToggle && $refs.navToggle.focus() }">
+      @keydown.escape.window="if (nav) { nav = false; $refs.navToggle && $refs.navToggle.focus() }"
+      @keydown.window="if ($event.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test($event.target.tagName) && !$event.target.isContentEditable) { const d = document.getElementById('qjump'); if (d && !d.open) { $event.preventDefault(); d.showModal() } }">
 
   {# أول ما يصل إليه التركيز في الصفحة: قفزة فوق القائمة إلى المحتوى. #}
   <a class="skip-link" href="#main">{% translate "تخطَّ إلى المحتوى" %}</a>
+
+  {% comment %}
+     لوحة الانتقال السريع هنا لا بعد <main> عمداً.
+
+     موضع <dialog> في الشجرة لا يغيّر شيئاً في سلوكه — يُفتح فوق الصفحة كلها
+     أينما كُتب. لكنّه يغيّر ما يقع داخل «جسم الصفحة» حين يُقرأ بالقصّ: وهذه
+     اللوحة تُعيد ذكر كل شاشةٍ في النظام برابطها، فحين كانت تقع بعد نهاية
+     المحتوى كان كل حارسٍ يقصّ ما بعد نهاية القائمة الجانبية ليسأل «ماذا ترسم
+     هذه الشاشة؟» يتلقّى
+     جوابها: أسماء الشاشات كلها وروابطها. فسقط ستة عشر حارساً على شاشاتٍ لم
+     يتغيّر فيها حرف.
+
+     رفعُها فوق القائمة الجانبية يُخرجها من كل قصّ دفعةً واحدة، بدل تعديل
+     ١٣٠ موضعَ قصٍّ في الاختبارات — وهو الإصلاح في مكان العلّة لا في مكان
+     ظهورها.
+  {% endcomment %}
+  {% if nav_groups %}
+    <dialog class="modal qjump" id="qjump" dir="rtl" aria-labelledby="qjump-t"
+            x-data="{ q: '' }" @close="q = ''">
+        <div class="modal-head">
+          <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.4"/><path d="M13.2 13.2 17 17"/></svg></span>
+          <h2 id="qjump-t">{% translate "انتقال سريع" %}</h2>
+        </div>
+        <div class="modal-body">
+          <div class="fld">
+            <label for="qjump-q">{% translate "اكتب اسم الشاشة" %}</label>
+            <input type="search" id="qjump-q" data-dialog-autofocus x-model="q" spellcheck="false"
+                   placeholder="{% translate 'مثال: دفعات · وصل · خصم · وزارة…' %}"
+                   @keydown.enter.prevent="$el.closest('.modal').querySelector('.qjump-direct a:not([hidden]), .qjump-list a:not([hidden])')?.click()">
+          </div>
+          {# رمزٌ مكتوب يقود إلى سجلّه مباشرةً: كل سجلّ يقبل ?q=، فلا استعلام جديد ولا بحث ثانٍ. #}
+          {# والوجهة من قائمة هذا القارئ وحدها. #}
+          {# ورقم المشارك بلا بادئة (BR-001)، فله سطره: أرقامٌ وحدها تقوده إلى سجلّه، ونصٌّ ليس رمزاً يُقرأ اسماً. #}
+          {% if nav_jump_targets %}
+            <div class="qjump-direct">
+              {% for t in nav_jump_targets %}
+                <a href="{{ t.url }}" :href="'{{ t.url }}?q=' + encodeURIComponent(q.trim())"
+                   {% if t.match == "digits" %}:hidden="!/^[0-9]{3,}$/.test(q.trim())"
+                   {% elif t.match == "text" %}:hidden="!q.trim() || /^[A-Za-z0-9-]+$/.test(q.trim())"
+                   {% else %}:hidden="!q.trim() || !q.trim().toUpperCase().startsWith('{{ t.prefix }}')"{% endif %}>
+                  <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.4"/><path d="M13.2 13.2 17 17"/></svg></span>
+                  {% if t.match == "text" %}
+                    <span class="t">{% translate "ابحث عن" %} {{ t.what }} <span dir="rtl" x-text="'«' + q.trim() + '»'"></span></span>
+                    <span class="g">{% translate "في سجل المشاركين" %}</span>
+                  {% else %}
+                    <span class="t">{% translate "افتح" %} {{ t.what }} <span class="num" dir="ltr" x-text="q.trim().toUpperCase()"></span></span>
+                    <span class="g">{% translate "في سجلّه" %}</span>
+                  {% endif %}
+                </a>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <div class="qjump-list">
+            {% for group in nav_groups %}
+              <section x-show="$el.querySelectorAll('a:not([hidden])').length > 0">
+                <h3>{{ group.title }}</h3>
+                {% for item in group.items %}
+                  <a href="{{ item.url }}" data-label="{{ item.label }} {{ group.title }}"
+                     :hidden="q !== '' && !$el.dataset.label.includes(q)">
+                    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ item.icon }}"/></svg></span>
+                    <span class="t">{{ item.label }}</span>
+                    <span class="g">{{ group.title }}</span>
+                  </a>
+                {% endfor %}
+              </section>
+            {% endfor %}
+          </div>
+          <p class="hint">{% translate "اكتب اسم شاشة، أو رمز سجلّ (R- · EN- · CO- · RF- …)، أو رقم مشارك، أو اسمه — فيفتح سجلّه على نتيجته. وتُعرض الشاشات التي تسمح بها صلاحيتك وحدها." %}</p>
+        </div>
+        <div class="modal-acts">
+          <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "إغلاق" %}</button>
+        </div>
+    </dialog>
+  {% endif %}
+
+  {# لوحة الرموز مرة واحدة للصفحة كلها: القائمة الجانبية ولوحة المؤشرات تشيران إليها. #}
+  {% include "partials/_nav_icons.html" %}
 
   <div class="min-h-screen flex flex-col">
     <header class="topbar">
@@ -40,12 +119,36 @@
       {% endif %}
 
       <div class="brand">
-        <span class="logo" translate="no">UOP</span>
+        {% comment %}
+          الشعار مرفوعٌ من شاشة الإعدادات أو غير مرفوع. حين لا يوجد تبقى
+          الشارة النصّية كما كانت منذ 8B — لا مربّع مكسور ولا شعار مُختلَق.
+        {% endcomment %}
+        {% if brand.logo_primary %}
+          <img class="logo-img" src="{{ brand.logo_primary.url }}"
+               alt="{{ brand.logo_primary.alt|default:_('شعار الجامعة') }}">
+        {% else %}
+          <span class="logo" translate="no">UOP</span>
+        {% endif %}
         <span>
           {% translate "مركز التعليم المستمر وخدمة المجتمع" %}
           <small>{% translate "جامعة البترا — عمّان، الأردن" %}</small>
         </span>
       </div>
+
+      {% if nav_groups %}
+        {# الانتقال السريع: روابط القائمة نفسها بالصلاحية نفسها، مرتّبة للبحث. #}
+        {# يُفتح بالنمط المشترك في `static/js/ui.js` لا بـ`$refs`: الحوار انتقل #}
+        {# إلى أعلى الصفحة، و`x-ref` يُسجَّل في المكوّن الذي يحمله — فصار زرٌّ #}
+        {# في فرعٍ آخر لا يراه. و`data-opens` يعمل بالمعرّف أينما كان الحوار، #}
+        {# وهو ما تفتح به كل حوارات النظام أصلاً، ويُعيد التركيز إلى الزرّ. #}
+        <button type="button" class="qjump-open" data-opens="qjump"
+                aria-haspopup="dialog" aria-controls="qjump"
+                aria-label="{% translate 'انتقال سريع' %}">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.4"/><path d="M13.2 13.2 17 17"/></svg>
+          <span>{% translate "انتقال سريع" %}</span>
+          <kbd aria-hidden="true">/</kbd>
+        </button>
+      {% endif %}
 
       {% if user.is_authenticated %}
         <div class="topbar-user">
@@ -68,9 +171,11 @@
 
       <main class="content flex-1" id="main" tabindex="-1">
         {% include "partials/_messages.html" %}
+        {% include "partials/_crumbs.html" %}
         {% block content %}{% endblock %}
       </main>
     </div>
+
 
     <footer class="footer">
       <small>{% translate "نظام إدارة مركز التعليم المستمر" %}</small>
@@ -79,6 +184,8 @@
 
   <script src="{% static 'js/htmx.min.js' %}" defer></script>
   <script src="{% static 'js/alpine.min.js' %}" defer></script>
+  {# فتح الحوارات وإغلاقها، والتركيز الابتدائي — مرّة واحدة للشاشات كلها بدل نسخةٍ في كل قالب. #}
+  <script src="{% static 'js/ui.js' %}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

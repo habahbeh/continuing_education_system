@@ -2,7 +2,27 @@
 {% load i18n %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <div>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+  </div>
+  {% if can_take_payment and statement.state.participant_owes or can_grant_discount or can_refund or can_charge_fee %}
+    <div class="acts">
+      {% if can_take_payment and statement.state.participant_owes %}
+        <a class="btn2 primary" href="{% url 'cashbox:payment-new' %}?enrollment={{ statement.enrollment_code }}">{% translate "قبض دفعة على هذا التسجيل" %}</a>
+      {% endif %}
+      {% if can_grant_discount %}
+        <a class="btn2" href="{% url 'billing:discounts' %}?enrollment={{ statement.enrollment_code }}#grant">{% translate "منح خصم" %}</a>
+      {% endif %}
+      {% if can_charge_fee %}
+        <a class="btn2 ghost" href="{% url 'billing:extra-fees' %}?enrollment={{ statement.enrollment_code }}#charge">{% translate "تحميل رسم إضافي" %}</a>
+      {% endif %}
+      {% if can_refund and statement.state.centre_owes %}
+        <a class="btn2" href="{% url 'billing:refunds' %}?enrollment={{ statement.enrollment_code }}&amp;tab=credit#request">{% translate "ردّ الفائض للمشارك" %}</a>
+      {% elif can_refund and statement.state.total_paid > 0 %}
+        <a class="btn2 ghost" href="{% url 'billing:refunds' %}?enrollment={{ statement.enrollment_code }}#request">{% translate "طلب استرداد" %}</a>
+      {% endif %}
+    </div>
+  {% endif %}
 </div>
 {% include "operations/_statement.html" with statement=statement only %}
 {% endblock %}

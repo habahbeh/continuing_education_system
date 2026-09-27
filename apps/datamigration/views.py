@@ -141,6 +141,11 @@ def links_view(request: HttpRequest) -> HttpResponse:
         request,
         "datamigration/links.html",
         {
+            # BR-094 — the finance officer proposes an opening balance from a
+            # linked archive row; the door is drawn here, the act lives there.
+            "can_propose_balance": policy.is_allowed(
+                request.user, Screen.OPENING_BALANCES, Action.CREATE
+            ),
             "title": _("ربط السجلات التاريخية"),
             "active_screen": Screen.MIGRATION,
             "rows": read_service.link_queue(

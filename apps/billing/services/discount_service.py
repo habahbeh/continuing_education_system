@@ -377,24 +377,179 @@ def _approve(*, actor: Any, discount: Discount, request: Any) -> Discount:
     return discount
 
 
+#: Enrolment statuses a discount may still be granted on — the enrolment is
+#: alive or waiting for its first payment; a closed one has nothing to reduce.
+_DISCOUNTABLE_STATUSES = (
+    "PENDING_FINANCE",
+    "PENDING_APPROVAL",
+    "ACTIVE",
+    "PAYMENT_OVERDUE",
+    "DEFERRED",
+)
+
+
+def split_preview(*, agreement: Any) -> dict[str, Any]:
+    """
+    How a discount on this cohort would be borne, for the form's live preview.
+
+    ``partner_pct`` is the share of every discounted dinar the partner bears
+    (0 when the university bears it all); ``supported`` is False when
+    :func:`split_for` would refuse, so the form can say so before the save.
+    """
+    from apps.partners.models import DiscountSplitMode
+
+    if agreement is None:
+        return {
+            "mode": NO_AGREEMENT_MODE,
+            "mode_display": str(DiscountSplitMode.UNIVERSITY_ONLY.label),
+            "partner_pct": ZERO,
+            "agreement_number": "",
+            "supported": True,
+        }
+    try:
+        _u, partner, mode = split_for(amount=HUNDRED, agreement=agreement)
+    except UnsupportedSplitError:
+        return {
+            "mode": agreement.discount_split_mode,
+            "mode_display": str(DiscountSplitMode(agreement.discount_split_mode).label),
+            "partner_pct": ZERO,
+            "agreement_number": agreement.agreement_number,
+            "supported": False,
+        }
+    return {
+        "mode": mode,
+        "mode_display": str(DiscountSplitMode(mode).label),
+        "partner_pct": partner,
+        "agreement_number": agreement.agreement_number,
+        "supported": True,
+    }
+
+
+def discountable_rows(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """
+    The enrolments a discount can still be granted on, with what the form
+    needs to preview it: the tuition base (§5.1), what has already been
+    discounted, and how the cohort's agreement would split a new one.
+
+    Filtered by the same tests :func:`grant_discount` applies — a live
+    enrolment, tuition to discount, no money yet on shareable lines — so the
+    list offers nothing the save would refuse for a reason the reader could
+    have seen.
+    """
+    from apps.operations.models import Enrollment
+
+    policy.require(actor, Screen.DISCOUNTS, Action.CREATE, request=request)
+
+    rows: list[dict[str, Any]] = []
+    queryset = (
+        Enrollment.objects.filter(status__in=_DISCOUNTABLE_STATUSES)
+        .select_related("participant", "cohort__program", "cohort__agreement")
+        .order_by("-enrolled_on", "-id")[:300]
+    )
+    for enrollment in queryset:
+        base = tuition_base(enrollment)
+        if base <= ZERO or has_shareable_allocations(enrollment):
+            continue
+        already = ZERO
+        for d in enrollment.discounts.all():
+            already += d.amount
+        cohort = enrollment.cohort
+        rows.append(
+            {
+                "code": enrollment.code,
+                "participant_name": enrollment.participant.name_ar,
+                "participant_number": enrollment.participant.participant_number,
+                "program_name": cohort.program.name_ar,
+                "cohort_name": cohort.name_ar or cohort.code,
+                "status_display": enrollment.get_status_display(),
+                "tuition_base": base,
+                "already_discounted": already,
+                "split": split_preview(agreement=agreement_for(enrollment)),
+            }
+        )
+    return rows
+
+
+def discounts_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Totals over already-projected rows — no second query."""
+    total = ZERO
+    university = ZERO
+    partner = ZERO
+    pending = 0
+    for r in rows:
+        total += r["amount"]
+        university += r["university_burden"]
+        partner += r["partner_burden"]
+        if not r["is_approved"]:
+            pending += 1
+    return {
+        "count": len(rows),
+        "total": total,
+        "university": university,
+        "partner": partner,
+        "pending": pending,
+        "approved": len(rows) - pending,
+    }
+
+
+DISCOUNT_FILTERS = ("pending", "approved")
+
+
 def list_discounts(
-    *, actor: Any, enrollment_code: str = "", request: Any = None
+    *,
+    actor: Any,
+    enrollment_code: str = "",
+    query: str = "",
+    status: str = "",
+    request: Any = None,
 ) -> list[dict[str, Any]]:
-    """Discounts as rows, with the split each one recorded (§5.1)."""
+    """
+    Discounts as rows, with the split each one recorded (§5.1).
+
+    ``query`` matches the enrolment code, the participant's name or number,
+    or the president's approval reference; ``status`` narrows to the rows
+    still awaiting the internal countersign or the ones that have it.
+    """
+    from django.db.models import Q
+
+    from apps.partners.models import DiscountSplitMode
+
     policy.require(actor, Screen.DISCOUNTS, Action.VIEW, request=request)
 
     queryset = Discount.objects.select_related(
-        "enrollment__participant", "created_by", "approved_by"
+        "enrollment__participant", "enrollment__cohort__program", "created_by", "approved_by"
     )
     if enrollment_code:
         queryset = queryset.filter(enrollment__code=enrollment_code)
+    if query.strip():
+        q = query.strip()
+        queryset = queryset.filter(
+            Q(enrollment__code__icontains=q)
+            | Q(enrollment__participant__name_ar__icontains=q)
+            | Q(enrollment__participant__participant_number__icontains=q)
+            | Q(president_approval_ref__icontains=q)
+            | Q(reason_ar__icontains=q)
+        )
+    if status == "pending":
+        queryset = queryset.filter(approved_by__isnull=True)
+    elif status == "approved":
+        queryset = queryset.filter(approved_by__isnull=False)
+
+    def _mode_label(mode: str) -> str:
+        try:
+            return str(DiscountSplitMode(mode).label)
+        except ValueError:
+            return mode
 
     return [
         {
             "id": d.pk,
             "enrollment_code": d.enrollment.code,
             "participant_name": d.enrollment.participant.name_ar,
+            "participant_number": d.enrollment.participant.participant_number,
+            "program_name": d.enrollment.cohort.program.name_ar,
             "discount_type": d.discount_type,
+            "discount_type_display": d.get_discount_type_display(),
             "rate": d.rate,
             "amount": d.amount,
             "base_amount": d.base_amount,
@@ -404,10 +559,13 @@ def list_discounts(
             "university_burden": d.university_burden,
             "partner_burden": d.partner_burden,
             "split_mode": d.discount_split_mode_snapshot,
+            "split_mode_display": _mode_label(d.discount_split_mode_snapshot),
             "created_by": person_name(d.created_by),
             "created_by_id": d.created_by_id,
+            "created_at": d.created_at,
             "is_approved": d.approved_by_id is not None,
             "approved_by": person_name(d.approved_by),
+            "approved_at": d.approved_at,
         }
         for d in queryset.order_by("-created_at")
     ]
@@ -420,6 +578,7 @@ def get_discount(*, actor: Any, discount_id: int, request: Any = None) -> Discou
 
 
 __all__ = [
+    "DISCOUNT_FILTERS",
     "NO_AGREEMENT_MODE",
     "DiscountAfterPaymentError",
     "DiscountBaseError",
@@ -429,10 +588,13 @@ __all__ = [
     "agreement_for",
     "approve_discount",
     "claim_base_adjustment",
+    "discountable_rows",
+    "discounts_summary",
     "get_discount",
     "grant_discount",
     "has_shareable_allocations",
     "list_discounts",
     "split_for",
+    "split_preview",
     "tuition_base",
 ]

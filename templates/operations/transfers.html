@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{% translate "النقل بين الدورات — مركز التعليم المستمر" %}{% endblock %}
 
@@ -23,7 +23,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "نقل مشارك من دفعة إلى أخرى: الطلب يُرفع من شاشة «طلب نقل جديد»، وهذه الشاشة تتابع الطلبات القائمة وما نُفِّذ منها وما رُفض. القراءة للجميع، والأفعال بالصلاحية." %}</p>
   </div>
   {% if can_request %}
@@ -33,7 +33,6 @@
   {% endif %}
 </div>
 
-{% guided_help "transfers" %}
 
 <div class="note">
   <div>
@@ -45,10 +44,15 @@
   </div>
 </div>
 
-<form method="get" class="filterbar" role="search">
+{# البحث فوري: كل تغيير يعيد رسم النتائج (htmx) ويحدّث العنوان؛ وبلا JS يعمل بمفتاح Enter وزرّ «بحث». #}
+<form method="get" class="filterbar" role="search" id="tr-form"
+      hx-get="{% url 'operations:transfers' %}" hx-target="#tr-results" hx-select="#tr-results" hx-swap="outerHTML"
+      hx-select-oob="#tr-count,#tr-clear"
+      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status"
+      hx-push-url="true" hx-indicator="#tr-busy">
   <div class="fld">
     <label for="f_q">{% translate "بحث" %}</label>
-    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رمز النقل أو اسم المشارك…' %}" spellcheck="false" id="f_q">
+    <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رمز النقل أو اسم المشارك…' %}" spellcheck="false" id="f_q" autocomplete="off">
   </div>
   <div class="fld">
     <label for="f_status">{% translate "الحالة" %}</label>
@@ -60,10 +64,11 @@
     </select>
   </div>
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if active_filters %}
-    <a class="btn2 ghost" href="{% url 'operations:transfers' %}">{% translate "إلغاء التصفية" %}</a>
-  {% endif %}
-  <span class="count">{% blocktranslate count n=transfers|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
+  <span class="busy" id="tr-busy" aria-hidden="true"></span>
+  {# غلافان ثابتان لا يختفيان: البحث الفوري يستبدلهما خارج الهدف (OOB)، وما يختفي لا يُستبدل. #}
+  <span id="tr-clear">{% if active_filters %}<a class="btn2 ghost" href="{% url 'operations:transfers' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}</span>
+  {# العدّاد يقول الكلّي لا المعروض. #}
+  <span class="count" id="tr-count">{{ page.total|ar_count:"نتيجة واحدة|نتيجتان|نتائج|نتيجة" }}</span>
 </form>
 
 {% if active_filters %}
@@ -77,6 +82,7 @@
   </div>
 {% endif %}
 
+<div id="tr-results">
 <div class="card2">
   <div class="card2-head">
     <h2>{% translate "سجل طلبات النقل" %}</h2>
@@ -90,31 +96,33 @@
     {% endif %}
   </div>
   <div class="tbl-wrap">
-    <table class="tbl">
+    <table class="tbl tr-tbl">
       <thead><tr>
+        <th class="expand" aria-label="{% translate 'تفاصيل' %}"></th>
         <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
         <th>{% translate "من" %}</th><th>{% translate "إلى" %}</th>
-        <th class="num">{% translate "المحاضرات" %}</th><th>{% translate "المجال" %}</th>
+        <th>{% translate "المجال" %}</th>
         <th class="num">{% translate "فرق الرسوم" %}</th><th>{% translate "الحالة" %}</th>
         <th aria-label="{% translate 'إجراءات' %}"></th>
       </tr></thead>
       <tbody>
         {% for t in transfers %}
+          {# سطرٌ واحد لكل خليّة: أربع خلايا كانت تحمل سطرين وثلاثة («من» و«إلى» ثلاثةً كلٌّ منهما)، #}
+          {# فبلغ الصفّ 79px على 1440 و**183px على 1024** — أي أقلّ من ثلاثة صفوف في الشاشة. #}
+          {# وما نزل عن السطر لم يُحذف: صفُّ التفاصيل تحته يحمله، ويُفتح في مكانه كسجل التسجيلات. #}
           <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ t.code }}</strong><br>
-              <small class="muted num">{{ t.requested_on|date:"Y-m-d" }}</small></td>
-            <td>{{ t.participant_name }}<br>
-              <small class="muted num" dir="ltr" translate="no">{{ t.participant_number }}</small><br>
-              <small class="muted">{{ t.reason_display }}</small></td>
-            <td><span dir="ltr" translate="no">{{ t.from_cohort_code }}</span><br>
-              <small class="muted">{{ t.from_program_name }}</small><br>
-              <small class="muted num" dir="ltr" translate="no">{{ t.from_enrollment_code }}</small></td>
-            <td><span dir="ltr" translate="no">{{ t.to_cohort_code }}</span><br>
-              <small class="muted">{{ t.to_program_name }}</small>
-              {% if t.to_enrollment_code %}<br>
-                <small class="muted num" dir="ltr" translate="no">{{ t.to_enrollment_code }}</small>
-              {% endif %}</td>
-            <td class="num">{{ t.lectures_attended_at_request }}</td>
+            <td class="expand">
+              <button type="button" class="row-expand" data-expands="trd-{{ t.code }}"
+                      aria-expanded="false" aria-controls="trd-{{ t.code }}"
+                      title="{% translate 'تفاصيل الطلب' %}"
+                      aria-label="{% translate 'تفاصيل' %} {{ t.code }}">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 4l6 6-6 6"/></svg>
+              </button>
+            </td>
+            <td dir="ltr" translate="no"><strong class="num">{{ t.code }}</strong></td>
+            <td>{{ t.participant_name }}</td>
+            <td><span dir="ltr" translate="no">{{ t.from_cohort_code }}</span></td>
+            <td><span dir="ltr" translate="no">{{ t.to_cohort_code }}</span></td>
             <td>
               {% if t.same_category %}<span class="chip ok">{% translate "نفس المجال" %}</span>
               {% elif t.category_waiver_granted %}<span class="chip warn">{% translate "باستثناء" %}</span>
@@ -124,8 +132,29 @@
             <td><span class="chip {{ t.status|status_tone }}">{{ t.status_display }}</span></td>
             <td class="acts"><a class="btn2 ghost" href="{% url 'operations:transfer-detail' t.code %}">{% translate "عرض الطلب" %}</a></td>
           </tr>
+          {# ما نزل عن السطر — لا ما حُذف منه: في الصفحة ومقروءٌ لقارئ الشاشة قبل أي نقرة. #}
+          {# و`hidden` لا `display:none`: ما يخفيه الوسم يُظهره الزرّ بلا ورقة أنماط. #}
+          <tr class="row-detail" id="trd-{{ t.code }}" hidden>
+            <td colspan="{{ column_count }}">
+              <dl class="dl detail-dl">
+                <dt>{% translate "تاريخ الطلب" %}</dt>
+                <dd class="num" dir="ltr">{{ t.requested_on|date:"Y-m-d" }}</dd>
+                <dt>{% translate "الرقم الجامعي" %}</dt>
+                <dd class="num" dir="ltr" translate="no">{{ t.participant_number }}</dd>
+                <dt>{% translate "سبب النقل" %}</dt>
+                <dd>{{ t.reason_display }}</dd>
+                <dt>{% translate "المحاضرات عند الطلب" %}</dt>
+                <dd class="num">{{ t.lectures_attended_at_request }}</dd>
+                <dt>{% translate "من — البرنامج" %}</dt>
+                <dd>{{ t.from_program_name }} <span class="muted num" dir="ltr" translate="no">{{ t.from_enrollment_code }}</span></dd>
+                <dt>{% translate "إلى — البرنامج" %}</dt>
+                <dd>{{ t.to_program_name }}{% if t.to_enrollment_code %} <span class="muted num" dir="ltr" translate="no">{{ t.to_enrollment_code }}</span>{% endif %}</dd>
+              </dl>
+              <p class="hint">{% translate "القرار وخطواته وفرق الرسوم بالتفصيل في صفحة الطلب." %}</p>
+            </td>
+          </tr>
         {% empty %}
-          <tr><td colspan="9" class="empty">
+          <tr><td colspan="{{ column_count }}" class="empty">
             {% if active_filters %}
               <span class="empty-title">{% translate "لا طلب نقل يطابق التصفية الحالية" %}</span>
               <span class="empty-body">{% translate "جرّب رمز النقل كاملاً أو جزءاً من اسم المشارك، أو وسّع الحالة إلى «كل الحالات»." %}</span>
@@ -142,5 +171,16 @@
       </tbody>
     </table>
   </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted"><span class="num">{{ page.start }}</span>–<span class="num">{{ page.end }}</span> {% translate "من" %} <span class="num">{{ page.total }}</span></span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.prev }}">&lsaquo; {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.next }}">{% translate "التالي" %} &rsaquo;</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+</div>
 </div>
 {% endblock %}

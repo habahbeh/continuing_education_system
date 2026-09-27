@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n arabic_ui status_ui %}
 
 {% block title %}{% translate "المشاركون — مركز التعليم المستمر" %}{% endblock %}
 
@@ -9,20 +9,32 @@
   لذلك كل عمود اختياري محروس بوجود اسمه في `columns`، ولا يُضاف عمود هنا
   لأن الديمو يعرضه.
 
-  ومن هذا الحرس نفسه: مرشّح الفئة وشرائح العدّ لا يظهران إلا لمن يرى حقل
-  الفئة. عرض مرشّح على حقل لا يراه صاحب الدور يجعل الشاشة تُخبره عمّا حُجب
-  عنه — وهو ما تتفاداه الخدمة في صندوق البحث للسبب نفسه.
+  ومن هذا الحرس نفسه: مرشّح الفئة وبطاقاتها لا تظهر إلا لمن يرى حقل الفئة.
+  عرض مرشّح على حقل لا يراه صاحب الدور يجعل الشاشة تُخبره عمّا حُجب عنه — وهو
+  ما تتفاداه الخدمة في صندوق البحث للسبب نفسه.
 
   اسم الفئة يأتي جاهزاً من العرض (`category_display`) بدل الرمز المخزَّن:
   سجلٌّ يقول UNIVERSITY أمام العميل ليس سجلاً.
+
+  «المدينة» و«المؤهل» نزلتا من الجدول إلى العرض السريع: عمودان فارغان في أكثر
+  الصفوف كانا يدفعان عمود الإجراءات — وفيه «فتح الملف» — خلف تمرير أفقي على
+  شاشة 1024. الحقل لم يُحجب، بل نُقل إلى حيث يُقرأ.
+
+  «عرض سريع» (Sprint 8I) حوارٌ للمراجعة لا للعمل: الهوية، والفئة، والمدينة
+  والمؤهل، وعدد التسجيلات، وآخر تسجيل وحالته، وروابط إلى الملف الكامل
+  والتسجيلات وكشف الحساب. لا أرقام مالية فيه — حسابها لصفحة كاملة يجعل
+  القائمة بطيئة، وكشف الحساب على بُعد نقرة. الملف الكامل هو مكان العمل.
+
+  وهو حوارٌ **واحد** للصفحة كلها لا واحدٌ لكل صفّ، كحوار التسجيل تماماً:
+  خمسون صفّاً كانت تعني خمسين حواراً مرسومة سلفاً في كل تحميل.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
-    <h1>{% translate "المشاركون" %}</h1>
-    <p class="sub">{% translate "سجل المشاركين: بحث وفتح ملف. ما يظهر لك من أعمدة تحدّده صلاحيتك، لا هذه الشاشة." %}</p>
+    <h1>{% include "partials/_title_icon.html" %}{% translate "المشاركون" %}</h1>
+    <p class="sub">{% translate "سجل المشاركين: بحث وفتح ملف. ما يظهر لك من أعمدة وأفعال تحدّده صلاحيتك، لا هذه الشاشة." %}</p>
   </div>
   {% if can_create %}
     <div class="acts">
@@ -31,13 +43,18 @@
   {% endif %}
 </div>
 
-{% guided_help "participants" %}
-
-<form method="get" class="filterbar" role="search">
-  <div class="fld">
+{# البحث فوري: كل تغيير يعيد رسم البطاقات والجدول (htmx) ويحدّث العنوان؛ وبلا JS يعمل النموذج بمفتاح Enter وزرّ «بحث». #}
+<form method="get" class="filterbar pt-filters" role="search" id="pt-form"
+      hx-get="{% url 'people:participants' %}" hx-target="#pt-results" hx-select="#pt-results" hx-swap="outerHTML"
+      hx-select-oob="#pt-count,#pt-clear"
+      hx-trigger="input changed delay:350ms from:#q, change from:#category"
+      hx-push-url="true" hx-indicator="#pt-busy">
+  <div class="fld grow">
     <label for="q">{% translate "بحث" %}</label>
+    {# النصّ يَعِد بما تفعله الخدمة لهذا الدور بالذات: الدور المقيّد يبحث بالرقم وحده (BR-101). #}
     <input type="search" id="q" name="q" value="{{ query }}"
-           placeholder="{% translate 'بالاسم أو الرقم الجامعي…' %}" spellcheck="false">
+           placeholder="{% if 'phone' in columns %}{% translate 'اسم، أو رقم جامعي، أو هاتف، أو رقم وثيقة…' %}{% else %}{% translate 'بالرقم الجامعي…' %}{% endif %}"
+           spellcheck="false" autocomplete="off">
   </div>
   {% if "category" in columns %}
     <div class="fld">
@@ -51,47 +68,50 @@
     </div>
   {% endif %}
   <button type="submit" class="btn2">{% translate "بحث" %}</button>
-  {% if query or selected_category %}
-    <a class="btn2 ghost" href="{% url 'people:participants' %}">{% translate "إلغاء التصفية" %}</a>
-  {% endif %}
-  <span class="count">
-    {% blocktranslate count total=participants|length %}مشارك واحد{% plural %}{{ total }} مشاركين{% endblocktranslate %}
+  <span class="busy" id="pt-busy" aria-hidden="true"></span>
+  {# غلافان ثابتان لا يختفيان: البحث الفوري يستبدلهما خارج الهدف (OOB)، وما يختفي لا يُستبدل. #}
+  <span id="pt-clear">{% if is_filtered %}<a class="btn2 ghost" href="{% url 'people:participants' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}</span>
+  <span class="count" id="pt-count">
+    {{ page.total|ar_count:"مشارك واحد|مشاركان|مشاركين|مشاركاً" }}
   </span>
 </form>
 
-{% if query or selected_category %}
-  <div class="note">
-    <div>
-      {% translate "نتائج مصفّاة" %}:
-      {% if query %}<span class="chip">{% translate "بحث" %}: {{ query }}</span>{% endif %}
-      {% if selected_category %}
-        {% for value, label in categories %}
-          {% if value == selected_category %}<span class="chip">{% translate "الفئة" %}: {{ label }}</span>{% endif %}
-        {% endfor %}
-      {% endif %}
-    </div>
+<div id="pt-results">
+{% if tiles %}
+  {# بطاقاتٌ تُصفّي: كلٌّ منها تعدّ ما تركه البحث، والمفعَّلة تُنقر ثانيةً فتوسّع. #}
+  <div class="kpi-grid tiles pt-tiles">
+    {% for t in tiles %}
+      <a class="kpi{% if t.tone %} tone-{{ t.tone }}{% endif %}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+        <span class="txt">
+          <span class="label">{{ t.label }}</span>
+          <span class="value num">{{ t.value }}</span>
+        </span>
+      </a>
+    {% endfor %}
   </div>
 {% endif %}
 
 <div class="card2">
   <div class="card2-head">
+    <span class="head-ico tone-brand" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-users"/></svg></span>
     <h2>{% translate "سجل المشاركين" %}</h2>
-    {% if category_counts %}
+    {% if is_filtered %}
       <div class="acts">
-        {% for label, count in category_counts %}
-          <span class="chip">{{ label }}: <span class="num">{{ count }}</span></span>
-        {% endfor %}
+        {% if query %}<span class="chip">{% translate "بحث" %}: {{ query }}</span>{% endif %}
+        {% if selected_category_label %}<span class="chip">{% translate "الفئة" %}: {{ selected_category_label }}</span>{% endif %}
       </div>
     {% endif %}
   </div>
   <div class="tbl-wrap">
-    <table class="tbl">
+    <table class="tbl pt-tbl">
       <thead>
         <tr>
           <th>{% translate "الرقم الجامعي" %}</th>
           <th>{% translate "الاسم" %}</th>
           {% if "category" in columns %}<th>{% translate "الفئة" %}</th>{% endif %}
           {% if "phone" in columns %}<th>{% translate "الهاتف" %}</th>{% endif %}
+          <th class="num">{% translate "التسجيلات" %}</th>
           <th><span class="sr-only">{% translate "إجراءات" %}</span></th>
         </tr>
       </thead>
@@ -102,17 +122,49 @@
             <td>{{ p.name_ar }}</td>
             {% if "category" in columns %}<td><span class="chip">{{ p.category_display }}</span></td>{% endif %}
             {% if "phone" in columns %}<td dir="ltr">{{ p.phone|default:"—" }}</td>{% endif %}
+            <td class="num">
+              {# العدد رابطٌ إلى تسجيلات صاحبه لمن تفتح له شاشة التسجيلات — ووجود `latest` هو إذنها بعينه؛ ومن لا تفتح له يراه رقماً. #}
+              {% if p.latest %}
+                <a class="row-link" href="{% url 'operations:enrollments' %}?participant={{ p.participant_number }}">{{ p.enrollment_count }}</a>
+              {% else %}{{ p.enrollment_count }}{% endif %}
+            </td>
             <td class="acts">
-              <a class="btn2 ghost" href="{% url 'people:participant-detail' p.participant_number %}">
-                {% translate "عرض الملف" %}
+              {# الملف هو مسار العمل؛ العرض السريع للمراجعة فقط، فيتبعه لا يسبقه. #}
+              <a class="btn2 primary sm" href="{% url 'people:participant-detail' p.participant_number %}">
+                {% translate "فتح الملف" %}
               </a>
+              {% if enroll_groups %}
+                <button class="btn2 sm" type="button" data-opens="enroll-modal"
+                        data-number="{{ p.participant_number }}" data-name="{{ p.name_ar }}"
+                        title="{% translate 'تسجيل المشارك بدورة أو دبلوم' %}">
+                  {% translate "تسجيل" %}
+                </button>
+              {% endif %}
+              {% if can_edit %}
+                <a class="btn2 ghost sm" href="{% url 'people:participant-edit' p.participant_number %}">{% translate "تعديل" %}</a>
+              {% endif %}
+              {% if "category" in columns %}
+                {# لا يُرسم للدور المقيّد: حواره كان سطراً يكرّر خليةً في الصفّ نفسه، وزرٌّ لا يضيف شيئاً أسوأ من غيابه. #}
+                <button class="btn2 ghost sm" type="button" data-opens="quick-modal"
+                        data-number="{{ p.participant_number }}" data-name="{{ p.name_ar }}"
+                        data-category="{{ p.category_display }}"
+                        data-registered="{{ p.registered_on|date:'Y-m-d' }}"
+                        data-phone="{{ p.phone|default:'' }}"
+                        data-city="{{ p.city_display|default:'' }}"
+                        data-qualification="{{ p.qualification_display|default:'' }}"
+                        data-count="{{ p.enrollment_count }}"
+                        data-detail-url="{% url 'people:participant-detail' p.participant_number %}"
+                        {% if p.latest %}data-latest-code="{{ p.latest.code }}" data-latest-cohort="{{ p.latest.cohort_name }}" data-latest-status="{{ p.latest.status_display }}" data-latest-tone="{{ p.latest.status|status_tone }}"{% if p.latest.is_approved and not p.latest.is_final %} data-latest-approved="{% translate 'معتمد' %}"{% endif %} data-enrollments-url="{% url 'operations:enrollments' %}?participant={{ p.participant_number }}" data-account-url="{% url 'operations:account' p.latest.code %}"{% endif %}>
+                  {% translate "عرض سريع" %}
+                </button>
+              {% endif %}
             </td>
           </tr>
         {% empty %}
           <tr><td colspan="{{ column_count }}" class="empty">
-            {% if query or selected_category %}
+            {% if is_filtered %}
               <span class="empty-title">{% translate "لا مشارك يطابق البحث" %}</span>
-              <span class="empty-body">{% translate "جرّب الرقم الجامعي كاملاً، أو وسّع الفئة إلى «كل الفئات». البحث يطابق بداية الرقم لا وسطه." %}</span>
+              <span class="empty-body">{% translate "جرّب الرقم الجامعي كاملاً، أو وسّع الفئة إلى «كل الفئات». البحث يطابق بداية الرقم لا وسطه، ولا يفرّق في الاسم بين «أحمد» و«احمد»." %}</span>
               <a class="btn2 empty-act" href="{% url 'people:participants' %}">{% translate "عرض كل المشاركين" %}</a>
             {% else %}
               <span class="empty-title">{% translate "لا مشاركون بعد" %}</span>
@@ -126,5 +178,101 @@
       </tbody>
     </table>
   </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted"><span class="num">{{ page.start }}</span>–<span class="num">{{ page.end }}</span> {% translate "من" %} <span class="num">{{ page.total }}</span></span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.prev }}">‹ {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.next }}">{% translate "التالي" %} ›</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
 </div>
+</div>
+
+{% if "category" in columns %}
+  {% include "people/_participant_quick.html" %}
+{% endif %}
+
+{% if enroll_groups %}
+  {% comment %}
+    حوار التسجيل السريع — حوارٌ واحد للصفحة كلها لا واحد لكل صفّ: الزرّ يحمل
+    رقم المشارك واسمه، والسكربت يضعهما في الحوار عند فتحه. ثلاث خطوات:
+    «دورة أم دبلوم؟» بطاقاتٌ تُنقر، ثم دفعات ذلك النوع وحدها (المعتمدة من
+    الوزارة — BR-013)، ثم التاريخ وملخّصٌ يقول ما سيحدث قبل زرّ التأكيد.
+    قائمةٌ لكل نوع، والمعطَّلة لا تُرسَل. الإرسال إلى مسار التسجيلات نفسه.
+  {% endcomment %}
+  <dialog class="modal enroll-modal" id="enroll-modal" dir="rtl" aria-labelledby="enroll-modal-t"
+          x-data="{ kind: '', cohort: '' }" @close="kind = ''; cohort = ''">
+    <form method="post" action="{% url 'operations:enrollment-quick' %}">
+      {% csrf_token %}
+      <input type="hidden" name="participant_number" id="enroll-number" data-from="number" value="">
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <div class="modal-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-user-plus"/></svg></span>
+        <div class="min-w-0">
+          <h2 id="enroll-modal-t">{% translate "تسجيل المشارك" %}</h2>
+          <div class="sub"><span id="enroll-name" data-from="name"></span> <span class="chip num" dir="ltr" translate="no" id="enroll-chip" data-from="number"></span></div>
+        </div>
+      </div>
+      <div class="modal-body">
+        {# 1 — النوع #}
+        <div class="step-lbl"><span class="n">1</span>{% translate "اختر نوع البرنامج" %}</div>
+        <div class="seg-cards" role="group" aria-label="{% translate 'نوع البرنامج' %}">
+          {% for g in enroll_groups %}
+            <button type="button" class="seg-card tone-{% if g.type == 'DIPLOMA' %}violet{% elif g.type == 'ONLINE_COURSE' %}teal{% else %}info{% endif %}"
+                    :class="{ 'is-on': kind === '{{ g.type }}' }" :aria-pressed="kind === '{{ g.type }}'"
+                    @click="kind = '{{ g.type }}'; cohort = ''; $nextTick(() => $refs['sel_{{ g.type }}'].focus())">
+              <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{% if g.type == 'DIPLOMA' %}cap{% elif g.type == 'ONLINE_COURSE' %}globe{% else %}book{% endif %}"/></svg></span>
+              <span class="t">{{ g.label }}</span>
+              <span class="c num">{{ g.cohorts|length }} {% translate "دفعة" %}</span>
+            </button>
+          {% endfor %}
+        </div>
+
+        {# 2 — الدفعة #}
+        <div class="step-lbl" :class="{ 'is-off': !kind }"><span class="n">2</span>{% translate "اختر الدفعة" %}</div>
+        <p class="hint" x-show="!kind">{% translate "اختر النوع أولاً لتظهر دفعاته المعتمدة." %}</p>
+        {% for g in enroll_groups %}
+          <div class="fld" x-show="kind === '{{ g.type }}'" x-cloak>
+            <label for="enroll-cohort-{{ g.type }}" class="sr-only">{{ g.label }}</label>
+            <select id="enroll-cohort-{{ g.type }}" name="cohort_code" x-ref="sel_{{ g.type }}" x-model="cohort"
+                    :disabled="kind !== '{{ g.type }}'" :required="kind === '{{ g.type }}'">
+              <option value="">{% translate "— اختر الدفعة —" %}</option>
+              {% for c in g.cohorts %}
+                <option value="{{ c.code }}" data-label="{{ c.label }}">{{ c.label }} · {{ c.program_name }} · {{ c.starts_on|date:"Y-m-d" }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endfor %}
+
+        {# 3 — التاريخ #}
+        <div class="step-lbl" :class="{ 'is-off': !cohort }"><span class="n">3</span>{% translate "تاريخ التسجيل" %}</div>
+        <div class="fld">
+          <label for="enroll-date" class="sr-only">{% translate "تاريخ التسجيل" %}</label>
+          <input type="date" id="enroll-date" name="enrolled_on" value="{{ today|date:'Y-m-d' }}" required>
+        </div>
+
+        <div class="note ok" x-show="cohort" x-cloak aria-live="polite">
+          <div>
+            {% translate "سيُسجَّل" %} <strong data-from="name"></strong>
+            {% translate "على الدفعة" %} <strong x-text="$refs['sel_' + kind]?.selectedOptions[0]?.dataset.label"></strong>{% translate "، وتُحمَّل الرسوم بقائمة الأسعار السارية." %}
+          </div>
+        </div>
+        <p class="hint">{% translate "الدفعات المعروضة هي المعتمدة من الوزارة فقط (BR-013). التسجيل يحتاج بعدها إلى الوصل والاعتماد كالمعتاد." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit" :disabled="!cohort">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc-check"/></svg>
+          {% translate "تسجيل" %}
+        </button>
+        <button class="btn2 ghost" type="button" data-closes>{% translate "إلغاء" %}</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
+
+{# الفتح والإغلاق وإعادة التركيز في `static/js/ui.js` — سلوكٌ واحد لكل الشاشات لا نسخةٌ في كل قالب. #}
+{# وحوار التسجيل يُملأ بالإعلان نفسه (`data-from`) بدل استثناءٍ مكتوب له وحده. #}
 {% endblock %}

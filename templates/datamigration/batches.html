@@ -2,7 +2,7 @@
 {% load i18n status_ui %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
 </div>
 <div class="note warn">
   {% translate "الأرشيف التاريخي معزول عن الدفتر المالي. لا يُنشئ سنداً ولا دفعة ولا مطالبة شريك، ولا يمسّ رقماً واحداً في التقارير. المعبر الوحيد إلى المال رصيد افتتاحي يُراجَع فرداً فرداً — وهو خارج نطاق هذه المرحلة." %}

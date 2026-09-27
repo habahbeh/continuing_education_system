@@ -51,11 +51,22 @@ from apps.billing.models import (
 from apps.core.display import person_name, text_of
 from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
 
 ENTITY = "billing.OpeningBalance"
 ZERO = Decimal("0.000")
+
+#: ``OB-2026-00001`` for a balance and ``PO-2026-00001`` for a payout — the
+#: system's own yearly sequences; nobody types one.
+BALANCE_SCOPE = "opening_balance"
+PAYOUT_SCOPE = "opening_balance_payout"
+
+
+def _next_code(scope: str, prefix: str, on: date) -> str:
+    year = str(on.year)
+    return next_number(scope, year, prefix=f"{prefix}-{year}-", padding=5)
 
 
 class OpeningBalanceStateError(Exception):
@@ -113,11 +124,11 @@ def propose_from_archive(
     *,
     actor: Any,
     historical_enrollment: Any,
-    code: str,
     direction: str,
     amount: Decimal,
     as_of: date,
     description_ar: str,
+    code: str = "",
     request: Any = None,
 ) -> OpeningBalance:
     """
@@ -161,12 +172,12 @@ def propose_from_archive(
 def propose_manually(
     *,
     actor: Any,
-    code: str,
     direction: str,
     amount: Decimal,
     as_of: date,
     description_ar: str,
     legacy_number: str = "",
+    code: str = "",
     request: Any = None,
 ) -> OpeningBalance:
     """
@@ -201,7 +212,7 @@ def _validate_new(*, code: str, direction: str, amount: Decimal, description_ar:
         raise ValidationError("مبلغ الرصيد الافتتاحي يجب أن يكون موجباً.")
     if not description_ar.strip():
         raise ValidationError("البيان إلزامي — الرصيد الذي لا يشرح نفسه لا يُراجَع.")
-    if OpeningBalance.objects.filter(code=code).exists():
+    if code and OpeningBalance.objects.filter(code=code).exists():
         raise ValidationError(f"رمز الرصيد {code} مستعمل سلفاً.")
 
 
@@ -222,6 +233,10 @@ def _create(
     request: Any,
 ) -> OpeningBalance:
     """The write half — permission already decided by the caller (BR-085)."""
+    code = code.strip()
+    if not code:
+        ensure_sequence(BALANCE_SCOPE, str(as_of.year), padding=5)
+        code = _next_code(BALANCE_SCOPE, "OB", as_of)
     balance = OpeningBalance.objects.create(
         code=code,
         source_enrollment=historical_enrollment,
@@ -693,13 +708,13 @@ def pay_refund_due(
     *,
     actor: Any,
     balance: OpeningBalance,
-    code: str,
     amount: Decimal,
     paid_on: date,
     payment_method: Any,
     external_reference: str,
     payee_name_ar: str,
     note_ar: str = "",
+    code: str = "",
     request: Any = None,
 ) -> OpeningBalanceRefund:
     """
@@ -761,16 +776,19 @@ def pay_refund_due(
             f"المبلغ المصروف {amount} لا يساوي الرصيد المستحق {balance.amount} — "
             "الصرف الجزئي غير مدعوم في هذه المرحلة."
         )
-    if OpeningBalanceRefund.objects.filter(code=code).exists():
+    code = code.strip()
+    if code and OpeningBalanceRefund.objects.filter(code=code).exists():
         raise ValidationError(f"رمز الصرف {code} مستعمل سلفاً.")
 
     _guard_movement_date(
         paid_on,
         what_ar="صرف رصيد افتتاحي",
         actor=actor,
-        reference=code,
+        reference=code or balance.code,
         request=request,
     )
+    if not code:
+        ensure_sequence(PAYOUT_SCOPE, str(paid_on.year), padding=5)
 
     return _write_payout(
         actor=actor,
@@ -801,6 +819,8 @@ def _write_payout(
     request: Any,
 ) -> OpeningBalanceRefund:
     """The write half — permission and state already decided by the caller."""
+    if not code:
+        code = _next_code(PAYOUT_SCOPE, "PO", paid_on)
     payout = OpeningBalanceRefund.objects.create(
         code=code,
         opening_balance=balance,
@@ -1083,8 +1103,15 @@ def unsettled_debt_total(participant: Any) -> Decimal:
 # Reads (A-05 — the screens ask here, never the models)
 # ---------------------------------------------------------------------------
 def list_balances(
-    *, actor: Any, status: str = "", direction: str = "", request: Any = None
+    *,
+    actor: Any,
+    status: str = "",
+    direction: str = "",
+    query: str = "",
+    request: Any = None,
 ) -> list[dict[str, Any]]:
+    from django.db.models import Q
+
     policy.require(actor, Screen.OPENING_BALANCES, Action.VIEW, request=request)
     queryset = OpeningBalance.objects.select_related(
         "created_by",
@@ -1100,6 +1127,15 @@ def list_balances(
         queryset = queryset.filter(status=status)
     if direction:
         queryset = queryset.filter(direction=direction)
+    if query.strip():
+        q = query.strip()
+        queryset = queryset.filter(
+            Q(code__icontains=q)
+            | Q(description_ar__icontains=q)
+            | Q(source_legacy_number__icontains=q)
+            | Q(enrollment__code__icontains=q)
+            | Q(participant__name_ar__icontains=q)
+        )
     # Newest payout first, so ``next(iter(...))`` picks the live one: a
     # reversed payout is only ever followed by a newer live one.
     queryset = queryset.prefetch_related("refund_payouts")
@@ -1125,13 +1161,21 @@ def list_balances(
                 "status": balance.status,
                 "status_display": balance.get_status_display(),
                 "enrollment_code": text_of(balance.enrollment, "code"),
+                "participant_name": text_of(balance.participant, "name_ar"),
+                "participant_number": text_of(balance.participant, "participant_number"),
                 "legacy_number": balance.source_legacy_number,
                 "source": _source_label(balance),
                 "created_by": person_name(balance.created_by),
+                "created_by_id": balance.created_by_id,
+                "created_at": balance.created_at,
                 "reviewed_by": person_name(balance.reviewed_by),
+                "reviewed_by_id": balance.reviewed_by_id,
+                "reviewed_at": balance.reviewed_at,
                 "approved_by": person_name(balance.approved_by),
+                "approved_at": balance.approved_at,
                 "posted_by": person_name(balance.posted_by),
                 "posted_at": balance.posted_at,
+                "resolved_by_id": balance.resolved_by_id,
                 "review_note_ar": balance.review_note_ar,
                 "decision_note_ar": balance.decision_note_ar,
                 "is_postable": balance.is_postable,
@@ -1200,6 +1244,115 @@ def balance_instance(*, actor: Any, code: str, request: Any = None) -> OpeningBa
     return OpeningBalance.objects.select_related("enrollment", "posted_charge_line").get(code=code)
 
 
+def balances_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts and sums by stage over already-projected rows — the screen's tiles."""
+    out = {
+        "draft": 0,
+        "reviewed": 0,
+        "approved": 0,
+        "refund_due": 0,
+        "refund_due_total": ZERO,
+        "posted": 0,
+        "posted_total": ZERO,
+        "applied": 0,
+        "applied_total": ZERO,
+        "refunded": 0,
+        "refunded_total": ZERO,
+        "rejected": 0,
+    }
+    for r in rows:
+        st = r["status"]
+        if st == "DRAFT":
+            out["draft"] += 1
+        elif st == "REVIEWED":
+            out["reviewed"] += 1
+        elif st == "APPROVED":
+            out["approved"] += 1
+        elif st == "REFUND_DUE":
+            out["refund_due"] += 1
+            out["refund_due_total"] += r["amount"]
+        elif st == "POSTED":
+            out["posted"] += 1
+            out["posted_total"] += r["amount"]
+        elif st == "APPLIED":
+            out["applied"] += 1
+            out["applied_total"] += r["amount"]
+        elif st == "REFUNDED":
+            out["refunded"] += 1
+            out["refunded_total"] += r["amount"]
+        elif st == "REJECTED":
+            out["rejected"] += 1
+    return out
+
+
+def enrollment_options(*, actor: Any, balance: OpeningBalance, request: Any = None) -> list[dict[str, Any]]:
+    """
+    The live enrolments a reviewer may attach this balance to — nothing is
+    matched automatically (the archive carries legacy numbers under two
+    different names). The list is a suggestion ordered by likeness: the
+    participant already attached first, then the legacy number, then the
+    rest; the reviewer still chooses.
+    """
+    from apps.operations.models import Enrollment
+
+    policy.require(actor, Screen.OPENING_BALANCES, Action.VIEW, request=request)
+
+    legacy = (balance.source_legacy_number or "").strip()
+    linked_id = getattr(
+        getattr(balance.source_enrollment, "participant", None), "linked_participant_id", None
+    ) if balance.source_enrollment_id else None
+    queryset = Enrollment.objects.select_related("participant", "cohort__program").exclude(
+        status="CANCELLED"
+    )
+    options = []
+    for e in queryset.order_by("-enrolled_on", "-id")[:300]:
+        rank = 2
+        if balance.participant_id and e.participant_id == balance.participant_id:
+            rank = 0
+        elif linked_id and e.participant_id == linked_id:
+            rank = 0
+        elif legacy and legacy in (e.participant.participant_number or ""):
+            rank = 1
+        options.append(
+            {
+                "code": e.code,
+                "label": f"{e.code} — {e.participant.name_ar} · {e.cohort.program.name_ar}",
+                "rank": rank,
+                "participant_name": e.participant.name_ar,
+            }
+        )
+    options.sort(key=lambda o: (o["rank"], o["code"]))
+    return options
+
+
+def archive_row_summary(*, actor: Any, source_row_id: int, request: Any = None) -> dict[str, Any] | None:
+    """What the proposer reads before typing a figure — the archive row, in words."""
+    from apps.datamigration.services import read_service
+
+    try:
+        h = read_service.historical_enrollment_for(
+            actor=actor, source_row_id=source_row_id, request=request
+        )
+    except Exception:  # noqa: BLE001 — missing row or no archive access: no summary
+        return None
+    already = OpeningBalance.objects.filter(source_enrollment=h).values_list("code", flat=True).first()
+    return {
+        "row_id": source_row_id,
+        "name": text_of(h.participant, "name_ar"),
+        "legacy_number": text_of(h.participant, "legacy_number"),
+        "program": text_of(getattr(h.cohort, "program", None), "name_ar")
+        or text_of(h.cohort, "name_ar"),
+        "tuition": h.tuition,
+        "registration_fee": h.registration_fee,
+        "collected": h.collected,
+        "note": h.source_note,
+        "workbook": text_of(h.batch, "source_filename"),
+        "sheet": text_of(h.source_row, "sheet_name"),
+        "row_number": getattr(h.source_row, "source_row", None),
+        "already_proposed": already,
+    }
+
+
 def status_choices() -> list[tuple[str, str]]:
     return [(value, str(label)) for value, label in OpeningBalanceStatus.choices]
 
@@ -1210,6 +1363,9 @@ def direction_choices() -> list[tuple[str, str]]:
 
 __all__ = [
     "AlreadyPostedError",
+    "archive_row_summary",
+    "balances_summary",
+    "enrollment_options",
     "AlreadyRefundedError",
     "AlreadyResolvedError",
     "CreditNotPostableError",

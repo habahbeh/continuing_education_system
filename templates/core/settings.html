@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{% translate "الإعدادات — مركز التعليم المستمر" %}{% endblock %}
 
@@ -7,12 +7,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "النظام" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "ما الذي يستطيع المركز تغييره دون إصدار برمجي جديد: المفاتيح التي تحكم القواعد، والقرارات التي ما زالت مفتوحة." %}</p>
   </div>
 </div>
 
-{% guided_help "settings" %}
 
 <div class="note info">
   <div>
@@ -30,6 +29,87 @@
 <div class="note">
   <div>
     {% translate "القيم غير معروضة هنا عن قصد: تُقرأ عند لحظة استعمالها بحسب تاريخ سريانها، فطباعة قيمة على هذه الصفحة تُظهر رقماً هو رقم اليوم بالمصادفة وحدها. الثابت هو المفتاح وما يحكمه." %}
+  </div>
+</div>
+
+{% comment %}
+  Sprint 8L — هوية المؤسسة: أول ما يُغيَّر من هذه الشاشة فعلاً.
+
+  الخانات الأربع تُعرض كلها ولو كانت فارغة: أن يرى المدير أن «شعار الطباعة»
+  لم يُرفع بعد هو نصف فائدة الشاشة. والرفع يفتح حواراً أصيلاً لا `confirm()`،
+  لأن استبدال شعارٍ قائم فعلٌ يُقرأ قبل أن يُنفَّذ.
+{% endcomment %}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "هوية المؤسسة" %}</h2></div>
+  <div class="card2-body">
+    <p class="hint">
+      {% translate "الشعار يظهر في شريط العنوان وفي ترويسة كل مستند مطبوع — السند وبراءة الذمة والشهادة والتقارير. تغييره يكتب صفّاً مؤرّخاً جديداً ولا يمحو ما قبله، فالرجوع عنه رفعُ الملف السابق من جديد لا استرجاع نسخة احتياطية." %}
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>{% translate "الموضع" %}</th><th>{% translate "الحالي" %}</th>
+              <th>{% translate "سارٍ منذ" %}</th><th>{% translate "الملف" %}</th></tr>
+        </thead>
+        <tbody>
+          {% for slot in brand_slots %}
+            <tr>
+              <td>{{ slot.label }}</td>
+              <td>
+                {% if slot.url %}
+                  <img src="{{ slot.url }}" alt="{{ slot.asset.alt_text_ar }}" class="brand-preview">
+                {% else %}
+                  <span class="chip">{% translate "لم يُرفع بعد" %}</span>
+                {% endif %}
+              </td>
+              <td class="num">{{ slot.since|default:"—" }}</td>
+              <td>
+                {% if slot.asset %}
+                  <span dir="ltr">{{ slot.asset.original_filename }}</span>
+                  <small class="muted" dir="ltr">
+                    {{ slot.asset.size_bytes }}B{% if slot.asset.width_px %} · {{ slot.asset.width_px }}×{{ slot.asset.height_px }}{% endif %}
+                  </small>
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if may_edit_brand %}
+      <div class="action-bar">
+        <button class="btn2 primary" type="button"
+                @click="document.getElementById('brand-upload').showModal()">
+          {% translate "رفع ملف هوية…" %}
+        </button>
+      </div>
+
+      <dialog class="modal confirm-modal" id="brand-upload" dir="rtl" aria-labelledby="brand-upload-t"
+              {% if brand_form.errors %}x-init="$nextTick(() => $el.showModal())"{% endif %}>
+        <form method="post" enctype="multipart/form-data">{% csrf_token %}
+          <div class="modal-head">
+            <h2 id="brand-upload-t">{% translate "رفع ملف هوية" %}</h2>
+          </div>
+          <div class="modal-body">
+            {% include "partials/_form.html" with form=brand_form %}
+            <p class="hint">
+              {% translate "الملف الملوَّن للشاشة، والأحادي للطباعة: شعار ملوَّن على طابعة أحادية يخرج لطخة رمادية. ملف SVG يحمل سكربتاً يُرفض — صدّره من برنامج التصميم بلا تفاعل أو ارفعه PNG." %}
+            </p>
+          </div>
+          <div class="modal-acts">
+            <button class="btn2 primary" type="submit">{% translate "رفع واعتماد" %}</button>
+            <button class="btn2 ghost" type="button"
+                    @click="document.getElementById('brand-upload').close()">{% translate "رجوع" %}</button>
+          </div>
+        </form>
+      </dialog>
+    {% else %}
+      <p class="hint">{% translate "تغيير الهوية من صلاحية مدير المركز (§3.7/35)." %}</p>
+    {% endif %}
   </div>
 </div>
 
@@ -75,4 +155,97 @@
     </div>
   </div>
 </div>
+{% if may_edit_brand %}
+  {# بيانات العرض: زرّان يستدعيان أمر `seed_demo_all` نفسه — طريقُ زرعٍ واحد لا #}
+  {# اثنان يتباعدان. ومن يقف أمام العميل قبل العرض بنصف ساعة لا يفتح طرفية. #}
+  <div class="card2">
+    <div class="card2-head">
+      <span class="head-ico tone-amber" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-database"/></svg></span>
+      <h2>{% translate "بيانات العرض" %}</h2>
+      <div class="acts">
+        <span class="chip" dir="ltr" translate="no">{{ demo_database }}</span>
+      </div>
+    </div>
+    <div class="card2-body">
+      <p class="hint boxed">
+        {% translate "زرّان: أحدهما يملأ الناقص ولا يمسّ القائم، والآخر يمحو كل صفٍّ ويبني القاعدة من الصفر. وكل حالة تُبلَغ بالمشي على مسارات النظام نفسها — لا بكتابة الحالة على الصفّ — فما يُعرَض على العميل شيءٌ يستطيع النظام إنتاجه." %}
+      </p>
+      <div class="form-acts">
+        <button class="btn2 primary" type="button" data-opens="demo-fill">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+          {% translate "املأ بيانات العرض" %}
+        </button>
+        {% if demo_resettable %}
+          <button class="btn2 danger-ghost" type="button" data-opens="demo-reset">
+            <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-undo"/></svg>
+            {% translate "أعِد البناء من الصفر" %}
+          </button>
+        {% endif %}
+      </div>
+      {% if not demo_resettable %}
+        {# §3.4 — لا يُرسَم زرٌّ استعماله مرفوض: الأمر نفسه يرفض المحو على قاعدة #}
+        {# لم تُسمَّ قاعدةَ عرض، فالزرّ هنا كان سيوعد بما يُرفَض (BR-085). #}
+        <div class="note">
+          <div>
+            <strong>{% translate "المحو غير متاح على هذه القاعدة." %}</strong>
+            {% blocktranslate with name=demo_database %}«{{ name }}» ليست مسمّاةً قاعدةَ عرض، وأمرٌ يمحو كل صفٍّ لا يعمل على قاعدةٍ لم تُسمَّ له.{% endblocktranslate %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <dialog class="modal confirm-modal" id="demo-fill" dir="rtl" aria-labelledby="demo-fill-t">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="action" value="seed-demo">
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2 id="demo-fill-t">{% translate "ملء بيانات العرض" %}</h2>
+      </div>
+      <div class="modal-body">
+        <p>{% blocktranslate with name=demo_database %}يُضاف الناقص إلى «{{ name }}»؟{% endblocktranslate %}</p>
+        <p class="hint">{% translate "لا يُحذف صفٌّ واحد، ولا يُمسّ ما هو قائم. يُضاف ما هو غائب فقط: الأدوار والفصل والفترات المالية والكتالوج والدفعات والمشاركون والشركاء والمطالبات والمخالصات." %}</p>
+        <div class="note">
+          <div>{% translate "قد يستغرق نحو نصف دقيقة — لا تُغلق الصفحة." %}</div>
+        </div>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "املأ" %}</button>
+        <button class="btn2 ghost" type="button" data-closes="demo-fill">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+
+  {% if demo_resettable %}
+    <dialog class="modal confirm-modal" id="demo-reset" dir="rtl" aria-labelledby="demo-reset-t">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="reset-demo">
+        <div class="modal-head">
+          <span class="head-ico tone-danger" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+          <h2 id="demo-reset-t">{% translate "إعادة البناء من الصفر" %}</h2>
+        </div>
+        <div class="modal-body">
+          <div class="note danger">
+            <div>
+              <strong>{% translate "يُمحى كل صفٍّ — ولا رجعة." %}</strong>
+              {% translate "المشاركون والتسجيلات والسندات والمطالبات وسجل التدقيق والمستخدمون." %}
+            </div>
+          </div>
+          <p class="hint">{% translate "ثم تُبنى القاعدة بالمشي على المسارات نفسها، فيخرج سجلُّ تدقيقٍ متّسق. والحسابات تُعاد بكلمة مرور الزرع — فستُخرَج من جلستك وتسجّل الدخول من جديد." %}</p>
+          <div class="fld">
+            <label for="demo-confirm">{% translate "اكتب اسم القاعدة للتأكيد" %}<span class="req" aria-hidden="true">*</span></label>
+            <input type="text" id="demo-confirm" name="confirm" dir="ltr" autocomplete="off"
+                   spellcheck="false" placeholder="{{ demo_database }}" required
+                   data-dialog-autofocus>
+            <div class="help">{% blocktranslate with name=demo_database %}اكتب {{ name }} حرفاً بحرف. وأيُّ شيءٍ غيره لا يمسّ شيئاً.{% endblocktranslate %}</div>
+          </div>
+        </div>
+        <div class="modal-acts">
+          <button class="btn2 danger" type="submit">{% translate "امحُ وابنِ من الصفر" %}</button>
+          <button class="btn2 ghost" type="button" data-closes="demo-reset">{% translate "رجوع" %}</button>
+        </div>
+      </form>
+    </dialog>
+  {% endif %}
+{% endif %}
 {% endblock %}

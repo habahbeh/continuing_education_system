@@ -129,6 +129,11 @@
   .brand    { @apply flex items-center gap-3 font-extrabold min-w-0; }
   .brand > span { @apply min-w-0 truncate; }
   .brand small { @apply block font-normal text-2xs opacity-80 truncate; }
+  /* الشعار المرفوع يحلّ محلّ الشارة النصّية بالمقاس نفسه، فلا يقفز الشريط
+     حين يُرفع أول ملف ولا حين يُزال. `object-fit` لأن ما يرفعه المركز قد
+     يكون مربّعاً أو عريضاً، ولا نعرف أيّهما. */
+  .logo-img { @apply h-9 w-auto shrink-0 rounded-lg; max-width: 8rem; object-fit: contain;
+              print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .logo     { @apply inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-lg bg-white/15 font-black text-xs;
               letter-spacing: .02em; }
   .content  { @apply p-4 sm:p-6 w-full min-w-0; max-width: theme(maxWidth.content); }
@@ -198,7 +203,26 @@
   .modal-head h2    { @apply text-base font-black m-0; }
   .modal-body       { @apply px-4 py-3 text-sm; text-wrap: pretty; }
   .modal-body .dl   { @apply mt-3; }
+  /* حوار دورة حياة التسجيل يُقرأ دفعة واحدة، فمسافاته أضيق منها في الصفحة:
+     الشرح ثم الملخّص ثم الحقول بلا فجوات تدفع زرّ التأكيد خارج الشاشة على
+     الهاتف. مقصورةٌ على حوارات هذه الشاشة كي لا تمسّ حوار براءة الذمة. */
+  .modal[dir="rtl"] .modal-body > .note { @apply mb-0; }
+  .modal[dir="rtl"] .modal-body .dl dt,
+  .modal[dir="rtl"] .modal-body .dl dd  { @apply py-1.5; }
   .modal-acts       { @apply flex flex-wrap items-center gap-2 border-t border-line px-4 py-3; }
+  /* الحوار يقف في DOM داخل خلية «الإجراءات»، فينزل إليه ثلاثة أشياء من فوقه:
+     `text-align:end` و`white-space:nowrap` موروثتان عن `.tbl td.acts`، و
+     `.tbl td .btn2` مُحدِّد وصفيّ يبلغ أزراره. و«النهاية» في صفحة RTL يسار —
+     فكان عنوان الحوار وعناوين حقوله وشرحه تُرسم إلى اليسار، ولا يلتفّ سطر
+     القاعدة الطويل، وتُصغَّر أزرار التأكيد إلى قياس أزرار الصفّ.
+     الحوار لوحة قائمة بذاتها لا امتداد للخلية: يستردّ اتجاهه ولفّه وقياسه. */
+  .modal            { white-space: normal; }
+  .modal[dir="rtl"] { text-align: right; }
+  .tbl td .modal .btn2    { @apply px-3 py-2 text-sm; }
+  .tbl td .modal .btn2.sm { @apply px-2 py-1 text-xs; }
+  /* حقول الحوار في شبكة واحدة: عمودان على اللوحي والمكتبي وعمود على الهاتف،
+     فيقف «مرجع القرار» و«سبب الفصل» متوازنين بعرض واحد بدل عمود طويل. */
+  .modal-fields     { @apply grid gap-x-4 gap-y-3 mt-3 sm:grid-cols-2; }
 
   /* قائمة «إجراءات الحالة» في صفّ التسجيل: مُفصح أصلي يطوي المخارج الثلاثة،
      وكلُّ بند يفتح حواره. الألوان بحسب الفعل: التخرج محايد، الانسحاب تنبيه،
@@ -217,6 +241,11 @@
   .row-menu-item.danger   { @apply text-danger; }
   .row-menu-item.danger:hover { @apply bg-danger-soft; }
   .modal .fld             { @apply mt-3 mb-0; }
+  /* داخل الشبكة تحمل الفجوةُ المسافةَ، فلا هامش على الحقل يضاعفها. */
+  .modal-fields .fld      { @apply mt-0 mb-0; }
+  /* الخطأ داخل الحوار يبقى مقروءاً بلا أن يملأ اللوحة: الإطار الأحمر على
+     الأداة يحمل الإشارة، والسطر تحتها يقول ما المطلوب بخطّ أصغر. */
+  .modal .fld .err        { @apply text-2xs font-bold leading-snug; }
   /* خلية الإجراءات لا تلتفّ ولا تُمطّ. */
   .tbl td.acts  { @apply whitespace-nowrap text-end; }
 
@@ -244,6 +273,9 @@
   .note.warn    { @apply border-warn-line bg-warn-soft text-warn; border-inline-start-color: theme(colors.warn.DEFAULT); }
   .note.danger  { @apply border-danger-line bg-danger-soft text-danger; border-inline-start-color: theme(colors.danger.DEFAULT); }
   .note.info    { @apply border-info-line bg-info-soft text-info; border-inline-start-color: theme(colors.info.DEFAULT); }
+  /* قاعدة عملٍ يجب أن تُقرأ قبل الضغط على زرّ لا رجعة فيه. التمييز بالوزن
+     والتباين لا باللون: الأحمر محجوز للحظة يُرفض فيها شيء (قاعدة 6-5). */
+  .note.strong  { @apply text-ink font-bold; border-inline-start-color: theme(colors.ink.DEFAULT); }
   /* Django's message tags are success/error/warning/debug, and `_messages.html`
      prints them straight into the class attribute. Only `info` happened to
      collide with a rule that existed, so every success and every refusal in
@@ -341,12 +373,17 @@
   .btn2:disabled:hover { @apply bg-white; }
 
   /* الروابط داخل المحتوى لم يكن لها أي تنسيق. */
-  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link) {
+  /* البطاقة والمحطة رابطان كاملان لا نصّاً مسطوراً: مستثنيان من لون الرابط وتسطيره. */
+  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):not(.kpi):not(.stop):not(.row-link) {
     @apply text-brand-700 font-bold;
   }
-  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):hover {
+  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):not(.kpi):not(.stop):not(.row-link):hover {
     @apply underline;
   }
+  /* رقم الصفّ رابطٌ بلون النصّ: يُفتح بالنقر ولا يبدو عنواناً مسطوراً. */
+  .content a.row-link { @apply text-ink font-black; text-decoration: none; }
+  .content a.row-link:hover { @apply text-brand-700; text-decoration: none; }
+  a.kpi, a.kpi:hover, a.stop, a.stop:hover { text-decoration: none; }
 
   /* --- الملخّصات العددية ----------------------------------------------- */
   .kpi          { @apply bg-white border border-line rounded-xl p-4; }
@@ -439,6 +476,57 @@
    * `flex-1` مع حدّ أدنى للعرض: ستّ محطات في صفّ على المكتبي، وتلتفّ وحدها
    * إلى صفّين أو ثلاثة دون استعلام وسائط.
    */
+  /* --- لوحة المؤشرات (Sprint 8I) ---------------------------------------
+   * مسارٌ أفقي بثماني محطات، حلقةٌ وأعمدةٌ ومقاييس من CSS وحدها، وألسنةٌ
+   * لجدول الأعمال المعلّقة. لا مكتبة رسم ولا سكربت غير Alpine الموجود. */
+  .stepper      { @apply grid gap-2 m-0 p-0 mb-6; list-style: none;
+                  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); }
+  /* ثماني محطات صفّاً واحداً حيث يتّسع العرض؛ دونه تلتفّ بلا محطة وحيدة في آخر سطر. */
+  @media (min-width: 1280px) { .stepper { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+  .stepper li   { @apply relative flex flex-col items-start gap-1 rounded-xl border bg-white px-3 pt-3 pb-3 text-sm;
+                  border-color: theme(colors.brand.200); border-block-start: 4px solid theme(colors.brand.700); }
+  .stepper li.off { @apply bg-surface-2 border-line text-ink-3; border-block-start-color: theme(colors.line.2); }
+  .stepper .n   { @apply inline-flex items-center justify-center w-6 h-6 rounded-full text-2xs font-black
+                         bg-brand-700 text-white; }
+  .stepper li.off .n { @apply bg-line-2 text-ink-3; }
+  .stepper .t   { @apply font-extrabold text-ink leading-tight; }
+  .stepper li.off .t { @apply text-ink-3; }
+  .stepper .w   { @apply text-2xs text-ink-3 mb-1; }
+  .stepper .btn2, .stepper .chip { margin-block-start: auto; }
+  /* السهم بين المحطات: على الحافة المنطقية النهائية، فيتّجه مع النصّ. */
+  .stepper li:not(:last-child)::after { content: "‹"; position: absolute; top: 50%; inset-inline-end: -.7rem;
+                  transform: translateY(-60%); color: theme(colors.brand.300); font-size: 1.25rem; font-weight: 900; }
+
+  .chart-grid   { @apply grid gap-4 mb-6 md:grid-cols-2; }
+  .chart-grid .card2 { @apply mb-0; }
+  /* شريط الأرصدة المكدَّس: خانات ملوّنة بالنغمة، لا أعراض محسوبة. */
+  .bar.stack    { @apply h-3 mt-0 mb-3; }
+  .bar.stack span { @apply h-3; }
+  .bar span.on.danger { @apply bg-danger; }
+  .bar span.on.ok     { @apply bg-ok; }
+  .bar span.on.warn   { @apply bg-warn; }
+  .legend       { @apply m-0 p-0 text-sm flex flex-wrap gap-x-5; list-style: none; }
+  .legend li    { @apply flex items-center gap-2 py-1; }
+  .legend .dot  { @apply inline-block w-2.5 h-2.5 rounded-full; }
+  .legend .dot.danger { @apply bg-danger; }
+  .legend .dot.ok     { @apply bg-ok; }
+  .legend .dot.warn   { @apply bg-warn; }
+  /* أعمدة الأسبوع: عشر خانات واقفة لكلّ يوم، تُملأ من الأرض. */
+  .cols         { @apply flex items-end gap-2; }
+  .col          { @apply flex-1 flex flex-col items-center min-w-0; }
+  .col .v       { @apply text-2xs font-bold text-ink-2 mb-0.5; min-height: 1rem; }
+  .colbar       { @apply flex flex-col w-full gap-px; }
+  .colbar span  { @apply block w-full bg-line-2; height: .55rem; }
+  .colbar span:first-child { border-start-start-radius: 3px; border-start-end-radius: 3px; }
+  .colbar span.on { @apply bg-brand-600; }
+  .col .l       { @apply text-2xs text-ink-3 mt-1; }
+
+  .tabs         { @apply flex flex-wrap gap-1 px-3 pt-2 border-b border-line bg-surface-2; }
+  .tab          { @apply inline-flex items-center gap-2 px-3 py-2 text-sm font-bold text-ink-2 rounded-t-lg
+                         border border-transparent border-b-0; margin-block-end: -1px; }
+  .tab:hover    { @apply text-brand-800; }
+  .tab.is-active{ @apply bg-white text-brand-800 border-line; }
+
   .flow         { @apply flex flex-wrap gap-2 m-0 p-0; list-style: none; }
   .flow li      { @apply flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm;
                   flex: 1 1 9rem; }
@@ -493,9 +581,23 @@
   .fld input, .fld select, .fld textarea {
                   @apply rounded-lg border border-line px-3 py-2 text-sm bg-white w-full text-ink; }
   .fld textarea { @apply min-h-[5rem]; }
+  /* الأداة ترث اتجاه الصفحة، لكنها لا تُظهره لمن يُملي الحقل: المؤشّر يقف
+     حيث يبدأ النص. الحقل العربي يحمل `dir="rtl"` صراحةً في القالب، وهذه
+     المحاذاة تتبعه — مشروطةً به، فلا تمسّ حقلاً لاتينياً أو رمزاً. */
+  .fld input[dir="rtl"], .fld select[dir="rtl"], .fld textarea[dir="rtl"] {
+                  text-align: right; }
   .fld input:hover, .fld select:hover, .fld textarea:hover { @apply border-ink-3/50; }
   .fld input:disabled, .fld select:disabled, .fld textarea:disabled {
                   @apply bg-surface-2 text-ink-3 cursor-not-allowed; }
+  /* خانة البحث التي يدرجها `ui.js` فوق قائمة طويلة: تبدو تابعةً لقائمتها لا
+     حقلاً ثانياً — أصغر، وبلا الفجوة التي تفصل حقلاً عن حقل. */
+  .fld .sel-search {
+                  @apply text-xs py-1.5 bg-surface-2 border-dashed; margin-block-end: .25rem; }
+  .fld .sel-search::placeholder { @apply text-ink-3; }
+  /* الاستثناء كتلةٌ واحدة: الخانة وسببُها يظهران ويغيبان معاً، وحدٌّ خفيف
+     يقول إن ما بعده ليس من الطلب العادي. */
+  .waiver       { @apply rounded-lg border border-dashed border-line bg-surface-2 p-3 mb-3; }
+  .waiver .fld:last-child { @apply mb-0; }
   .fld .help    { @apply text-2xs text-ink-3; text-wrap: pretty; }
   .fld .err     { @apply text-xs font-bold text-danger; }
   /* الحقل المرفوض يُعلَّم بالإطار لا باللون وحده. */
@@ -509,6 +611,30 @@
   .fld.is-check label { @apply text-sm font-bold text-ink cursor-pointer; }
   .fld.is-check input[type="checkbox"] {
                   @apply w-4 h-4 shrink-0 accent-brand-700 cursor-pointer; }
+
+  /* تعليلُ حالةٍ فارغة: لِمَ لا فعل هنا، وأين الفعل. داخل الخليّة الفارغة لا
+     بطاقةً فوقها، لأن القارئ ينظر إلى موضع الزرّ الغائب لا إلى رأس الصفحة. */
+  .empty .empty-why  { @apply block max-w-2xl mx-auto mt-2 text-start; }
+
+  /* قائمة خانات اختيار: أوّل حقلٍ من نوعه في المشروع، ولم يكن له شكل.
+
+     `CheckboxSelectMultiple` يُرسم `<div>` لكل خيار، وخانته `<input>` عادية —
+     فورثت `w-full` من `.fld input` وصارت صندوقاً مؤطَّراً بعرض العمود: قياس
+     فعلي 543px عند 1440 و463 عند 1280 و335 عند 1024، اثنتا عشرة مرّة فوق
+     بعضها بارتفاع 571px في خليّة واحدة. وهي العلّة نفسها التي عالجها
+     `.fld.is-check` للخانة المفردة، ولم تكن قد لقيت نظيراً للمتعدّدة.
+
+     والأعمدة تنساب مع العرض: ثلاثة على السطح وواحد على الهاتف، بلا نقطة
+     انكسار مكتوبة باليد. */
+  .check-set          { @apply border border-line rounded-lg px-3 py-2 mt-1; }
+  .check-set legend   { @apply text-sm font-bold text-ink px-1; }
+  .check-list         { @apply grid gap-x-4 gap-y-1;
+                        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  .check-list label   { @apply flex flex-row items-center gap-2 text-sm text-ink cursor-pointer py-0.5; }
+  .fld .check-list input[type="checkbox"],
+  .check-list input[type="checkbox"] {
+                        @apply w-4 h-4 shrink-0 accent-brand-700 cursor-pointer
+                               rounded border border-line p-0; }
 
   /* شاشة دخول: بطاقة واحدة في وسط الصفحة. كانت ثلاث شاشات مصادقة تحمل
      `style="max-width:..."` سطرياً لأن الصنف لم يكن موجوداً. */
@@ -633,6 +759,14 @@
   .doc          { @apply mx-auto bg-white text-ink; max-width: 21cm; }
   .doc-head     { @apply flex items-start gap-4 pb-3 mb-5;
                   border-block-end: 2px solid theme(colors.brand.900); }
+  /* ارتفاع بالمليمتر لا بالبكسل: هذه الترويسة مقصدها الورق، و14mm هو ما
+     يترك اسم الجامعة سيّد الترويسة بدل أن يزاحمه الشعار.
+     `print-color-adjust` وإلّا طبعته بعض المتصفحات باهتاً أو أسقطته. */
+  /* معاينة الشعار في شاشة الإعدادات: ارتفاع ثابت وعرضٌ حرّ، فلا يمطّ الصفّ
+     ملفٌّ عريض ولا يختفي ملفٌّ مربّع. */
+  .brand-preview { height: 2.25rem; width: auto; max-width: 9rem; object-fit: contain; }
+  .doc-logo     { height: 14mm; width: auto; max-width: 40mm; object-fit: contain;
+                  print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .doc-head .org{ @apply font-extrabold leading-tight; font-size: 1.125rem; }
   .doc-head .org small { @apply block font-normal text-xs text-ink-3; }
   .doc-head .meta { @apply text-xs text-ink-3; margin-inline-start: auto; text-align: start; }
@@ -675,8 +809,15 @@
                     font-weight: 900; font-size: 7.5rem; line-height: 1; color: var(--burgundy);
                     opacity: .045; transform: rotate(-12deg); pointer-events: none; user-select: none;
                     white-space: nowrap; }
-  .cert > :not(.cert-watermark) { position: relative; }
-  .cert-logo    { display: none; height: 20mm; width: auto; margin: 0 auto 4mm; }
+  .cert > :not(.cert-watermark):not(.cert-watermark-img) { position: relative; }
+  /* كان `display:none` بانتظار ملفٍّ تحت static/. صار الملف يُرفع من شاشة
+     الإعدادات، والقالب لا يرسم الوسم أصلاً حين لا شعار — فالإخفاء لم يعد
+     له عمل. */
+  .cert-logo    { height: 20mm; width: auto; margin: 0 auto 4mm; object-fit: contain;
+                  print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .cert-watermark-img { position: absolute; inset: 0; margin: auto; width: 55%; height: auto;
+                  opacity: .06; object-fit: contain; pointer-events: none;
+                  print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .cert-meta    { @apply flex justify-between text-2xs text-ink-3; letter-spacing: .04em; }
   .cert-identity{ @apply text-center mt-2; }
   .cert-university { @apply font-black; font-size: 1.375rem; color: var(--burgundy-deep); line-height: 1.3; }
@@ -709,6 +850,507 @@
                       box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 5px var(--gold-soft); }
   .cert-note    { @apply text-center text-ink-3 mt-3; font-size: .625rem; }
 
+  .kpi-grid.rcpt-kpis { @apply xl:grid-cols-2; }
+  .rcpt-kpis .kpi .foot { @apply block mt-1 text-2xs text-ink-3; white-space: normal; }
+  .rcpt-kpis .kpi .value { white-space: normal; }
+  .rcpt-facts dd { @apply text-sm; }
+  /* سند بلا وصل: الشارة وزر الاستكمال على سطر واحد (§5.2). */
+  .rcpt-facts .voucher-missing { @apply flex flex-wrap items-center gap-2; }
+  .rcpt-facts .voucher-missing .btn2 { @apply py-1 px-2.5 text-xs; }
+  .rcpt-alloc td:last-child, .rcpt-alloc th:last-child { @apply w-40; }
+  /* السند الملغى: البطاقتان تبهتان ولا يُخفى شيء. */
+  .rcpt-page.is-void .rcpt-kpis .kpi { opacity: .75; }
+  .err .reasons { @apply m-0 mt-1 ps-4 list-disc; }
+  .err .reasons li { @apply mt-0.5; }
+  .btn2.danger-ghost { @apply text-danger border-danger-line; }
+  .btn2.danger-ghost:hover { @apply bg-danger-soft; }
+
+  /* --- سجل السندات: بطاقات-مرشّح، أزرار المدى، صفّ الملغى، الذيل ------------ */
+  .reg-filters .fld.grow, .disc-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .reg-filters .fld.grow input, .disc-filters .fld.grow input { @apply w-full; }
+  .seg-btns     { @apply inline-flex rounded-lg border border-line overflow-hidden; }
+  .seg-btn      { @apply px-3 py-1.5 text-xs font-bold text-ink-2 bg-white border-e border-line last:border-e-0 cursor-pointer; }
+  .seg-btn:hover { @apply bg-surface-2; }
+  .seg-btn.is-on { @apply bg-brand-700 text-white; }
+  /* سجلّ كثيف: صفّ واحد السطر، رأس ثابت عند التمرير، أيقونات للفعلين. */
+  .reg-tbl td     { @apply py-1.5; }
+  .reg-tbl thead th { position: sticky; top: 0; z-index: 1; }
+  .reg-tbl .sub-line { @apply block text-2xs leading-tight; }
+  .reg-tbl .who-cell small { @apply ms-1; }
+  .reg-tbl td.acts .ico-btn { @apply inline-flex items-center justify-center w-8 h-8 p-0; }
+  .reg-tbl td.acts .ico-btn svg { @apply w-4 h-4; }
+  .kpi-grid.reg-tiles { @apply md:grid-cols-3 xl:grid-cols-5; }
+  .reg-tbl tr.is-void td { @apply text-ink-3; }
+  .reg-tbl tr.is-void .amt { text-decoration: line-through; }
+  .content .reg-tbl .row-link:hover { @apply text-brand-700; text-decoration: none; }
+  .reg-tbl tfoot td { @apply bg-surface-2 font-bold border-t-2 border-line; }
+  .reg-tbl .by-method .chip { @apply me-1; }
+  .busy         { @apply inline-block w-4 h-4 rounded-full border-2 border-line border-t-brand-700 opacity-0 transition-opacity; }
+  .busy.htmx-request, .htmx-request .busy { @apply opacity-100; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #reg-results.htmx-request, .htmx-request #reg-results { @apply opacity-60; }
+  .pager        { @apply flex flex-wrap items-center justify-between gap-2; }
+  .pager-btns   { @apply flex items-center gap-2; }
+
+  /* --- الإقفال اليومي: الطابور، المعاينة الحيّة، الفرق ------------------------ */
+  .kpi-grid.closing-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+
+  /* الخصومات: أربع بطاقات، بطاقتا نوع، معاينة حيّة، وسطور فرعية في الجدول. */
+  .kpi-grid.disc-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  /* سبعة أعمدة لا تسع ثلثي شاشة 1024؛ العمودان من xl فما فوق. */
+  .dash-cols.disc-cols { @apply lg:grid-cols-1 xl:grid-cols-3; }
+  .disc-cols .dash-main { @apply lg:col-span-1 xl:col-span-2; }
+  .seg-cards.two { @apply grid-cols-2 sm:grid-cols-2; }
+  .seg-cards.two .seg-card { @apply py-2; }
+  .seg-cards.two .ico { @apply w-8 h-8; }
+  .seg-cards.two .ico svg { @apply w-4 h-4; }
+  .disc-tbl td { @apply px-2; }
+  .disc-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .disc-tbl .code-cell .row-link, .disc-tbl .burden .pair, .disc-tbl .disc-state .chip { @apply whitespace-nowrap; }
+  .disc-tbl .disc-reason { @apply min-w-[7rem] max-w-[16rem]; }
+  .disc-tbl .burden .pair { @apply flex justify-between gap-2 text-xs; }
+  .disc-tbl .burden .pair .num { font-variant-numeric: tabular-nums; }
+  .disc-grant .step-lbl { @apply mt-2; }
+  .disc-grant .seg-cards.two .seg-card { @apply py-1.5 flex-row justify-center gap-2; }
+  .disc-grant .seg-cards.two .ico { @apply w-7 h-7; }
+  .disc-tbl .disc-state .sub-line { white-space: normal; }
+  .disc-scope { @apply mb-2; }
+  .disc-preview { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 mb-3 text-sm; }
+  .disc-preview .row { @apply flex items-center justify-between gap-2 py-0.5; }
+  .disc-preview .row.split { @apply text-xs text-ink-3 border-t border-line-2 mt-1 pt-1; }
+  .disc-preview .is-danger { @apply text-danger; }
+  .disc-grant .dl { @apply text-sm; }
+
+  /* الاستردادات: بطاقات، تبويبا النموذجين، صندوق الرصيد، وجدولان مضغوطان. */
+  .kpi-grid.rf-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  .dash-cols.rf-cols { @apply lg:grid-cols-1 xl:grid-cols-3; }
+  .rf-cols .dash-main { @apply lg:col-span-1 xl:col-span-2; }
+  .rf-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .rf-filters .fld.grow input { @apply w-full; }
+  .rf-scope { @apply mb-2; }
+  .rf-tbl td { @apply px-2; }
+  .rf-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .rf-tbl .code-cell .num, .rf-tbl .rf-state .chip { @apply whitespace-nowrap; }
+  .rf-tbl .docs { @apply text-xs; }
+  .rf-tbl .rf-reason { @apply min-w-[7rem] max-w-[16rem]; }
+  .rf-tbl .rf-acts { @apply whitespace-nowrap; }
+  .rf-tbl .rf-acts .btn2 + .btn2 { @apply ms-1; }
+  .rf-tabs { @apply flex gap-1 p-1; }
+  .rf-tab { @apply flex-1 rounded-lg px-3 py-2 text-sm font-bold text-ink-2 bg-transparent border-0 cursor-pointer transition-colors; }
+  .rf-tab:hover { @apply bg-surface-2; }
+  .rf-tab.is-on { @apply bg-white text-ink shadow-sm; }
+  .rf-side .step-lbl { @apply mt-2; }
+  .rf-side .seg-cards.two .seg-card { @apply py-1.5 flex-row justify-center gap-2; }
+  .rf-side .seg-cards.two .ico { @apply w-7 h-7; }
+  .rf-side .dl { @apply text-sm; }
+  .rf-credit-box { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 mb-3 text-sm; }
+  .rf-credit-box .lbl { @apply block text-2xs font-bold text-ink-3; }
+  .rf-credit-box b { @apply text-xl font-black; }
+  .rf-credit-box .foot { @apply block text-2xs text-ink-3 mt-1; }
+
+  /* الرسوم الإضافية: بطاقات الأنواع بمبلغها المُعدّ، الحقول الشرطية، والمعاينة. */
+  .kpi-grid.xf-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  .xf-tiles .kpi .foot { @apply block; }
+  .dash-cols.xf-cols { @apply lg:grid-cols-1 xl:grid-cols-3; }
+  .xf-cols .dash-main { @apply lg:col-span-1 xl:col-span-2; }
+  .xf-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .xf-filters .fld.grow input { @apply w-full; }
+  .xf-scope { @apply mb-2; }
+  .xf-tbl td { @apply px-2; }
+  .xf-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .xf-tbl .code-cell .num { @apply whitespace-nowrap; }
+  .xf-side .step-lbl { @apply mt-2; }
+  .xf-types .seg-card { @apply py-2 items-start text-start; }
+  .xf-types .seg-card .c { @apply text-start; }
+  .xf-side .check-row { @apply flex items-center gap-2 text-sm font-bold text-ink-2 cursor-pointer; }
+  .xf-side .check-row input { @apply w-4 h-4; }
+  .xf-side .seg-btns .seg-btn { @apply relative; }
+  .xf-side .dl { @apply text-sm; }
+  .xf-preview { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 mb-3 text-sm leading-relaxed; }
+
+  /* المصروفات: بطاقات الحالة، رقائق التصنيفات، نموذج القيد ومعاينته. */
+  .kpi-grid.ex-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  .ex-tiles .kpi .foot { @apply block; }
+  .dash-cols.ex-cols { @apply lg:grid-cols-1 xl:grid-cols-3; }
+  .ex-cols .dash-main { @apply lg:col-span-1 xl:col-span-2; }
+  .ex-filters .fld.grow { @apply flex-1 min-w-[14rem]; }
+  .ex-filters .fld.grow input { @apply w-full; }
+  .ex-chips { @apply flex flex-wrap gap-1.5 px-3 py-2 border-b border-line-2; }
+  .ex-chip { @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1 text-xs font-bold text-ink-2 no-underline; }
+  .ex-chip .num { @apply text-ink-3 font-normal; }
+  .ex-chip:hover { @apply bg-surface-2; }
+  .ex-chip.is-on { @apply bg-brand-700 border-brand-700 text-white; }
+  .ex-chip.is-on .num { @apply text-white; }
+  .ex-tbl td { @apply px-2; }
+  .ex-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .ex-tbl .code-cell .num, .ex-tbl .ex-state .chip { @apply whitespace-nowrap; }
+  .ex-tbl .ex-desc { @apply min-w-[9rem] max-w-[18rem]; }
+  .ex-tbl .ex-acts { @apply whitespace-nowrap; }
+  .ex-tbl .ex-acts .btn2 + .btn2 { @apply ms-1; }
+  .ex-side .step-lbl { @apply mt-2; }
+  .ex-cats .seg-card { @apply py-2; }
+  .ex-side .dl { @apply text-sm; }
+  .ex-side #period-check { @apply mb-2 text-xs; }
+  .ex-side #period-check .err { @apply mt-0; }
+  .ex-preview { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 mb-3 text-sm leading-relaxed; }
+
+  /* الأرصدة الافتتاحية: بطاقات المرحلة، صندوق الصف المصدر، الأيدي في سطر، وحوارات الصف. */
+  .kpi-grid.ob-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  .ob-tiles .kpi .foot { @apply block; }
+  .dash-cols.ob-cols { @apply lg:grid-cols-1 xl:grid-cols-3; }
+  .ob-cols .dash-main { @apply lg:col-span-1 xl:col-span-2; }
+  .ob-filters .fld.grow { @apply flex-1 min-w-[14rem]; }
+  .ob-filters .fld.grow input { @apply w-full; }
+  .ob-tbl td { @apply px-2 align-top; }
+  .ob-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .ob-tbl .code-cell .num, .ob-tbl .ob-state .chip { @apply whitespace-nowrap; }
+  .ob-tbl .ob-desc { @apply min-w-[9rem] max-w-[16rem]; }
+  .ob-tbl .ob-acts { @apply whitespace-nowrap; }
+  .ob-tbl .ob-acts .btn2 + .btn2 { @apply ms-1; }
+  .ob-tbl .ob-acts small { @apply block max-w-[11rem]; white-space: normal; }
+  .ob-tbl .ob-hands { @apply text-ink-3; }
+  .ob-tbl .ob-foot { @apply flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3; }
+  .ob-side .step-lbl { @apply mt-2; }
+  .ob-side .seg-cards.two .seg-card { @apply py-2; }
+  .ob-side .dl, .ob-acts .dl { @apply text-sm; }
+  .ob-source { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 mb-2 text-sm flex flex-col gap-0.5; }
+  .ob-source .lbl { @apply text-2xs font-bold text-ink-3; }
+  .ob-source .line { @apply text-xs text-ink-2; }
+  .ob-source .err { @apply mt-1; }
+  .ob-preview { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 mb-3 text-sm leading-relaxed; }
+  .ob-acts .modal-body .is-danger { @apply text-danger font-bold; }
+  .ob-acts option.is-likely { @apply font-bold; }
+
+  /* شريط الأقسام: خمس بطاقات على صفحة تبلغ 2052px على اللوحي؛ التمرير وحده
+     لا يقول أين أنت ولا أين الأحمر. يلتفّ على الهاتف ولا يُمرَّر أفقياً. */
+  .sec-nav      { @apply sticky top-0 z-10 flex flex-wrap gap-1 rounded-xl border border-line
+                         bg-white/95 p-2 mb-4 backdrop-blur; }
+  .content .sec-nav a {
+                  @apply inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs
+                         font-bold text-ink-2; text-decoration: none; }
+  .content .sec-nav a:hover { @apply bg-surface-2 text-brand-700; text-decoration: none; }
+  .sec-nav .n   { @apply inline-flex items-center justify-center w-5 h-5 shrink-0 rounded-full
+                         bg-surface-2 text-2xs text-ink-3; }
+  .content .sec-nav a.has-error { @apply text-danger; }
+  .sec-nav a.has-error .n { @apply bg-danger text-white; }
+  @media (max-width: 640px) { .sec-nav .t { @apply sr-only; } }
+
+  /* --- طلب التحاق جديد: ملخّص أخطاء، شريط حفظ لاصق، نموذج للاطّلاع ------- */
+  /* الصفحة بطول شاشتين ونصف؛ زرّ الحفظ كان عند 1691px منها. */
+  .action-bar.is-sticky {
+                  @apply sticky bottom-3 z-20 shadow-lg; }
+  /* والقفزة تترك للشريط اللاصق مكانه: بلا هذا الهامش يهبط القسم المقصود عند
+     0 فيحجب الشريط (48px) عنوانه هو نفسه، ويهبط الحقل المقصود من ملخّص
+     الأخطاء عند ‎-23‎ فيختفي عنوانه ورسالة خطئه معاً — أي 71px محجوبة عمّن
+     نقر السطر ليقرأها. القيمة تسع الشريط وسطر العنوان فوق الأداة. */
+  .sec-nav ~ form .card2[id^="sec-"] { scroll-margin-block-start: 4rem; }
+  .sec-nav ~ form .fld input,
+  .sec-nav ~ form .fld select,
+  .sec-nav ~ form .fld textarea { scroll-margin-block-start: 5.5rem; }
+  /* روابط الملخّص: اسم الحقل يُنقر فينتقل التركيز إليه، لا يُبحَث عنه. */
+  .err-links    { @apply flex flex-wrap gap-2 mt-2; }
+  .content .err-links a {
+                  @apply inline-flex items-center rounded-lg border border-danger/30 bg-white
+                         px-2 py-1 text-xs font-bold text-danger; text-decoration: none; }
+  .content .err-links a:hover { @apply bg-danger/5; text-decoration: none; }
+  .note.warn .err-links a { @apply border-warn-line text-ink-2; }
+  .err-summary:focus { @apply outline-none ring-2 ring-danger/40; }
+  /* النموذج المعطَّل لمن يقرأ ولا يُنشئ: يُقرأ ولا يُغري بالتعبئة. */
+  .plain-set    { @apply border-0 m-0 p-0 min-w-0; }
+  .plain-set:disabled { @apply opacity-75; }
+  .plain-set:disabled input, .plain-set:disabled select, .plain-set:disabled textarea {
+                  @apply bg-surface-2 cursor-not-allowed; }
+
+  /* سجل التسجيلات: تسعة أعمدة وأربعة أفعال في الصفّ، فيلتفّ ما كان يمتدّ.
+     بلا هذا كان الجدول 1366px داخل غلافٍ عرضه 1134 على شاشة 1440 — فائضٌ
+     232px يبدأ معه عمود الإجراءات عند ‎-207‎، أي أنّ «كشف الحساب» و«اعتماد»
+     خلف تمرير أفقي على شاشةٍ مكتبية كاملة. وعلى 1024 كان الفائض 648px
+     والصفحة نفسها تُجرّ 238px.
+
+     يلتفّ شيئان: خليّة الإجراءات، ورقاقات الحالة — وأطولها «معتمد مع رصيد
+     متبقٍ — الشهادة/البراءة تتطلب التسديد» كانت تحبس خليّتها عند 344px.
+     المقيس بعدهما: 1440 → الجدول 1134 داخل 1134 بلا فائض والإجراءات تبدأ
+     عند ‎+25‎؛ 1024 → الفائض 152px داخل غلاف الجدول وحده، وتمرير الصفحة صفر. */
+  /* الإجراءات في سطرٍ واحد على المكتب، وتلتفّ دون 1180 فقط. بسبعة أعمدة بدل
+     تسعة صار الجدول 1134px داخل غلافٍ عرضه 1134 على 1440 بلا فائض وهي في
+     سطر — والصفوف 59–79 بدل 59–82. أمّا على 1024 فسطرٌ واحد يعني فائض 363px،
+     فالالتفاف هناك هو الأقلّ سوءاً (الصفّ يطول، والجدول لا يخرج). */
+  .enr-tbl td.acts { @apply whitespace-nowrap; }
+  @media (max-width: 1180px) {
+    .enr-tbl td.acts { @apply whitespace-normal; }
+    .enr-tbl td.acts > * { @apply mb-1; }
+  }
+  /* سطرٌ واحد لكل خليّة: الصفّ كان 115px (147 في صفّين) لأن خلاياه تحمل سطرين
+     وثلاثة، فكان الجدول يُري تسجيلين ونصفاً على شاشة 1440×900. وما نزل عن
+     السطر يسكن صفَّ التفاصيل تحته. */
+
+  /* سجل النقل بين الدورات: نفس علاج سجل التسجيلات ولنفس السبب. أربع خلايا
+     كانت تحمل سطرين وثلاثة («من» و«إلى» ثلاثةً كلٌّ منهما)، فبلغ الصفّ 79px
+     على 1440 و183px على 1024 — أقلّ من ثلاثة صفوف في الشاشة. وما نزل عن
+     السطر يسكن صفَّ التفاصيل تحته.
+
+     القواعد مشتركة مع `.enr-tbl` عمداً: جارتان بنمطٍ واحد أصحّ من جارتين
+     بنمطين، والفئتان تُذكران معاً فلا تنجرف إحداهما عن الأخرى. */
+  .enr-tbl td, .tr-tbl td { @apply align-middle; }
+  .enr-tbl th.expand, .enr-tbl td.expand,
+  .tr-tbl th.expand, .tr-tbl td.expand { @apply w-8 px-1; }
+  .enr-tbl .row-expand, .tr-tbl .row-expand {
+                  @apply inline-flex items-center justify-center w-6 h-6 rounded-lg border border-line
+                         bg-surface-2 text-ink-3; }
+  .enr-tbl .row-expand:hover, .tr-tbl .row-expand:hover { @apply bg-white text-brand-700; }
+  .enr-tbl .row-expand svg, .tr-tbl .row-expand svg {
+                  @apply w-3.5 h-3.5; transition: transform .15s; transform: scaleX(-1); }
+  .enr-tbl .row-expand[aria-expanded="true"] svg,
+  .tr-tbl .row-expand[aria-expanded="true"] svg { transform: scaleX(-1) rotate(90deg); }
+  .enr-tbl .row-detail > td, .tr-tbl .row-detail > td { @apply bg-surface-2 px-3 py-3; }
+  .enr-tbl .detail-dl, .tr-tbl .detail-dl { @apply gap-x-6 gap-y-1; }
+  .enr-tbl .row-detail .hint, .tr-tbl .row-detail .hint { @apply mt-2; }
+
+  /* سجل المشاركين: أربع بطاقات تصفية، وحقل بحث يأخذ ما بقي من الشريط.
+     وعمود الإجراءات يلتفّ على الشاشات الضيّقة بدل أن يخرج عنها: بأربعة
+     أزرار في الصفّ بلغ الجدول 819px داخل غلافٍ عرضه 718px على شاشة 1024،
+     فبدأت خليّة الإجراءات عند ‎-76‎ وصار «فتح الملف» — وهو الفعل الأساسي —
+     خلف تمرير أفقي. الالتفاف يردّ الجدول إلى 718px بلا فائض، والخليّة من
+     299px إلى 170px. وفوق ذلك تبقى في سطرٍ واحد كما كانت. */
+  .kpi-grid.pt-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  .pt-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .pt-filters .fld.grow input { @apply w-full; }
+  .pt-tbl td { @apply px-2; }
+  .pt-tbl td.acts { @apply whitespace-nowrap; }
+  @media (max-width: 1180px) {
+    .pt-tbl td.acts { @apply whitespace-normal; }
+    .pt-tbl td.acts .btn2 { @apply mb-1; }
+  }
+
+  /* سجل الشركاء: حقل البحث يأخذ ما بقي من الشريط بعد مرشّحَي النوع والحالة،
+     كما في سجلّي المشاركين والسندات. كان بلا `grow` فيقف بعرض محتواه وحده. */
+  .pt2-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .pt2-filters .fld.grow input { @apply w-full; }
+  /* «عرض» هو الفعل الوحيد في الصفّ، فلا يُقطع سطره ولا يقع خلف تمرير أفقي:
+     عمود «السجل» ينزل تحت الاسم على الهاتف بدل أن يدفعه خارج الشاشة — وهي
+     معالجة سجل المشاركين نفسها حين أنزل «المدينة» و«المؤهل». */
+  .pt2-tbl td.acts { @apply whitespace-nowrap; }
+  .pt2-tbl .row-sub { @apply hidden text-xs text-ink-3; }
+  .pt2-tbl td.num .chip { @apply mt-1; }
+  /* على اللوحي تبقى الأعمدة السبعة، ويكفي تضييق الحشو ليقف «عرض» داخل
+     الصندوق: كان يفيض بأربعة عشر بكسلاً لا أكثر. */
+  @media (max-width: 1023px) {
+    .pt2-tbl td, .pt2-tbl th { @apply px-2; }
+  }
+  @media (max-width: 639px) {
+    .pt2-tbl .col-sm-off { @apply hidden; }
+    .pt2-tbl .row-sub { @apply block mt-0.5; }
+  }
+
+  /* الكتالوج: بطاقات، جدول البرامج، حوار البطاقة العريض، المطابقة BR-006. */
+  .kpi-grid.pg-tiles { @apply md:grid-cols-2 xl:grid-cols-4; }
+  .pg-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .pg-filters .fld.grow input { @apply w-full; }
+  .pg-tbl td { @apply px-2; }
+  .pg-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .pg-tbl .code-cell .num { @apply whitespace-nowrap; }
+  .pg-tbl .pg-name { @apply min-w-[12rem]; }
+  .pg-modal { @apply w-full max-w-2xl; }
+  .pg-modal .grid2 { @apply gap-x-3; }
+  .pg-modal .fld.is-check { @apply pt-6; }
+  .pg-modal .check-row { @apply flex items-center gap-2 text-sm font-bold text-ink-2 cursor-pointer; }
+  .pg-modal .check-row input { @apply w-4 h-4; }
+  .dash-cols.pg-cols { @apply lg:grid-cols-1 xl:grid-cols-3; }
+  .pg-cols .dash-main { @apply lg:col-span-1 xl:col-span-2; }
+  .pg-facts dd { @apply text-sm; }
+  .pg-subjects td, .pg-cohorts td { @apply px-2; }
+  .pg-cohorts .sub-line { @apply block text-2xs leading-tight mt-0.5; white-space: normal; }
+  .pg-subject-acts { @apply whitespace-nowrap; }
+  .pg-subject-acts .btn2 + .btn2 { @apply ms-1; }
+  .pg-recon { @apply rounded-lg bg-surface-2 border border-line-2 px-3 py-2 text-sm leading-relaxed; }
+  .pg-recon.is-ok { @apply border-ok-line bg-ok-soft; }
+  .pg-recon.is-off { @apply border-danger-line bg-danger-soft; }
+  .pg-levels td { @apply px-2; }
+  .pg-fees { @apply px-4 py-2 border-t border-line-2 flex flex-wrap gap-x-5 gap-y-1 text-sm; }
+  .pg-fees li { @apply flex items-center gap-2; }
+  .pg-fees li.is-exc { @apply font-bold; }
+  .pg-fees .lbl { @apply text-ink-3; }
+  .pg-fees small { @apply font-normal text-2xs; }
+  .pg-pricing .hint { @apply px-4 pb-3; }
+  .pg-siblings { @apply flex flex-col gap-1 text-sm; }
+  .kpi-grid.plist-tiles { @apply sm:grid-cols-2 xl:grid-cols-4; }
+  .plist-tiles .kpi .code-val { @apply block mt-0.5 text-xl font-black leading-none truncate text-ink; font-variant-numeric: tabular-nums; }
+  .plist-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .kpi-grid.plist-tiles { @apply sm:grid-cols-2 xl:grid-cols-4; }
+  .plist-tiles .kpi .code-val { @apply block mt-0.5 text-xl font-black leading-none truncate text-ink; font-variant-numeric: tabular-nums; }
+  .plist-filters .fld.grow input { @apply w-full; }
+  .kpi-grid.co-tiles { @apply sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6; }
+  .co-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .kpi-grid.plist-tiles { @apply sm:grid-cols-2 xl:grid-cols-4; }
+  .plist-tiles .kpi .code-val { @apply block mt-0.5 text-xl font-black leading-none truncate text-ink; font-variant-numeric: tabular-nums; }
+  .plist-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  .kpi-grid.plist-tiles { @apply sm:grid-cols-2 xl:grid-cols-4; }
+  .plist-tiles .kpi .code-val { @apply block mt-0.5 text-xl font-black leading-none truncate text-ink; font-variant-numeric: tabular-nums; }
+  .plist-filters .fld.grow input { @apply w-full; }
+  .kpi-grid.co-tiles { @apply sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6; }
+  .co-filters .fld.grow input { @apply w-full; }
+  .co-acts { @apply flex flex-wrap gap-1 mt-1.5; }
+  .co-modal { @apply w-full max-w-xl; }
+  .co-modal .grid2 { @apply gap-x-3; }
+  /* الانتقال السريع: زرّ في الشريط العلوي ولوحة بحث فوق الصفحة. */
+  .qjump-open   { @apply hidden md:inline-flex items-center gap-2 rounded-lg border border-line bg-white
+                         px-3 py-1.5 text-xs font-bold text-ink-2 hover:bg-surface-2; margin-inline-start: auto; }
+  .qjump-open svg { @apply w-4 h-4; }
+  .qjump-open kbd { @apply rounded border border-line px-1 text-2xs font-bold text-ink-3 bg-surface-2; }
+  .qjump        { @apply w-full max-w-xl; }
+  .qjump-direct { @apply mb-2; }
+  .qjump-direct a { @apply flex items-center gap-2 rounded-lg px-2 py-2 text-sm no-underline
+                           border border-brand-600 bg-brand-50 text-ink hover:no-underline; }
+  .qjump-direct a .ico { @apply w-5 h-5 text-brand-700 shrink-0; }
+  .qjump-direct a .ico svg { @apply w-full h-full; }
+  .qjump-direct a .t { @apply font-bold; }
+  .qjump-direct a .g { @apply text-2xs text-ink-3; margin-inline-start: auto; }
+  .qjump-list   { @apply max-h-[52vh] overflow-y-auto -mx-1 px-1; }
+  .qjump-list section { @apply mb-3; }
+  .qjump-list h3 { @apply text-2xs font-bold text-ink-3 mb-1; letter-spacing: .04em; }
+  .qjump-list a { @apply flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-ink no-underline
+                         hover:bg-surface-2 hover:no-underline; }
+  .qjump-list a:focus-visible { @apply bg-surface-2 outline-none ring-2 ring-brand-600; }
+  .qjump-list a .ico { @apply w-5 h-5 text-ink-3 shrink-0; }
+  .qjump-list a .ico svg { @apply w-full h-full; }
+  .qjump-list a .t { @apply font-bold; }
+  .qjump-list a .g { @apply text-2xs text-ink-3; margin-inline-start: auto; }
+  .mohe-filters .fld.grow { @apply flex-1 min-w-[16rem]; }
+  /* الانتقال السريع: زرّ في الشريط العلوي ولوحة بحث فوق الصفحة. */
+  .qjump-open   { @apply hidden md:inline-flex items-center gap-2 rounded-lg border border-line bg-white
+                         px-3 py-1.5 text-xs font-bold text-ink-2 hover:bg-surface-2; margin-inline-start: auto; }
+  .qjump-open svg { @apply w-4 h-4; }
+  .qjump-open kbd { @apply rounded border border-line px-1 text-2xs font-bold text-ink-3 bg-surface-2; }
+  .qjump        { @apply w-full max-w-xl; }
+  .qjump-direct { @apply mb-2; }
+  .qjump-direct a { @apply flex items-center gap-2 rounded-lg px-2 py-2 text-sm no-underline
+                           border border-brand-600 bg-brand-50 text-ink hover:no-underline; }
+  .qjump-direct a .ico { @apply w-5 h-5 text-brand-700 shrink-0; }
+  .qjump-direct a .ico svg { @apply w-full h-full; }
+  .qjump-direct a .t { @apply font-bold; }
+  .qjump-direct a .g { @apply text-2xs text-ink-3; margin-inline-start: auto; }
+  .qjump-list   { @apply max-h-[52vh] overflow-y-auto -mx-1 px-1; }
+  .qjump-list section { @apply mb-3; }
+  .qjump-list h3 { @apply text-2xs font-bold text-ink-3 mb-1; letter-spacing: .04em; }
+  .qjump-list a { @apply flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-ink no-underline
+                         hover:bg-surface-2 hover:no-underline; }
+  .qjump-list a:focus-visible { @apply bg-surface-2 outline-none ring-2 ring-brand-600; }
+  .qjump-list a .ico { @apply w-5 h-5 text-ink-3 shrink-0; }
+  .qjump-list a .ico svg { @apply w-full h-full; }
+  .qjump-list a .t { @apply font-bold; }
+  .qjump-list a .g { @apply text-2xs text-ink-3; margin-inline-start: auto; }
+  .mohe-filters .fld.grow input { @apply w-full; }
+  .empty-inline { @apply text-sm text-ink-3 m-0; text-wrap: pretty; }
+  .chip-link { @apply cursor-pointer no-underline hover:no-underline hover:bg-surface-2; }
+  .page-head h1 .chip { @apply align-middle ms-2 text-xs; }
+  .open-days td, .closings-tbl td { @apply py-1.5; }
+  .closings-tbl .sub-line { @apply block text-2xs leading-tight mt-0.5; }
+  .closings-tbl td.acts .btn2 { @apply inline-flex align-middle; }
+  .closings-tbl td.acts .ico-btn { @apply items-center justify-center w-8 h-8 p-0; }
+  .closings-tbl td.acts .ico-btn svg { @apply w-4 h-4; }
+  .sys-box      { @apply rounded-xl border border-line bg-surface-2 p-3 mb-2; }
+  .sys-total    { @apply flex flex-col; }
+  .sys-total .lbl { @apply text-2xs font-bold text-ink-3; }
+  .sys-total .val { @apply text-2xl font-black text-ink; font-variant-numeric: tabular-nums; }
+  .sys-total .foot { @apply text-2xs text-ink-3; }
+  .sys-methods  { @apply mt-2 flex flex-wrap gap-1; }
+  .unvouched .reasons { @apply mt-1; }
+  .unvouched .row-link { @apply font-bold; }
+  .help.live .is-ok { @apply text-ok font-bold; }
+  .ok-line      { @apply text-ok; }
+  .empty.snug { @apply p-4; }
+  .dash-side .todo li span:last-child { @apply text-xs; }
+
+  .closing-doc .doc-methods { @apply mt-3 pt-2 border-t border-line text-xs text-ink-2; }
+  .closing-doc .missing { @apply text-danger font-bold; }
+  .closing-doc .sign-box .who { @apply block text-2xs text-ink-3 mt-0.5; }
+  .closing-doc tfoot td { @apply font-bold bg-surface-2; }
+
+  /* --- سند القبض على الورق: نسختان على A4، خطّ قصّ بينهما ------------------ */
+  .rcpt         { @apply relative border border-line rounded-lg p-5 mb-4 overflow-hidden; }
+  .rcpt-void span { display: inline-block; }
+  .rcpt .doc-head { @apply mb-3 pb-2; }
+  .rcpt-title   { @apply flex items-center justify-between gap-3; }
+  .rcpt-title h1 { @apply my-2 text-start; }
+  .rcpt-copy    { @apply text-xs font-bold text-ink-3 border border-line rounded-full px-3 py-0.5; }
+  .rcpt-grid    { @apply grid gap-4 items-start; grid-template-columns: 1fr; }
+  @media (min-width: 640px) { .rcpt-grid { grid-template-columns: 1fr max-content; } }
+  .rcpt-amount  { @apply flex flex-col items-center justify-center rounded-lg border-2 px-5 py-3 text-center;
+                  border-color: theme(colors.brand.900); order: 2; }
+  .rcpt-amount .lbl { @apply text-2xs font-bold text-ink-3; }
+  .rcpt-amount .val { @apply text-3xl font-black text-ink; font-variant-numeric: tabular-nums; }
+  .rcpt-amount .cur { @apply text-xs font-bold text-ink-2; }
+  .rcpt .doc-grid { order: 1; }
+  .rcpt .doc-grid dd .num { white-space: nowrap; }
+  .rcpt-tbl     { @apply mt-4; max-width: 28rem; }
+  .rcpt-sign    { @apply mt-6; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rcpt-sign .sign-line { height: 2.25rem; }
+  .rcpt-sign .stamp-ring { width: 3.5rem; height: 3.5rem; }
+  .rcpt-title h1 .num { @apply text-base font-bold text-ink-2; margin-inline-start: .5rem; }
+  .rcpt-sign .who { @apply block text-2xs text-ink-3 mt-0.5; }
+  .rcpt-sign .closing-line { @apply flex items-end justify-center text-sm font-bold text-ink; }
+  .rcpt-void-note { @apply mt-3 rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger; }
+  .rcpt-void    { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                  pointer-events: none; font-weight: 900; font-size: 5rem; color: theme(colors.danger.DEFAULT);
+                  opacity: .18; }
+  .rcpt-void span { transform: rotate(-18deg); }
+  .rcpt.is-void { border-color: theme(colors.danger.line); }
+  .rcpt-cut     { @apply my-3 border-t-2 border-dashed border-line-2; }
+  .rcpt-cut::before { content: "✂"; @apply text-ink-3 text-sm; position: relative; top: -0.8rem; }
+
+  /* ---------------- التقارير (Sprint 8L) ---------------- */
+  /* شريط تبويب السبعة: يلتفّ في الشاشات الضيّقة ولا يُمرَّر أفقياً، لأن
+     تبويباً يُمرَّر يُخفي تقارير لا يعرف القارئ أنها هناك. */
+  .rpt-tabs     { @apply flex flex-wrap gap-1.5 mb-4; }
+  .rpt-tab      { @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line
+                          bg-surface text-xs font-bold text-ink-2 no-underline; }
+  .rpt-tab:hover{ @apply bg-surface-2 text-ink; }
+  .rpt-tab .n   { @apply inline-flex items-center justify-center w-5 h-5 shrink-0 rounded-md
+                          bg-surface-2 text-ink-3; }
+  .rpt-tab .n svg { @apply w-3.5 h-3.5; }
+  .rpt-tab .t   { @apply truncate; max-width: 14rem; }
+  .rpt-tab.is-on{ @apply bg-brand-100 border-brand-200 text-brand-700; }
+  .rpt-tab.is-on .n { @apply bg-brand-700 text-white; }
+  /* المحجوب عن الدور يبقى مرئياً ومعطَّلاً: معرفة أن التقرير موجود وليس من
+     نصيبك خيرٌ من ظنّه غير موجود. `not-allowed` لا `pointer-events:none`
+     حتى يصل الـ `title` إلى مَن يمرّ عليه. */
+  .rpt-tab.is-off { @apply opacity-45 line-through; cursor: not-allowed; }
+  /* ترويسة الورق: مخفيّة على الشاشة، تظهر في الطباعة وحدها. */
+  .print-only   { display: none; }
+  .doc-head .rpt-name { @apply font-bold text-ink-2; font-size: .95rem; margin-top: .15rem; }
+
+  /* سلّم احتساب: أسطر تُقرأ من أعلى إلى أسفل وينتهي كلٌّ منها برقم محاذٍ.
+     `.calc-row` قائم منذ 8C؛ ما يضيفه 8L هو صيغة القائمة (dt/dd) وعلامات
+     الطرح والمجموع — فسلّمٌ بلا إشارة بين أسطره جدولٌ لا سلّم. */
+  .calc         { @apply m-0 border border-line rounded-lg overflow-hidden; }
+  .calc .calc-row dt { @apply text-sm text-ink-2 m-0; }
+  .calc .calc-row dd { @apply m-0 font-bold text-ink; font-variant-numeric: tabular-nums; }
+  .calc-row.is-minus dd { @apply text-danger; }
+  .calc-row.is-sub  { @apply bg-surface-2; }
+  .calc-row.is-sub dt, .calc-row.is-sub dd { @apply font-extrabold; }
+  .calc-row.is-total { @apply bg-brand-100; border-block-start: 2px solid theme(colors.brand.700); }
+  .calc-row.is-total dt { @apply font-black text-brand-800; }
+  .calc-row.is-total dd { @apply font-black text-brand-800 text-lg; }
+
+  /* عمودان يلتصقان في عمود واحد على الهاتف. */
+  .split2       { @apply grid gap-3 mb-4; grid-template-columns: 1fr; }
+  @media (min-width: 1024px) { .split2 { grid-template-columns: 1fr 1fr; } }
+  .split2 > .card2 { @apply mb-0; }
+
+  /* شريط النسبة يستعمل `.bar` المقسّم إلى خانات كما تقرّر عند تعريفه: الخانة
+     الممتلئة صنف لا عرضٌ محسوب، فلا نمط سطري ولا جافاسكربت (§6.4). وهذا
+     الغلاف يضع الشريط ورقمه في سطر واحد لا يلتفّ. */
+  .pct-bar      { @apply inline-flex items-center gap-2; min-width: 6.5rem; }
+  .pct-bar .bar { @apply mt-0 w-16 shrink-0; }
+  .pct          { @apply text-2xs text-ink-3 tabular-nums; }
+
+  /* أشرطة التوزيع: بندٌ ومبلغه في سطر، وشريطه تحته. */
+  .split-bars   { @apply m-0 flex flex-col gap-3; }
+  .split-bars dt{ @apply flex items-baseline justify-between gap-2 text-sm font-bold text-ink-2 m-0; }
+  .split-bars dd{ @apply m-0 mt-1; }
+  .split-bars .pct-bar { @apply w-full; }
+  .split-bars .bar { @apply w-full; }
+
   .no-print     { @apply mb-4; }
   /* `.no-print` يحمل هامشه، فلا يزدوج مع هامش شريط الإجراءات داخله. */
   .no-print > .action-bar:last-child { @apply mb-0; }
@@ -733,7 +1375,38 @@
        والقماشة الرمادية والظلّ للشاشة وحدها. */
     .cert-canvas { background: none !important; margin: 0 !important; padding: 0 !important; }
     .cert { min-height: 193mm; width: 100%; margin: 0 auto !important; padding-block-end: 12mm; box-shadow: 0 0 0 4px #fff, 0 0 0 5px var(--gold); }
-    .doc-section, .sign-row, tr { break-inside: avoid; }
+    .doc-section, .sign-row, tr, .rcpt { break-inside: avoid; }
+    /* نسختان على ورقة واحدة: كل نسخة ≤ نصف الصفحة بعد الهوامش. */
+    .crumbs { display: none !important; }
+    /* ---------------- التقارير على الورق (Sprint 8L) ---------------- */
+    /* `print:hidden` على الشاشة ليست قاعدة طباعة؛ هذه هي. */
+    .rpt-tabs { display: none !important; }
+    .print-only { display: block !important; }
+    .doc-head.print-only { display: flex !important; print-color-adjust: exact;
+                           -webkit-print-color-adjust: exact; }
+    /* صفوف الجدول لا تُقصّ بين ورقتين، والترويسة تتكرّر في أعلى كل ورقة —
+       جدول مالي بلا رؤوس أعمدة في صفحته الثانية جدولٌ لا يُقرأ. */
+    .tbl thead { display: table-header-group; }
+    .tbl tfoot { display: table-footer-group; }
+    .kpi-grid { break-inside: avoid; }
+    .rcpt { margin-bottom: 2mm; padding: 4mm 5mm; font-size: 10.5px; line-height: 1.35; }
+    .rcpt .doc-head { margin-bottom: 2mm; padding-bottom: 1.5mm; }
+    .rcpt .doc-head .org { font-size: 13px; }
+    .rcpt .doc-warn { padding: 1mm 2mm; margin-bottom: 2mm; font-size: 9px; }
+    .rcpt h1 { font-size: 15px; margin: 1mm 0; }
+    .rcpt-grid { gap: 3mm; }
+    .rcpt .doc-grid { gap: 1mm 4mm; font-size: 10.5px; }
+    .rcpt-amount { padding: 2mm 4mm; }
+    .rcpt-amount .val { font-size: 20px; }
+    .rcpt-tbl { margin-top: 2mm; font-size: 10px; }
+    .rcpt-tbl th, .rcpt-tbl td { padding: 0.8mm 2mm; }
+    .rcpt-sign { margin-top: 2mm; gap: 6mm; }
+    .rcpt-sign .sign-line { height: 6mm; margin-bottom: 1mm; }
+    .rcpt-sign .stamp-ring { width: 11mm; height: 11mm; margin-bottom: 1mm; }
+    .rcpt .doc-note { margin-top: 2mm; padding-top: 1.5mm; font-size: 9px; }
+    .rcpt-void-note { margin-top: 2mm; padding: 1mm 2mm; font-size: 9px; }
+    .rcpt-title h1 .num { font-size: 11px; }
+    .rcpt-cut { margin: 2mm 0; }
     /* `position: running(header)` كان هنا ولا ينفّذه أي متصفح حالي
        (CSS GCPM) — كان لا عملاً. أُزيل بدل أن يُترك يوهم بأنه يعمل. */
     @page { size: A4; margin: 14mm 12mm; }
@@ -809,8 +1482,390 @@
     @apply ring-2 ring-white ring-offset-2; --tw-ring-offset-color: theme(colors.brand.700);
   }
 
+  /* --- النغمات اللونية ---------------------------------------------------
+   * ثلاثة متغيّرات لكل نغمة: الحبر، والأرضية الفاتحة، والحدّ. تُطلب بالاسم
+   * (`tone-ok`) على الحاوي، ويقرأها الرمز والحاشية والأرضية دون قاعدة لكل
+   * مكوّن. ثمان نغمات: الأربع الدلالية القائمة، والهوية، وثلاث زينة (بنفسجي،
+   * تركوازي، كهرماني) لا تحمل معنىً غير تمييز المجموعة عن جارتها.
+   */
+  .tone-brand  { --tone: theme(colors.brand.700);  --tone-soft: theme(colors.brand.100);  --tone-line: theme(colors.brand.200); }
+  .tone-info   { --tone: theme(colors.info.DEFAULT);   --tone-soft: theme(colors.info.soft);   --tone-line: theme(colors.info.line); }
+  .tone-ok     { --tone: theme(colors.ok.DEFAULT);     --tone-soft: theme(colors.ok.soft);     --tone-line: theme(colors.ok.line); }
+  .tone-warn   { --tone: theme(colors.warn.DEFAULT);   --tone-soft: theme(colors.warn.soft);   --tone-line: theme(colors.warn.line); }
+  .tone-danger { --tone: theme(colors.danger.DEFAULT); --tone-soft: theme(colors.danger.soft); --tone-line: theme(colors.danger.line); }
+  .tone-violet { --tone: #5b3fa8; --tone-soft: #efeafa; --tone-line: #cfc2ee; }
+  .tone-teal   { --tone: #0f6e6e; --tone-soft: #e6f4f4; --tone-line: #b6dede; }
+  .tone-amber  { --tone: #b45309; --tone-soft: #fff1e6; --tone-line: #f6cfa7; }
+
+  /* --- الشريط الجانبي: رمز ملوّن لكل مجموعة ------------------------------
+   * الرمز في مربّع صغير بأرضية النغمة الفاتحة وحبرها؛ عند المرور والفتح
+   * ينقلب: أرضية النغمة وحبر أبيض. اللون للمجموعة لا للمدخل، فالقسم يُرى
+   * قبل أن يُقرأ. النصّ يبقى على حبره — اللون إشارة لا محتوى.
+   */
+  .nav-ico-wrap { @apply inline-flex items-center justify-center w-7 h-7 shrink-0 rounded-lg
+                         transition-colors duration-150;
+                  background: var(--tone-soft, theme(colors.surface.2)); color: var(--tone, theme(colors.ink.3)); }
+  .nav-item:hover .nav-ico-wrap,
+  .nav-item.active .nav-ico-wrap { background: var(--tone, theme(colors.brand.700)); color: #fff; }
+  .nav-item.active { border-inline-start-color: var(--tone, theme(colors.brand.700)); }
+
+  /* --- لوحة المؤشرات: لا رابط مسطور --------------------------------------
+   * كلّ رابط في هذه الشاشة بطاقة أو زرّ أو محطة؛ التسطير يُقرأ خطأً في
+   * بطاقة. القاعدة العامة في `.content a` تبقى لبقية الشاشات.
+   */
+  .dash a, .dash a:hover { text-decoration: none !important; }
+
+  /* رمز في رأس بطاقة رسم أو لسان. */
+  .head-ico     { @apply inline-flex items-center justify-center w-7 h-7 shrink-0 rounded-lg;
+                  background: var(--tone-soft); color: var(--tone); }
+  .head-ico svg, .tab-ico svg, .kpi .ico svg, .stepper .ico svg { @apply w-4 h-4; }
+  .tab-ico      { @apply inline-flex items-center justify-center w-6 h-6 shrink-0 rounded-md;
+                  background: var(--tone-soft); color: var(--tone); }
+  .tab.is-active .tab-ico { background: var(--tone); color: #fff; }
+
+  /* --- البطاقات: سطران لا أكثر ------------------------------------------
+   * رمز على الحافة البادئة ونصّ سطرين: عنوان وقيمة (العدّاد)، أو عنوان وشرح
+   * (البدء)، أو محطة ومن يقوم بها (المسار). ما يزيد يُقصّ بنقاط لا يلتفّ —
+   * فتبقى الشبكة صفوفاً متساوية الارتفاع مهما طال النصّ.
+   */
+  .kpi          { @apply flex items-center gap-4 p-4 relative overflow-hidden; min-height: 5.5rem; text-align: start; }
+  .kpi .ico     { @apply inline-flex items-center justify-center w-12 h-12 shrink-0 rounded-full bg-white;
+                  color: var(--tone); box-shadow: 0 0 0 2px var(--tone-line); }
+  .kpi .ico svg { @apply w-6 h-6; }
+  .kpi .txt, .stepper .txt { @apply block min-w-0 flex-1; }
+  .kpi .label   { @apply block truncate text-xs font-extrabold; color: var(--tone); letter-spacing: 0; }
+  .kpi .value   { @apply block mt-0.5 text-3xl font-black leading-none truncate text-ink; }
+  .kpi::before  { content: ""; position: absolute; inset-inline: 0; top: 0; height: 4px; background: var(--tone); }
+  /* بديلٌ حين لا نغمة على البطاقة: بلا هذا يصير `var(--tone)` قيمةً غير صالحة
+     فتُحسب `transparent`، وتختفي الحاشية العلوية كلّها. قِيس في 8L-2: بطاقات
+     التقارير غير الرئيسية كانت حاشيتها `rgba(0,0,0,0)` — أي القرار المكتوب
+     («ما سوى الرئيسي يأخذ لون الخط») لم يكن يُرسَم أصلاً. */
+  .kpi.tile::before { background: var(--tone, theme(colors.line.DEFAULT)); }
+  a.kpi:hover   { border-color: var(--tone); }
+  a.kpi:hover .ico { background: var(--tone); color: #fff; }
+  a.kpi:hover .value { color: var(--tone); }
+
+  /* --- مسار العمل: محطة ملوّنة، البطاقة كلها رابط -------------------------
+   * `<li>` حاوٍ بلا حشو، و`.stop` هو الرابط يملأه؛ فالنقر في أي موضع من
+   * البطاقة يفتح الشاشة. الرمز فوق والنصّ تحته على عرض البطاقة كاملاً —
+   * فلا يُقصّ اسم المحطة. الحاشية العلوية والرمز بلون المحطة، والرقم شارة
+   * على زاوية الرمز، وسهمٌ بين كل محطتين يتّجه مع اتجاه الكتابة.
+   */
+  .stepper      { @apply gap-y-3; column-gap: 1.5rem; }
+  .stepper li   { @apply p-0 gap-0 block; border-block-start-color: var(--tone); border-color: var(--tone-line);
+                  background: var(--tone-soft); }
+  .stepper .stop { @apply flex flex-col items-center text-center gap-2 px-1.5 py-3 h-full rounded-xl text-ink
+                          transition-colors duration-150; }
+  .stepper li.on .step:hover { background: #fff; }
+  .stepper li.on .step:hover .ico { background: var(--tone); color: #fff; }
+  .stepper .ico { @apply relative inline-flex items-center justify-center w-11 h-11 shrink-0 rounded-full bg-white;
+                  color: var(--tone); box-shadow: 0 0 0 2px var(--tone-line); }
+  .stepper .ico svg { @apply w-5 h-5; }
+  .stepper .n   { @apply absolute w-5 h-5 text-2xs; inset-inline-end: -.4rem; top: -.4rem;
+                  background: var(--tone); color: #fff; border: 2px solid #fff; }
+  .stepper .txt { @apply w-full; }
+  .stepper .t   { @apply block text-sm leading-snug whitespace-nowrap; }
+  .stepper .w   { @apply block mb-0 truncate; }
+  .stepper li.off { @apply bg-surface-2; border-block-start-color: theme(colors.line.2); }
+  .stepper li.off .ico { @apply bg-white text-ink-3; box-shadow: 0 0 0 2px theme(colors.line.DEFAULT); }
+  .stepper li.off .n { @apply bg-ink-3; }
+  .stepper li.off .step { @apply cursor-not-allowed; }
+  /* السهم: في منتصف الفجوة، بلون المحطة، ويُقلب في RTL ليتّجه نحو التالية. */
+  .stepper li:not(:last-child)::after { content: "➜"; width: 1.5rem; inset-inline-end: -1.5rem; text-align: center;
+                  font-size: 1.15rem; line-height: 1; transform: translateY(-50%); color: var(--tone); opacity: .85; }
+  /* الحرف يشير يميناً؛ في العربية المحطة التالية على اليسار، فيُقلب. */
+  [dir="rtl"] .stepper li:not(:last-child)::after { transform: translateY(-50%) scaleX(-1); }
+  /* على الشبكة الملتفّة يعود السهم بين المحطات في الصفّ نفسه فقط لا يُرسم. */
+  @media (max-width: 1279px) { .stepper li::after { display: none; } }
+
+  /* --- المسار كقائمة اختيار: فهرس التقارير (8L-2) --------------------------
+   * الأسلوب نفسه، وفرقان: لا سهم — فالسبعة ليست تسلسلاً يبدأ بواحد وينتهي
+   * بسبعة؛ وعنوانٌ يلتفّ — فجُمَل §9 أطول من أسماء المحطات، والقصُّ في قائمة
+   * اختيارٍ يجعل الاختيار تخميناً.
+   */
+  .stepper.as-menu li::after { content: none; }
+  .stepper.as-menu .t { @apply whitespace-normal; }
+  .stepper.as-menu .w { @apply whitespace-normal; overflow: visible; text-overflow: clip; }
+  .stepper.as-menu .stop { @apply gap-2.5 py-4; }
+  /* أربع في الصفّ لا سبع: بطاقةٌ بجملةٍ كاملة تحتاج عرضاً، وسبعُ بطاقات
+     ضيّقة تعيد المشكلة التي حُلّت بالالتفاف. */
+  @media (min-width: 1280px) { .stepper.as-menu { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  /* التلميح بعرض البطاقة لا 15rem ثابتة: الثابتة تخرج عن حافة الصفحة في آخر
+     بطاقة من الصفّ فتُمرّر الصفحةَ أفقياً (§5.2). وهو هنا على المحجوبة وحدها،
+     فسعتُه كافية لسطرين. */
+  .stepper.as-menu .stop::after { inset-inline: 0; left: auto; width: auto; max-width: none;
+                                  transform: none; }
+
+  /* البطاقة كلها ملوّنة لا رمزها وحده: أرضية النغمة الفاتحة وحدّها. */
+  .kpi          { background: var(--tone-soft, #fff); border-color: var(--tone-line, theme(colors.line.DEFAULT)); }
+  .kpi .ico     { @apply bg-white; }
+  .kpi .label   { color: var(--tone); }
+
+  /* --- مسار العمل مطويّ ---------------------------------------------------
+   * `<details>` أصلي: مغلق افتراضياً، يفتحه النقر على الرأس، ولا يعتمد على
+   * سكربت. السهم يدور عند الفتح، والمحطات داخله على الشبكة نفسها.
+   */
+  /* لا `overflow-hidden`: تلميح المحطة يخرج تحت الصندوق ولا يجوز قصّه. */
+  .flow-box     { @apply bg-white border border-line rounded-xl mb-4; }
+  .flow-box summary { @apply flex items-center gap-2.5 px-4 py-3 text-sm font-extrabold text-ink cursor-pointer select-none rounded-xl; list-style: none; }
+  .flow-box summary::-webkit-details-marker, .flow-box summary::marker { display: none; content: ""; }
+  .flow-box summary .t { @apply min-w-0 flex-1 truncate; }
+  .flow-box summary:hover { @apply bg-surface-2; }
+  .flow-box .chev { @apply text-lg font-black text-ink-3 transition-transform duration-150; }
+  .flow-box[open] .chev { transform: rotate(-90deg); }
+  .flow-box .stepper { @apply mb-0 pt-2 pb-4; padding-inline: 1rem; }
+
+  /* ذيل جدول الطابور: كم صفّاً بقي، وزرّ يفتح الشاشة كاملة. */
+  .tbl-foot     { @apply flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-t border-line bg-surface-2 text-xs; }
+
+  /* تلميح المحطة عند المرور: `attr(data-tip)` من CSS وحدها، لا سكربت. */
+  .stepper .stop { position: relative; }
+  .stepper .stop::after { content: attr(data-tip); position: absolute; top: calc(100% + .45rem); left: 50%;
+                  width: 15rem; max-width: 70vw; transform: translateX(-50%);
+                  z-index: 20; padding: .5rem .7rem; border-radius: .5rem; background: theme(colors.ink.DEFAULT); color: #fff;
+                  font-size: .6875rem; line-height: 1.6; font-weight: 500; text-align: center; opacity: 0;
+                  pointer-events: none; transition: opacity .15s; box-shadow: 0 4px 14px rgb(15 22 32 / .25); }
+  .stepper .stop:hover::after, .stepper .stop:focus-visible::after { opacity: 1; }
+
+  /* --- مسار التصفح ورمز العنوان --------------------------------------------
+   * يُبنيان من المدخل المفتوح في القائمة: لا بيانات لكل صفحة. لا رابط مسطور.
+   */
+  .crumbs       { @apply mb-2 text-xs text-ink-3; }
+  .crumbs ol    { @apply flex flex-wrap items-center gap-1 m-0 p-0; list-style: none; }
+  .crumbs li + li::before { content: "›"; @apply inline-block mx-1 text-ink-3 font-black; }
+  [dir="rtl"] .crumbs li + li::before { content: "‹"; }
+  .crumbs a     { @apply font-bold text-ink-2 no-underline; }
+  .content .crumbs a, .content .crumbs a:hover { text-decoration: none; color: theme(colors.brand.700); }
+  .crumbs [aria-current="page"] a { @apply text-ink; }
+  .crumbs ~ .page-head .eyebrow { display: none; }
+  .page-head h1 { @apply flex items-center gap-2.5; }
+  .title-ico    { @apply inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-lg;
+                  background: var(--tone-soft); color: var(--tone); box-shadow: inset 0 0 0 1px var(--tone-line); }
+  .title-ico svg{ @apply w-5 h-5; }
+
+  /* --- الرسوم: امتلاء بصنف من عشرين ------------------------------------- */
+  .hbar         { @apply w-full h-2.5 mt-1.5 rounded-full bg-line-2 overflow-hidden; }
+  .hbar .fill   { @apply block h-full rounded-full; background: var(--tone, theme(colors.brand.600)); }
+  .hbar.calm .fill { background: theme(colors.info.DEFAULT); }
+  .vbars        { @apply flex items-end gap-2; }
+  .vcol         { @apply flex-1 flex flex-col items-center min-w-0; }
+  .vcol .v      { @apply text-2xs font-bold text-ink-2 mb-0.5; min-height: 1rem; }
+  .vtrack       { @apply flex flex-col justify-end w-full rounded-md bg-line-2 overflow-hidden; height: 6.5rem; }
+  .vtrack .fill { @apply block w-full rounded-t-md; background: theme(colors.brand.600); }
+  .vcol.today .vtrack .fill { background: theme(colors.ok.DEFAULT); }
+  .vcol .l      { @apply text-2xs text-ink-3 mt-1; }
+  .vcol.today .l{ @apply font-black text-ok; }
+  .fill.lv-0 { flex-basis: 0; width: 0; } .fill.lv-1 { flex-basis: 5%; width: 5%; } .fill.lv-2 { flex-basis: 10%; width: 10%; }
+  .fill.lv-3 { flex-basis: 15%; width: 15%; } .fill.lv-4 { flex-basis: 20%; width: 20%; } .fill.lv-5 { flex-basis: 25%; width: 25%; }
+  .fill.lv-6 { flex-basis: 30%; width: 30%; } .fill.lv-7 { flex-basis: 35%; width: 35%; } .fill.lv-8 { flex-basis: 40%; width: 40%; }
+  .fill.lv-9 { flex-basis: 45%; width: 45%; } .fill.lv-10 { flex-basis: 50%; width: 50%; } .fill.lv-11 { flex-basis: 55%; width: 55%; }
+  .fill.lv-12 { flex-basis: 60%; width: 60%; } .fill.lv-13 { flex-basis: 65%; width: 65%; } .fill.lv-14 { flex-basis: 70%; width: 70%; }
+  .fill.lv-15 { flex-basis: 75%; width: 75%; } .fill.lv-16 { flex-basis: 80%; width: 80%; } .fill.lv-17 { flex-basis: 85%; width: 85%; }
+  .fill.lv-18 { flex-basis: 90%; width: 90%; } .fill.lv-19 { flex-basis: 95%; width: 95%; } .fill.lv-20 { flex-basis: 100%; width: 100%; }
+  .vtrack .fill { width: 100%; }
+  .hbar .fill   { flex-basis: auto; }
+
+  /* حلقة الأرصدة: SVG بسمات (`stroke-dasharray`) لا أنماط سطرية. */
+  .donut-wrap   { @apply flex flex-wrap items-center gap-5; }
+  .donut        { @apply w-32 h-32 shrink-0; transform: rotate(-90deg); }
+  .donut .ring  { fill: none; stroke: theme(colors.line.2); stroke-width: 6; }
+  .donut .seg   { fill: none; stroke-width: 6; stroke-linecap: butt; }
+  .donut .seg.danger { stroke: theme(colors.danger.DEFAULT); }
+  .donut .seg.ok     { stroke: theme(colors.ok.DEFAULT); }
+  .donut .seg.warn   { stroke: theme(colors.warn.DEFAULT); }
+  .donut text   { transform: rotate(90deg); transform-origin: 21px 21px; font-size: 9px; font-weight: 800; fill: theme(colors.ink.DEFAULT); }
+  .donut-wrap .legend { @apply flex-col gap-0; }
+
+  /* --- حوار التسجيل السريع (شاشة المشاركين) -------------------------------
+   * ثلاث خطوات مرقّمة، والنوع بطاقاتٌ تُنقر لا قائمة: ثلاثة خيارات لا تحتاج
+   * قائمة منسدلة، والبطاقة تحمل رمزها وعدد دفعاتها فتُقرأ قبل أن تُفتح.
+   */
+  .enroll-modal { @apply max-w-xl; }
+  .enroll-modal .modal-head { @apply flex items-center gap-3; }
+  .enroll-modal .modal-head .sub { @apply text-xs text-ink-3 mt-0.5 flex items-center gap-2; }
+  .enroll-modal .modal-body { @apply py-4; }
+  .step-lbl     { @apply flex items-center gap-2 text-xs font-extrabold text-ink mt-4 mb-2 first:mt-0; }
+  .step-lbl .n  { @apply inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-700 text-white text-2xs font-black; }
+  .step-lbl.is-off { @apply text-ink-3; }
+  .step-lbl.is-off .n { @apply bg-line-2 text-ink-3; }
+  .seg-cards    { @apply grid gap-2 sm:grid-cols-3; }
+  .seg-card     { @apply flex flex-col items-center gap-1 rounded-xl border-2 border-line bg-white px-2 py-3 text-center
+                         transition-colors duration-150 cursor-pointer; }
+  .seg-card .ico { @apply inline-flex items-center justify-center w-10 h-10 rounded-full; background: var(--tone-soft); color: var(--tone); }
+  .seg-card .ico svg { @apply w-5 h-5; }
+  .seg-card .t  { @apply text-sm font-extrabold text-ink; }
+  .seg-card .c  { @apply text-2xs text-ink-3; }
+  .seg-card:hover { border-color: var(--tone-line); background: var(--tone-soft); }
+  .seg-card.is-on { border-color: var(--tone); background: var(--tone-soft); }
+  .seg-card.is-on .ico { background: var(--tone); color: #fff; }
+  .enroll-modal .fld select, .enroll-modal .fld input { @apply w-full; }
+  .enroll-modal .note { @apply mt-3 mb-0 text-sm; }
+  .btn-ico      { @apply w-4 h-4 inline-block align-[-3px]; margin-inline-end: .25rem; }
+  .btn2:disabled { @apply opacity-50 cursor-not-allowed; }
+
+  /* --- سجل الدفعات: حوار الفتح وأعمدة الصفّ ------------------------------- */
+  /* بطاقات المرشّح: عدّادات لوحة المؤشرات نفسها؛ المفعَّلة بحدّ من لونها. */
+  .kpi-grid.tiles .kpi.is-on { border-color: var(--tone); box-shadow: 0 0 0 2px var(--tone-soft); }
+  .kpi-grid.tiles .kpi.is-on .ico { background: var(--tone); color: #fff; }
+  .cohort-modal { @apply max-w-2xl; }
+  .cohort-modal .modal-head { @apply flex items-center gap-3; }
+  .cohort-modal .modal-head .sub { @apply text-xs text-ink-3 mt-0.5; text-wrap: pretty; }
+  .cohort-modal .modal-body { @apply py-4 max-h-[70vh] overflow-y-auto; }
+  .cohort-modal .grid2 .fld { @apply mb-1; }
+  .cohort-modal .step-lbl .muted { @apply font-medium; }
+  .adv          { @apply mt-3 rounded-lg border border-dashed border-line px-3 py-2; }
+  .adv summary  { @apply text-xs font-bold text-ink-2 cursor-pointer select-none; }
+  .adv[open] summary { @apply mb-2; }
+  .tbl td.seats { @apply min-w-[7rem]; }
+  .tbl td.seats .hbar { @apply mt-1 mb-0.5 h-1.5; }
+  .tbl td.seats .hbar .fill { background: theme(colors.ok.DEFAULT); }
+  .tbl td.seats .hbar.full .fill { background: theme(colors.danger.DEFAULT); }
+  .tbl td.acts-col { @apply align-top; }
+  .tbl td.acts-col .chip { @apply mb-1; }
+  .tbl td.acts-col .btn2 { @apply block w-max mt-1; }
+
+  /* --- شريط مسار قصير (٤ محطات) على صفحات العمل ----------------------------
+   * المحطات نفسها من لوحة المؤشرات، لكنها هنا خريطة لا روابط: المحطة الحالية
+   * مضاءة بحدّ من لونها وشارة «أنت هنا». أربعة أعمدة من `md` فصاعداً. */
+  .flow-strip   { @apply mb-4; }
+  @media (min-width: 768px) { .flow-strip { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; } }
+  .flow-strip li.is-here { border-color: var(--tone); box-shadow: 0 0 0 2px var(--tone-soft); }
+  .flow-strip li.is-here .ico { background: var(--tone); color: #fff; }
+  .flow-strip li.is-here .w { color: var(--tone); @apply font-extrabold; }
+  .flow-strip li.on .stop { cursor: default; }
+  .flow-strip li.on .stop:hover { background: transparent; }
+  .flow-strip li.on .stop:hover .ico { background: var(--tone); color: #fff; }
+  @media (max-width: 1279px) { .flow-strip li::after { display: block; } }
+  @media (max-width: 767px) { .flow-strip li::after { display: none; } }
+
+  /* قائمة «ما بعد الحفظ» وبطاقة الدفعة المختارة. */
+  .todo         { @apply m-0 p-0 text-sm; list-style: none; }
+  .todo li      { @apply flex items-start gap-2 py-1.5 border-b border-line-2 last:border-b-0; }
+  .todo .n      { @apply inline-flex items-center justify-center w-5 h-5 shrink-0 rounded-full bg-surface-2 text-2xs font-black text-ink-3; }
+  .todo .n.done { @apply bg-ok text-white; }
+  .chip.pick    { @apply cursor-pointer; }
+  .chip.pick:hover { @apply border-brand-300 text-brand-800; }
+  .cohort-card .dl dd:empty::before { content: "—"; color: theme(colors.ink.3); }
+
+  /* بطاقة إشارة: «لهذه الدفعة ملف قائم — افتحه». */
+  .pointer-card { border-color: var(--tone-line); background: var(--tone-soft); }
+  .pointer      { @apply flex flex-wrap items-center gap-3 text-sm; }
+  .pointer .ico { @apply inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-white; color: var(--tone); box-shadow: 0 0 0 2px var(--tone-line); }
+  .pointer .ico svg { @apply w-5 h-5; }
+  .pointer > div { @apply flex-1; }
+
+  /* طيّات أسماء المتدربين في سجل الوزارة: دفعة لكل طيّة. */
+  .names-box    { @apply border-t border-line; }
+  .names-box summary { @apply flex flex-wrap items-center gap-2 px-4 py-3 text-sm cursor-pointer select-none; list-style: none; }
+  .names-box summary::-webkit-details-marker, .names-box summary::marker { display: none; content: ""; }
+  .names-box summary:hover { @apply bg-surface-2; }
+  .names-box summary .code { @apply font-black; }
+  .names-box summary .t { @apply text-ink-2; }
+  .names-box .chev { @apply text-lg font-black text-ink-3 transition-transform duration-150; margin-inline-start: auto; }
+  .names-box[open] .chev { transform: rotate(-90deg); }
+
+  /* محطة منجَزة على شريط المسار: رمزها ممتلئ بلونها وعلامة صحّ صغيرة. */
+  .flow-strip li.is-done .ico { background: var(--tone); color: #fff; }
+  .flow-strip li.is-done .n { background: #fff; color: var(--tone); border-color: var(--tone); }
+  /* بطاقة الإجراء التالي: حدّ وعنوان بلون نغمتها. */
+  .next-card    { border-color: var(--tone-line); }
+  .next-card .card2-head { background: var(--tone-soft); border-color: var(--tone-line); }
+  .dash-side .card2 { @apply mb-4; }
+  /* النموذج في العمود الجانبي عمودٌ واحد: عرضه لا يتّسع لحقلين جنباً إلى جنب. */
+  .dash-side .grid2 { grid-template-columns: minmax(0, 1fr); }
+
+  /* --- الصندوق: استيفاء دفعة في ثلاث خطوات --------------------------------
+   * البحث سطرٌ واحد وزرّه بجانبه؛ النتائج صفوف تُنقر؛ التسجيل وطريقة الدفع
+   * بطاقات راديو (`.seg-card` نفسها، والزرّ الحقيقي مخفيّ بصرياً لا عن لوحة
+   * المفاتيح); والرصيد أكبر رقم في العمود الجانبي. */
+  .till-search-row { @apply flex gap-2; }
+  .till-search-row input { @apply flex-1 min-w-0; }
+  .pick-list    { @apply m-0 mt-3 p-0 border border-line rounded-xl divide-y divide-line-2; list-style: none; }
+  .pick-list li { @apply flex flex-wrap items-center gap-3 px-3 py-2.5 text-sm; }
+  .pick-list li:hover { @apply bg-surface-2; }
+  .pick-list .who { @apply flex-1 min-w-0 flex flex-wrap items-center gap-2; }
+  .pick-list .who strong { @apply text-ink; }
+  .pick-list .owe { @apply shrink-0; }
+  .quick-list   { @apply m-0 p-0 divide-y divide-line-2; list-style: none; }
+  .quick-list a { @apply flex items-center gap-2 py-2 text-sm text-ink no-underline rounded-lg; }
+  .quick-list a:hover { @apply bg-surface-2; text-decoration: none; }
+  .quick-list a:hover strong { @apply text-brand-700; }
+  .quick-list .ico { @apply inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-full; background: var(--tone-soft); color: var(--tone); }
+  .quick-list .ico svg { @apply w-4 h-4; }
+  .quick-list .txt { @apply flex-1 min-w-0 flex flex-col leading-tight; }
+  .quick-list .txt .muted { @apply text-2xs truncate; }
+  .quick-list .amt { @apply font-black text-ink; }
+  .seg-radio    { @apply absolute w-px h-px overflow-hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .seg-card     { position: relative; }
+  .seg-card:has(.seg-radio:focus-visible) { @apply outline outline-2 outline-offset-2 outline-brand-500; }
+  .enroll-cards { @apply sm:grid-cols-2 xl:grid-cols-3; }
+  .enroll-cards .seg-card { @apply py-3 px-3; }
+  .enroll-cards .t { text-wrap: balance; }
+  .enroll-cards .due { @apply text-xl font-black text-ink mt-1; font-variant-numeric: tabular-nums; }
+  .enroll-cards .due small { @apply text-2xs font-bold text-ink-3; }
+  .enroll-cards .chip { @apply mt-1; }
+  .method-cards { @apply grid-cols-3 sm:grid-cols-3; }
+  .method-cards .seg-card { @apply py-2; }
+  .method-cards .ico { @apply w-8 h-8; }
+  .method-cards .ico svg { @apply w-4 h-4; }
+  .fld .lbl     { @apply block text-xs font-bold text-ink-2 mb-1; }
+  .amount-row   { @apply flex gap-2; }
+  .amount-row input { @apply flex-1 min-w-0 text-lg font-black; font-variant-numeric: tabular-nums; }
+  .amount-row .btn2 { @apply whitespace-nowrap; }
+  .stmt-row     { @apply flex gap-2; }
+  .stmt-row input { @apply flex-1 min-w-0; }
+  .stmt-row .btn2 { @apply whitespace-nowrap; }
+  .help.live .is-warn { @apply text-warn font-bold; }
+  .help.live .is-danger { @apply text-danger font-bold; }
+  .adv summary .lnk { @apply text-brand-700 font-bold; }
+  .till-acts    { @apply flex flex-wrap items-center gap-3; }
+  .till-acts .till-date { margin-inline-start: auto; @apply text-xs; }
+  .who-card     { @apply mb-3 text-sm; }
+  .who-card strong { @apply block text-base text-ink; }
+  .who-card .muted { @apply flex flex-wrap items-center gap-2 text-xs mt-1; }
+  .till-kpi     { @apply mb-3; min-height: 0; }
+  .till-kpi .value { @apply text-2xl; }
+  .till-kpi .foot { @apply block mt-1 text-2xs text-ink-3; }
+  .till-dl      { @apply grid grid-cols-2 gap-x-3 gap-y-1 text-sm mb-3; }
+  .till-dl dt   { @apply text-ink-3 text-xs; }
+  .till-dl dd   { @apply m-0 text-ink font-bold; }
+  /* حوار تأكيد الإصدار: المبلغ أكبر ما فيه، ثم ملخّص لا يُعدَّل هنا. */
+  .confirm-modal { @apply max-w-md; }
+  .confirm-modal .modal-head { @apply flex items-center gap-3; }
+  .confirm-amt  { @apply text-3xl font-black text-ink text-center py-2; font-variant-numeric: tabular-nums; }
+  .confirm-amt small { @apply text-sm font-bold text-ink-3; }
+  .confirm-modal .hint { @apply mt-3 mb-0; }
+  .quick-acts   { @apply grid gap-2; }
+  .quick-acts .btn2 { @apply justify-start text-start; }
+  /* لا خطّ تحت أي رابط على هذه الشاشة عند المرور: الرابط زرّ أو صفّ يُنقر. */
+  .content .quick-list a:hover, .content .quick-acts a:hover { text-decoration: none; }
+
+  /* ---- الحالات الخاصة -------------------------------------------------
+     صفحة شرح: جدول الأنواع الستة، وقائمة الشاشات المجاورة بسطر تعليل لكلٍّ. */
+  .note-act     { @apply mt-2 mb-0; }
+  .sc-reach     { @apply whitespace-nowrap; }
+  .sc-where     { @apply block mt-1 text-xs; }
+  .sc-links     { @apply grid gap-2 m-0 p-0; list-style: none; }
+  .sc-links li  { @apply flex flex-wrap items-center gap-3 rounded-lg border border-line-2 bg-surface-2 px-3 py-2; }
+  .sc-links li > div { @apply min-w-0 grow; }
+  .sc-links li small { @apply block text-xs; }
+  .sc-links li .btn2 { margin-inline-start: auto; }
+
+  /* الهاتف: ثلاثة أعمدة أحدها شرحٌ طويل لا تُقرأ بالسحب الجانبي، فتصير بطاقات.
+     رؤوس الأعمدة تنتقل إلى `data-th` على كل خلية — فلا يضيع معنى القيمة. */
+  @media (max-width: 639px) {
+    .sc-types, .sc-types tbody, .sc-types tr, .sc-types td { @apply block w-full; }
+    .sc-types thead { @apply hidden; }
+    .sc-types tr { @apply rounded-lg border border-line-2 mb-2 px-3 py-2; }
+    .sc-types tr:last-child { @apply mb-0; }
+    .sc-types td { @apply border-b-0 px-0 py-1; }
+    .sc-types td[data-th]::before { content: attr(data-th); @apply block text-2xs font-bold text-ink-3 mb-0.5; }
+    .sc-types td:first-child[data-th]::before { @apply hidden; }
+    .sc-types td:first-child strong { @apply text-base; }
+  }
+
   /* الحركة اختيارية دائماً. */
   @media (prefers-reduced-motion: reduce) {
-    .sidebar, .btn2, .nav-item, a.kpi { transition: none !important; }
+    .sidebar, .btn2, .nav-item, .nav-ico-wrap, a.kpi, .stepper .stop { transition: none !important; }
   }
 }

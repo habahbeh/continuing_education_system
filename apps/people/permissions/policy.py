@@ -28,6 +28,7 @@ from django.core.exceptions import PermissionDenied
 
 from apps.core.services.audit_service import write_audit
 from apps.people.constants import Action, Screen
+from apps.people.models import Role
 from apps.people.permissions import deny_rules, matrix
 
 #: denial_rule value used when access falls through for want of a grant, as
@@ -85,6 +86,13 @@ def evaluate(user: Any, screen: str, action: str, *, obj: Any = None) -> Decisio
         # the role in the account; an account that carries none carries no
         # authority either.
         return Decision(False, screen, action, role, NO_ROLE_RULE, "الحساب بلا دور")
+
+    # --- Stage 0: SUPER_ADMIN — full authority, by role not by Django flag --
+    # The client's own account: every screen, every action. Decided here so
+    # no role-scoped deny rule (D-01, D-29 …) written for a business role can
+    # match it. ``is_superuser`` still grants nothing on its own (T-165).
+    if role == Role.SUPER_ADMIN:
+        return Decision(True, screen, action, role)
 
     # --- Stage 1: explicit deny, evaluated first and final -----------------
     rule = deny_rules.first_matching(role, screen, action)

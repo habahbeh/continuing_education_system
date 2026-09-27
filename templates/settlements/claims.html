@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -41,18 +41,17 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "ما استحقّه كل شريك عن فترة: الوعاء الموزَّع، وحصته منه، وما حُسم عليها، والصافي الذي تُخالَص به." %}</p>
   </div>
 </div>
 
-{% guided_help "claims" %}
 
 <div class="card2">
   <div class="card2-head">
     <h2>{% translate "المطالبات المسجَّلة" %}</h2>
     <div class="acts">
-      <span class="count muted">{% blocktranslate count n=claims|length %}مطالبة واحدة{% plural %}{{ n }} مطالبات{% endblocktranslate %}</span>
+      <span class="count muted">{{ claims|length|ar_count:"مطالبة واحدة|مطالبتان|مطالبات|مطالبة" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">

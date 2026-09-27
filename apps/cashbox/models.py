@@ -295,6 +295,17 @@ class ReceiptVoid(models.Model):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
     reason_ar = models.TextField(verbose_name=_("سبب الإلغاء"))
+    # A request may also be turned down — by the same hands that approve,
+    # with a reason of their own. The receipt then stays what it was.
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="voids_rejected",
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason_ar = models.TextField(blank=True, verbose_name=_("سبب الرفض"))
 
     class Meta:
         verbose_name = _("إلغاء سند")
@@ -310,10 +321,24 @@ class ReceiptVoid(models.Model):
                 | ~models.Q(approved_by=models.F("requested_by")),
                 name="cashbox_void_approver_differs",
             ),
+            models.CheckConstraint(
+                condition=models.Q(rejected_by__isnull=True)
+                | ~models.Q(rejected_by=models.F("requested_by")),
+                name="cashbox_void_rejecter_differs",
+            ),
+            # Decided one way or the other, never both.
+            models.CheckConstraint(
+                condition=models.Q(approved_by__isnull=True) | models.Q(rejected_by__isnull=True),
+                name="cashbox_void_one_decision",
+            ),
         ]
 
     def __str__(self) -> str:
         return f"إلغاء {self.receipt.internal_receipt_number}"
+
+    @property
+    def is_pending(self) -> bool:
+        return self.approved_by_id is None and self.rejected_by_id is None
 
 
 class DailyClosing(models.Model):
@@ -331,6 +356,18 @@ class DailyClosing(models.Model):
     counted_total = Money(default=0, verbose_name=_("العدّ الفعلي"))
     variance = Money(default=0, verbose_name=_("الفرق"))
     receipt_count = models.PositiveIntegerField(default=0)
+    #: §5.2 — receipts of the day recorded without the finance department's
+    #: own voucher number. The reconciliation is «المقبوض بالوصولات»: this
+    #: is the count that has to be zero, or explained.
+    unvouched_count = models.PositiveIntegerField(default=0)
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="closings_opened",
+    )
+    opened_at = models.DateTimeField(auto_now_add=True, null=True)
     status = ShortCode(choices=ClosingStatus.choices, default=ClosingStatus.OPEN)
     variance_resolution_ar = models.TextField(blank=True)
     approved_by = models.ForeignKey(

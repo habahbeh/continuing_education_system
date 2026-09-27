@@ -1,33 +1,41 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{% translate "الحالات الخاصة — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  صفحة قراءة: تشرح الأنواع الستة وتقول أين يُسجَّل كلٌّ منها. لا نموذج ولا POST
+  ولا زرّ يردّ من يضغطه — العرض نفسه لا يقبل POST.
+
+  الجدول ثلاثي الحالة لا ثنائيها: «مبني وله شاشة» و«مبني بلا شاشة» و«نوع
+  مُعرَّف بلا خدمة». الثنائية القديمة كانت تضع الفصل (خدمة + شاشة + حوار)
+  والترحيل (خدمة لا يستدعيها أحد) في شريحة خضراء واحدة، فيبحث القارئ عن شاشة
+  الترحيل ولا يجدها.
+
+  عمود «أين يُسجَّل» رابطٌ حيث يوجد مدخل فعلاً، ونصٌّ حيث لا يوجد. والرابط
+  مفلتر في العرض بـ `policy.is_allowed` (§3.4): لا يُدعى قارئ إلى رفض.
+
+  تحت 640px ينهار الجدول إلى بطاقات (`.sc-types`): ثلاثة أعمدة أحدها شرح طويل
+  لا تُقرأ بالسحب الجانبي على الهاتف.
+{% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
-    <h1>{{ title }}</h1>
-    <p class="sub">{% translate "الاستثناءات الموثّقة على مسار التسجيل العادي: ما هي، وماذا تكلّف، وأي قاعدة تحكم كل واحدة منها." %}</p>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "الاستثناءات الموثّقة على مسار التسجيل العادي: ما هي، وأين تُسجَّل، وأي قاعدة تحكم كل واحدة منها." %}</p>
   </div>
 </div>
 
-{% guided_help "special-cases" %}
 
 <div class="note info">
   <div>
-    <strong>{% translate "لا إدخال من هذه الصفحة." %}</strong>
-    {% translate "القواعد تعمل اليوم فعلاً: الخدمات تفرضها وقاعدة البيانات تحرسها وسجل التدقيق يكتبها. غير المبني بعد هو شاشة الإدخال، ولذلك تشرح هذه الصفحة الأنواع ولا ترسم نموذجاً يردّ كل من يفتحه." %}
-  </div>
-</div>
-
-<div class="note">
-  <div>
-    <strong>{% translate "الحالة الخاصة ليست تعديلاً غير رسمي على السجل." %}</strong>
-    <br>
-    {% translate "لكل نوع قاعدة تحكمه، ولكل حالة أثر مالي مكتوب بالكلمات لا بالحالة وحدها، ومرجع القرار إلزامي في الفصل." %}
-    <br>
-    {% translate "كل ذلك يُكتب في سجل التدقيق، ولا يُصحَّح قيد مالي بالحذف بل بقيد مقابل." %}
+    <strong>{% translate "لا إدخال من هذه الصفحة — والإدخال موجود." %}</strong>
+    {% translate "الفصل وإلغاء الطلب يُسجَّلان اليوم من شاشة التسجيلات، من قائمة إجراءات السطر. والقواعد تعمل فعلاً: الخدمات تفرضها وقاعدة البيانات تحرسها وسجل التدقيق يكتبها. هذه الصفحة تشرح الأنواع وتدلّ على مدخل كلٍّ منها، ولا ترسم نموذجاً يردّ كل من يفتحه." %}
+    {% if enrollments_url %}
+      <p class="note-act"><a class="btn2 sm" href="{{ enrollments_url }}">{% translate "افتح التسجيلات" %}</a></p>
+    {% endif %}
   </div>
 </div>
 
@@ -38,27 +46,34 @@
       <div class="acts">
         <small class="muted">{% translate "ما يقابله في النظام اليوم" %}:</small>
         {% for c in coverage %}
-          <span class="chip {% if c.built %}ok{% else %}warn{% endif %}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
+          <span class="chip {{ c.tone }}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
         {% endfor %}
       </div>
     {% endif %}
   </div>
   <div class="card2-body">
     <div class="tbl-wrap">
-      <table class="tbl">
+      <table class="tbl sc-types">
         <thead>
           <tr>
             <th>{% translate "النوع" %}</th>
             <th>{% translate "ما الذي يحدث، وأي قاعدة تحكمه" %}</th>
-            <th>{% translate "حالته في النظام" %}</th>
+            <th>{% translate "أين يُسجَّل" %}</th>
           </tr>
         </thead>
         <tbody>
           {% for case in cases %}
             <tr>
-              <td><strong>{{ case.label }}</strong></td>
-              <td>{{ case.what }}</td>
-              <td><span class="chip {% if case.built %}ok{% else %}warn{% endif %} dot">{{ case.state }}</span></td>
+              <td data-th="{% translate 'النوع' %}"><strong>{{ case.label }}</strong></td>
+              <td data-th="{% translate 'ما الذي يحدث، وأي قاعدة تحكمه' %}">{{ case.what }}</td>
+              <td data-th="{% translate 'أين يُسجَّل' %}" class="sc-reach">
+                <span class="chip {{ case.tone }} dot">{{ case.reach }}</span>
+                {% if case.where_url %}
+                  <a class="sc-where" href="{{ case.where_url }}">{{ case.where }}</a>
+                {% else %}
+                  <small class="muted sc-where">{{ case.where }}</small>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
@@ -75,19 +90,29 @@
         <dt>{{ label }}</dt><dd>{{ meaning }}</dd>
       {% endfor %}
     </dl>
+    <p class="hint">
+      {% translate "الحالة الخاصة ليست تعديلاً غير رسمي على السجل: لكل نوع قاعدة تحكمه، ولكل حالة أثر مالي مكتوب بالكلمات لا بالحالة وحدها، ومرجع القرار إلزامي في الفصل." %}
+      {% translate "وكل ذلك يُكتب في سجل التدقيق، ولا يُصحَّح قيد مالي بالحذف بل بقيد مقابل." %}
+    </p>
   </div>
 </div>
 
 {% if links %}
-  {# `.form-acts` closes a form, and there is no form: the links sat under a rule with nothing above it. #}
+  {# `.form-acts` closes a form، ولا نموذج هنا: الروابط كانت تحت خطّ بلا شيء فوقه. #}
   <div class="card2">
-    <div class="card2-head">
-      <h2>{% translate "الشاشات التي تلتقي بها هذه الحالات" %}</h2>
-      <div class="acts">
+    <div class="card2-head"><h2>{% translate "الشاشات التي تلتقي بها هذه الحالات" %}</h2></div>
+    <div class="card2-body">
+      <ul class="sc-links">
         {% for link in links %}
-          <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
+          <li>
+            <div>
+              <strong>{{ link.label }}</strong>
+              <small class="muted">{{ link.why }}</small>
+            </div>
+            <a class="btn2 sm" href="{{ link.url }}">{% translate "افتح" %}</a>
+          </li>
         {% endfor %}
-      </div>
+      </ul>
     </div>
   </div>
 {% endif %}

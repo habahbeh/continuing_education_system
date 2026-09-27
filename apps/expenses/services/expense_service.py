@@ -26,6 +26,7 @@ from django.utils import timezone
 from apps.core.display import person_name, text_of
 from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.core.services.settings_service import get_setting
 from apps.expenses.models import Expense, ExpenseStatus
 from apps.people.constants import Action, Screen
@@ -36,6 +37,10 @@ ZERO = Decimal("0.000")
 
 #: §9.7 — «مستهلكات · تسويق · شهادات · غيرها», as data.
 CATEGORIES_KEY = "expense_categories"
+
+#: ``EX-2026-00001`` — the system's own yearly sequence; nobody types one.
+EXPENSE_SCOPE = "expense"
+EXPENSE_FILTERS = ("RECORDED", "APPROVED", "REJECTED")
 
 
 #: Sprint 8D-5 — the rule moved to ``core.period_service`` so the refund
@@ -83,16 +88,20 @@ def _period_for(incurred_on: date, *, actor: Any = None, request: Any = None) ->
 def record(
     *,
     actor: Any,
-    code: str,
     category: str,
     amount: Decimal,
     incurred_on: date,
     description_ar: str,
     cohort: Any = None,
     reference: str = "",
+    code: str = "",
     request: Any = None,
 ) -> Expense:
-    """Record an expense as RECORDED — approval is somebody else's act."""
+    """
+    Record an expense as RECORDED — approval is somebody else's act.
+
+    ``code`` is normally empty and drawn from the yearly sequence.
+    """
     policy.require(actor, Screen.EXPENSES, Action.CREATE, request=request)
 
     if amount <= ZERO:
@@ -105,10 +114,13 @@ def record(
         raise ValidationError(
             f"تصنيف غير معرَّف: {category}. التصنيفات تُدار من الإعدادات ({CATEGORIES_KEY})."
         )
-    if Expense.objects.filter(code=code).exists():
+    code = code.strip()
+    if code and Expense.objects.filter(code=code).exists():
         raise ValidationError(f"رمز القيد {code} مستعمل سلفاً.")
 
     period = _period_for(incurred_on, actor=actor, request=request)
+    if not code:
+        ensure_sequence(EXPENSE_SCOPE, str(incurred_on.year), padding=5)
 
     return _record(
         actor=actor,
@@ -138,6 +150,9 @@ def _record(
     period: Any,
     request: Any,
 ) -> Expense:
+    if not code:
+        year = str(incurred_on.year)
+        code = next_number(EXPENSE_SCOPE, year, prefix=f"EX-{year}-", padding=5)
     expense = Expense.objects.create(
         code=code,
         category=category,
@@ -250,12 +265,23 @@ def list_expenses(
     cohort_code: str = "",
     date_from: date | None = None,
     date_to: date | None = None,
+    query: str = "",
     request: Any = None,
 ) -> list[dict[str, Any]]:
     """Expenses as rows for the screen and for report 7."""
+    from django.db.models import Q
+
     policy.require(actor, Screen.EXPENSES, Action.VIEW, request=request)
 
-    queryset = Expense.objects.select_related("cohort", "created_by", "approved_by")
+    queryset = Expense.objects.select_related("cohort__program", "created_by", "approved_by")
+    if query.strip():
+        q = query.strip()
+        queryset = queryset.filter(
+            Q(code__icontains=q)
+            | Q(description_ar__icontains=q)
+            | Q(reference__icontains=q)
+            | Q(cohort__code__icontains=q)
+        )
     if category:
         queryset = queryset.filter(category=category)
     if status:
@@ -278,6 +304,7 @@ def list_expenses(
             "incurred_on": e.incurred_on,
             "description_ar": e.description_ar,
             "cohort_code": text_of(e.cohort, "code"),
+            "cohort_name": (e.cohort.name_ar or e.cohort.code) if e.cohort_id else "",
             "reference": e.reference,
             "status": e.status,
             "status_display": e.get_status_display(),
@@ -285,10 +312,53 @@ def list_expenses(
             "created_by": person_name(e.created_by),
             "created_by_id": e.created_by_id,
             "approved_by": person_name(e.approved_by),
+            "approved_at": e.approved_at,
+            "created_at": e.created_at,
             "decision_note_ar": e.decision_note_ar,
         }
         for e in queryset.order_by("-incurred_on", "-id")
     ]
+
+
+def expenses_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts and sums over already-projected rows — the screen's tiles."""
+    from apps.billing.services.account_service import ZERO as _ZERO
+
+    out = {
+        "recorded": 0,
+        "recorded_total": _ZERO,
+        "approved": 0,
+        "approved_total": _ZERO,
+        "rejected": 0,
+        "shown_total": _ZERO,
+    }
+    for r in rows:
+        out["shown_total"] += r["amount"]
+        if r["status"] == "RECORDED":
+            out["recorded"] += 1
+            out["recorded_total"] += r["amount"]
+        elif r["status"] == "APPROVED":
+            out["approved"] += 1
+            out["approved_total"] += r["amount"]
+        else:
+            out["rejected"] += 1
+    return out
+
+
+def period_state(on_date: date) -> dict[str, Any]:
+    """Is the period covering this date open — for the form's live preview (D-23)."""
+    from apps.core.models import FinancialPeriodStatus
+
+    try:
+        period = period_service.period_for(on_date)
+    except period_service.ClosedPeriodError as exc:
+        return {"open": False, "label": str(exc), "period": ""}
+    return {
+        "open": True,
+        "label": str(period) if period is not None else "",
+        "period": str(period) if period is not None else "",
+        "status": period.status if period is not None else FinancialPeriodStatus.OPEN,
+    }
 
 
 def totals_by_category(
@@ -362,13 +432,16 @@ def expense_instance(*, actor: Any, code: str, request: Any = None) -> Expense:
 
 __all__ = [
     "CATEGORIES_KEY",
+    "EXPENSE_FILTERS",
     "ClosedPeriodError",
     "ExpenseStateError",
     "approve",
     "approved_total",
     "category_choices",
     "expense_instance",
+    "expenses_summary",
     "list_expenses",
+    "period_state",
     "record",
     "reject",
     "totals_by_category",

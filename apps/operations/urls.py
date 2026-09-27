@@ -13,11 +13,13 @@ urlpatterns = [
     path("operations/enroll-flow/", views.enroll_flow_view, name="enroll-flow"),
     path("operations/cohorts/", views.cohorts_view, name="cohorts"),
     path("operations/enrollments/", views.enrollments_view, name="enrollments"),
+    path("operations/enrollments/new/", views.enrollment_new_view, name="enrollment-new"),
     path(
         "operations/enrollments/<str:code>/action/",
         views.enrollment_action_view,
         name="enrollment-action",
     ),
+    path("operations/enrollments/quick/", views.enrollment_quick_view, name="enrollment-quick"),
     path("operations/enrollments/<str:code>/account/", views.account_view, name="account"),
     # The ministry file (Sprint 8G). ``mohe-submit`` sits above the detail
     # route because both live under the same prefix and "submit" is not an id.

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui guided_help arabic_ui %}
 
 {% block title %}{% translate "التسجيلات — مركز التعليم المستمر" %}{% endblock %}
 
@@ -30,28 +30,37 @@
   </div>
   {% if can_create %}
     <div class="acts">
-      <a class="btn2 primary" href="#enrollment-new">{% translate "تسجيل" %}</a>
+      <a class="btn2 primary" href="{% url 'operations:enrollment-new' %}">{% translate "تسجيل" %}</a>
     </div>
   {% endif %}
 </div>
 
 {% guided_help "enrollments" %}
 
+
 {# شريط البحث كان `input` بلا أي تنسيق — لم يكن للحقل إطار ولا للحقل عنوان. #}
-<form method="get" class="filterbar" role="search">
+{# البحث فوري: كل تغيير يعيد رسم النتائج (htmx) ويحدّث العنوان؛ وبلا JS يعمل النموذج بمفتاح Enter وزرّ «بحث». #}
+<form method="get" class="filterbar" role="search" id="enr-form"
+      hx-get="{% url 'operations:enrollments' %}" hx-target="#enr-results" hx-select="#enr-results" hx-swap="outerHTML"
+      hx-select-oob="#enr-count,#enr-clear"
+      hx-trigger="input changed delay:350ms from:#q"
+      hx-push-url="true" hx-indicator="#enr-busy">
   <div class="fld">
     <label for="q">{% translate "بحث" %}</label>
     <input type="search" id="q" name="q" value="{{ query }}"
-           placeholder="{% translate 'بالرمز أو الاسم…' %}" spellcheck="false">
+           placeholder="{% translate 'بالرمز أو الاسم…' %}" spellcheck="false" autocomplete="off">
   </div>
-  {# مرشّحا الدفعة والحالة يصلان من الرابط؛ يُحملان مع البحث كي لا يسقطا عنده. #}
+  {# المرشّحات الثلاثة تصل من الرابط؛ تُحمل مع البحث كي لا تسقط عنده. #}
+  {# و«المشارك» منها: سجل المشاركين يقود إلى هنا بـ ?participant=، وكان يسقط بأوّل بحث فتعود القائمة كلّها بلا تفسير. #}
   {% if request.GET.cohort %}<input type="hidden" name="cohort" value="{{ request.GET.cohort }}">{% endif %}
   {% if request.GET.status %}<input type="hidden" name="status" value="{{ request.GET.status }}">{% endif %}
+  {% if request.GET.participant %}<input type="hidden" name="participant" value="{{ request.GET.participant }}">{% endif %}
   <button class="btn2" type="submit">{% translate "بحث" %}</button>
-  {% if active_filters %}
-    <a class="btn2 ghost" href="{% url 'operations:enrollments' %}">{% translate "إلغاء التصفية" %}</a>
-  {% endif %}
-  <span class="count">{% blocktranslate count n=enrollments|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
+  <span class="busy" id="enr-busy" aria-hidden="true"></span>
+  {# غلافان ثابتان لا يختفيان: البحث الفوري يستبدلهما خارج الهدف (OOB)، وما يختفي لا يُستبدل. #}
+  <span id="enr-clear">{% if active_filters %}<a class="btn2 ghost" href="{% url 'operations:enrollments' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}</span>
+  {# العدّاد يقول الكلّي لا المعروض: صفحةٌ من خمسين تقول «خمسون» عن سجلٍّ فيه ألف. #}
+  <span class="count" id="enr-count">{{ page.total|ar_count:"نتيجة واحدة|نتيجتان|نتائج|نتيجة" }}</span>
 </form>
 
 {% if active_filters %}
@@ -65,6 +74,7 @@
   </div>
 {% endif %}
 
+<div id="enr-results">
 <div class="card2">
   <div class="card2-head">
     <h2>{% translate "سجل التسجيلات" %}</h2>
@@ -78,47 +88,81 @@
     {% endif %}
   </div>
   <div class="tbl-wrap">
-    <table class="tbl">
+    <table class="tbl enr-tbl">
       <thead><tr>
+        <th class="expand"><span class="sr-only">{% translate "تفاصيل" %}</span></th>
         <th>{% translate "الرمز" %}</th><th>{% translate "المشارك" %}</th>
         <th>{% translate "الدفعة" %}</th>
-        <th class="num">{% translate "المستحق" %}</th>
-        <th class="num">{% translate "المدفوع" %}</th><th class="num">{% translate "الخصم" %}</th>
         <th>{% translate "الرصيد" %}</th><th>{% translate "الحالة" %}</th>
         <th><span class="sr-only">{% translate "إجراءات" %}</span></th>
       </tr></thead>
       <tbody>
         {% for e in enrollments %}
+          {# سطرٌ واحد لكل خليّة: كانت الخلايا تحمل سطرين وثلاثة فبلغ الصفّ 115px (147 في صفّين). #}
+          {# فكان الجدول يُري تسجيلين ونصفاً على شاشة 1440×900 — سجلٌّ يُمسَح بالعين لا يُقرأ بالتمرير. #}
+          {# وما نزل عن السطر لم يُحذف: صفُّ التفاصيل تحته يحمله كاملاً ويُفتح في مكانه، #}
+          {# لأن «المستحق والمدفوع والخصم» أرقامٌ تُقارَن ببعضها، ومقارنتُها في صفحةٍ أخرى تُفقد موضع القارئ. #}
           <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ e.code }}</strong><br>
-              <small class="muted num">{{ e.enrolled_on|date:"Y-m-d" }}</small></td>
-            <td>{{ e.participant_name }}<br><small class="muted num" dir="ltr" translate="no">{{ e.participant_number }}</small></td>
-            <td><span dir="ltr" translate="no">{{ e.cohort_code }}</span><br>
-              <small class="muted">{{ e.cohort_name }}</small><br>
-              <small class="muted">{{ e.program_name }}</small></td>
-            <td class="num">{{ e.total_due }}</td>
-            <td class="num">{{ e.total_paid }}</td>
-            <td class="num">{{ e.total_discount }}</td>
+            <td class="expand">
+              <button type="button" class="row-expand" data-expands="det-{{ e.code }}"
+                      aria-expanded="false" aria-controls="det-{{ e.code }}"
+                      title="{% translate 'تفاصيل التسجيل' %}"
+                      aria-label="{% translate 'تفاصيل' %} {{ e.code }}">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 4l6 6-6 6"/></svg>
+              </button>
+            </td>
+            <td dir="ltr" translate="no"><strong class="num">{{ e.code }}</strong></td>
+            {# الاسم والرمز كانا نصّاً: من التسجيل إلى ملف صاحبه أو إلى دفعته كان يمرّ بالقائمة الجانبية ثم ببحث. #}
+            {# ويُرسم رابطاً لمن تفتح له تلك الشاشة وحده — من لا تفتح له يرى النصّ كما كان، ولا يُساق إلى رفض (§3). #}
+            <td>
+              {% if can_view_participants %}
+                <a class="row-link" href="{% url 'people:participant-detail' e.participant_number %}">{{ e.participant_name }}</a>
+              {% else %}{{ e.participant_name }}{% endif %}
+            </td>
+            <td>
+              {% if can_view_cohorts %}
+                <a class="row-link" dir="ltr" translate="no" href="{% url 'operations:cohorts' %}?q={{ e.cohort_code }}">{{ e.cohort_code }}</a>
+              {% else %}<span dir="ltr" translate="no">{{ e.cohort_code }}</span>{% endif %}
+            </td>
             <td>
               {% if e.participant_owes %}<span class="chip danger dot">{{ e.balance }} {% translate "عليه" %}</span>
               {% elif e.centre_owes %}<span class="chip warn dot">{{ e.balance }} {% translate "له" %}</span>
               {% else %}<span class="chip ok dot">{% translate "مسوّى" %}</span>{% endif %}
             </td>
             <td>
+              {# رقاقةُ حالةٍ واحدة، وما كان رقاقاتٍ فوقها صار نقاطاً تحمل نصّها كاملاً في `title`. #}
+              {# «معتمد مع رصيد متبقٍ» شرطٌ على الحالة لا حالةٌ ثانية، وجملةٌ كاملة في خليّة تُبطئ المسح. #}
               <span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span>
+              {% if e.pending_void_receipt %}<span class="chip warn dot" title="{% translate 'سند بطلب إلغاء معلّق؛ لا اعتماد ولا مصادقة حتى يُبتّ فيه' %} — {{ e.pending_void_receipt }}"><span class="sr-only">{% translate "إلغاء معلّق" %}</span>!</span>{% endif %}
               {# BR-018: الاعتماد بعد الوصل. الواقعة تُقال للقارئ، لا لمن يملك الزرّ وحده. #}
               {% if e.is_approved %}
-                <br><span class="chip ok">{% translate "معتمد" %}</span>
-                {# أقساط: الاعتماد صحيح والرصيد باقٍ. الدَّين يوقف البراءة (BR-073) لا التخرج (§6.4). #}
                 {% if e.participant_owes %}
-                  <br><span class="chip warn">{% translate "معتمد مع رصيد متبقٍ — الشهادة/البراءة تتطلب التسديد" %}</span>
+                  {# أقساط: الاعتماد صحيح والرصيد باقٍ. الدَّين يوقف البراءة (BR-073) لا التخرج (§6.4). #}
+                  <span class="chip warn dot" title="{% translate 'معتمد مع رصيد متبقٍ — الشهادة/البراءة تتطلب التسديد' %}"><span class="sr-only">{% translate "معتمد مع رصيد متبقٍ" %}</span>✓!</span>
+                {% else %}
+                  <span class="chip ok dot" title="{% translate 'معتمد' %}"><span class="sr-only">{% translate "معتمد" %}</span>✓</span>
                 {% endif %}
               {% elif e.voucher_received %}
-                <br><span class="chip">{% translate "الوصل مستلم" %}</span>
+                <span class="chip dot" title="{% translate 'الوصل مستلم' %}"><span class="sr-only">{% translate "الوصل مستلم" %}</span>◷</span>
               {% endif %}
             </td>
             <td class="acts">
               <a class="btn2 ghost" href="{% url 'operations:account' e.code %}">{% translate "كشف الحساب" %}</a>
+              {# §6.4 — الخروج تتبعه براءة ذمة، والـ view يحسب الخطوة لكل صفّ ولم يكن أحد يرسمها: #}
+              {# «فتح براءة ذمة» طريقٌ إلى السجل لا فعلٌ يُنفَّذ من هنا، و«عرض براءة الذمة» للقائمة فعلاً. #}
+              {% if e.clearance_code %}
+                <a class="btn2 ghost" href="{% url 'operations:clearance-detail' e.clearance_code %}">{% translate "عرض براءة الذمة" %}</a>
+              {% elif e.clearance_openable %}
+                <a class="btn2 ghost" href="{% url 'operations:clearances' %}">{% translate "فتح براءة ذمة" %}</a>
+              {% endif %}
+              {# §3.2/7 — الطلب يبدأ من التسجيل، وكان مدخله الوحيد سجل النقل ثم بحثاً عن الشخص نفسه في قائمة. #}
+              {# ولا يُرسم إلا على صفٍّ تقبله الشاشة الهدف فعلاً، بتعريفها هي لا بتخمين هنا. #}
+              {% if can_request_transfer and e.transferable %}
+                <a class="btn2 ghost" href="{% url 'operations:transfer-new' %}?enrollment={{ e.code }}">{% translate "طلب نقل" %}</a>
+              {% endif %}
+              {% if can_take_payment and e.participant_owes %}
+                <a class="btn2" href="{% url 'cashbox:payment-new' %}?enrollment={{ e.code }}">{% translate "قبض دفعة" %}</a>
+              {% endif %}
               {% if can_edit and not e.voucher_received and not e.is_final %}
                 {% if e.participant_owes %}
                   <button class="btn2" type="button" disabled>{% translate "الدفع من الصندوق أولًا" %}</button>
@@ -271,8 +315,35 @@
               {% endif %}
             </td>
           </tr>
+          {# ما نزل عن السطر — لا ما حُذف منه: يبقى في الصفحة ومقروءاً لقارئ الشاشة. #}
+          {# و`hidden` لا `display:none`: ما يخفيه الوسم يُظهره الزرّ بلا ورقة أنماط. #}
+          <tr class="row-detail" id="det-{{ e.code }}" hidden>
+            <td colspan="{{ column_count }}">
+              <dl class="dl detail-dl">
+                <dt>{% translate "تاريخ التسجيل" %}</dt>
+                <dd class="num" dir="ltr">{{ e.enrolled_on|date:"Y-m-d" }}</dd>
+                <dt>{% translate "الرقم الجامعي" %}</dt>
+                <dd class="num" dir="ltr" translate="no">{{ e.participant_number }}</dd>
+                <dt>{% translate "الدفعة" %}</dt>
+                <dd>{{ e.cohort_name }}</dd>
+                <dt>{% translate "البرنامج" %}</dt>
+                <dd>{{ e.program_name }}</dd>
+                <dt>{% translate "المستحق" %}</dt>
+                <dd class="num">{{ e.total_due }}</dd>
+                <dt>{% translate "المدفوع" %}</dt>
+                <dd class="num">{{ e.total_paid }}</dd>
+                <dt>{% translate "الخصم" %}</dt>
+                <dd class="num">{{ e.total_discount }}</dd>
+                {% if e.pending_void_receipt %}
+                  <dt>{% translate "سند بطلب إلغاء" %}</dt>
+                  <dd class="num" dir="ltr">{{ e.pending_void_receipt }}</dd>
+                {% endif %}
+              </dl>
+              <p class="hint">{% translate "الأرقام كاملةً وحركاتها في كشف الحساب." %}</p>
+            </td>
+          </tr>
         {% empty %}
-          <tr><td colspan="9" class="empty">
+          <tr><td colspan="{{ column_count }}" class="empty">
             {% if active_filters %}
               <span class="empty-title">{% translate "لا تسجيل يطابق التصفية الحالية" %}</span>
               <span class="empty-body">{% translate "جرّب رمز التسجيل كاملاً أو جزءاً من اسم المشارك، أو ارفع تصفية الحالة والدفعة. البحث يطابق الرمز واسم المشارك فقط." %}</span>
@@ -281,7 +352,7 @@
               <span class="empty-title">{% translate "لا توجد تسجيلات بعد" %}</span>
               <span class="empty-body">{% translate "يبدأ التسجيل من دفعة معتمدة وزارياً ومشارك مسجَّل، وتُحمَّل الرسوم آلياً من قائمة الأسعار السارية (BR-012 · BR-013)." %}</span>
               {% if can_create %}
-                <a class="btn2 primary empty-act" href="#enrollment-new">{% translate "تسجيل جديد" %}</a>
+                <a class="btn2 primary empty-act" href="{% url 'operations:enrollment-new' %}">{% translate "تسجيل جديد" %}</a>
               {% endif %}
             {% endif %}
           </td></tr>
@@ -289,47 +360,18 @@
       </tbody>
     </table>
   </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted"><span class="num">{{ page.start }}</span>–<span class="num">{{ page.end }}</span> {% translate "من" %} <span class="num">{{ page.total }}</span></span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.prev }}">&lsaquo; {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?{% if params_qs %}{{ params_qs }}&amp;{% endif %}page={{ page.next }}">{% translate "التالي" %} &rsaquo;</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+</div>
 </div>
 
-{% if can_create %}
-  <div class="card2" id="enrollment-new">
-    <div class="card2-head"><h2>{% translate "تسجيل جديد" %}</h2></div>
-    <div class="card2-body">
-      <p class="hint boxed">
-        {% translate "تُعرض الدفعات المعتمدة وزارياً فقط، وتُحمَّل الرسوم من قائمة الأسعار السارية تلقائياً. والمشارك يُختار بالاسم من قائمة من أُدخلت طلبات التحاقهم." %}
-      </p>
-      {% if not form.fields.participant_number.choices %}
-        <p class="hint">
-          {% translate "لا مشارك مسجَّل بعد، فلا اسم تختاره القائمة. يبدأ التسجيل من طلب الالتحاق." %}
-          <a href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
-        </p>
-      {% endif %}
-      <form method="post">
-        {% csrf_token %}
-        {% include "partials/_form.html" %}
-        <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "تسجيل" %}</button>
-        </div>
-      </form>
-    </div>
-  </div>
-{% endif %}
-{# فتح حوارات الحالة وإغلاقها: كلُّ زرّ `data-opens` يفتح الحوار المسمّى، وEscape أو «إلغاء» يغلقه ويعيد التركيز إلى الزرّ. #}
-<script>
-  (() => {
-    document.querySelectorAll("[data-opens]").forEach((opener) => {
-      opener.addEventListener("click", () => {
-        const dialog = document.getElementById(opener.dataset.opens);
-        if (!dialog || typeof dialog.showModal !== "function") return;
-        const menu = opener.closest("details");
-        if (menu) menu.removeAttribute("open");
-        dialog.showModal();
-        dialog.addEventListener("close", () => opener.focus(), { once: true });
-      });
-    });
-    document.querySelectorAll("[data-closes]").forEach((closer) => {
-      closer.addEventListener("click", () => closer.closest("dialog")?.close());
-    });
-  })();
-</script>
+{# فتح حوارات الحالة وإغلاقها في `static/js/ui.js`: الزرّ يسمّي حواره بـ `data-opens`، والقائمة تُطوى، وEscape أو «إلغاء» يعيد التركيز إليه. #}
 {% endblock %}

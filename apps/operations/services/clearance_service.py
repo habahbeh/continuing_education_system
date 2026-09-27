@@ -155,6 +155,45 @@ class StepRoleError(PermissionDenied):
     """§6.4 — a step attempted by a department it does not belong to."""
 
 
+def _role_satisfies(actor: Any, required_role: str) -> bool:
+    """
+    Whether this actor's ROLE answers for the department a step belongs to.
+
+    §6.4 assigns the steps to departments and not to permissions, so a raw role
+    comparison is right here and the permission check above it is not enough:
+    the finance officer holds ``CLEARANCE.APPROVE`` and must still not recover
+    the centre's property.
+
+    What the comparison missed is SUPER_ADMIN. ``permissions/policy.py`` settles
+    that role at «Stage 0 — full authority, by role not by Django flag … decided
+    here so no role-scoped deny rule written for a business role can match it»,
+    and every other role-scoped rule in the system yields to it. These two
+    checks were the only place in the codebase comparing ``actor.role`` directly,
+    and so the only place where the client's own account was refused — on a
+    fresh install with one account, no clearance could be completed at all.
+
+    **What this does NOT relax, and cannot:** ``C-30 · D-30`` is a database
+    constraint, ``second_certified_by <> certified_by``. Two signatures from one
+    person is a single control wearing a costume, and no role — this one
+    included — can be two people. A super-administrator may be EITHER signature
+    on the financial step; the other one belongs to somebody else.
+    """
+    role = getattr(actor, "role", None)
+    return role == required_role or role == Role.SUPER_ADMIN
+
+
+def role_may_take_step(*, actor: Any, required_role: str) -> bool:
+    """
+    The same decision, for a screen that must not draw a step it cannot carry.
+
+    Exported rather than repeated: the view was comparing ``user.role`` to the
+    setting itself, so the screen and the service each held their own copy of
+    «whose step is this» — and the SUPER_ADMIN case had to be found and fixed
+    twice, which is how a control drifts into disagreeing with itself.
+    """
+    return _role_satisfies(actor, required_role)
+
+
 def _require_step_role(
     *,
     actor: Any,
@@ -170,7 +209,7 @@ def _require_step_role(
     separating the centre's steps from finance's is that someone can later ask
     who tried to cross the line.
     """
-    if getattr(actor, "role", None) == required_role:
+    if _role_satisfies(actor, required_role):
         return
 
     write_audit(
@@ -486,6 +525,13 @@ def certify_finance_step(*, actor: Any, clearance: Clearance, request: Any = Non
     _require_previous_done(clearance, FINANCE_STEP)
 
     enrollment = clearance.enrollment
+
+    # A receipt under a pending void may yet be reversed; the balance it
+    # produces is not one to certify on. Decided first, certified after.
+    from apps.cashbox.services import payment_service
+
+    payment_service.require_no_pending_void(enrollment, what_ar="المصادقة المالية")
+
     balance = get_account_state(enrollment).balance
     deposit = deposit_settlement_state(enrollment)
 
@@ -647,7 +693,7 @@ def second_certify_finance_step(
         raise ValidationError("الخطوة المالية مغلقة سلفاً.")
 
     required_role = second_certifier_role(as_of=timezone.now().date())
-    if getattr(actor, "role", None) != required_role:
+    if not _role_satisfies(actor, required_role):
         write_audit(
             action="DENIED_ATTEMPT",
             entity_type=STEP_ENTITY,
@@ -943,7 +989,13 @@ def list_clearances(
     """Clearances as rows, each showing which step it is waiting on."""
     policy.require(actor, Screen.CLEARANCE, Action.VIEW, request=request)
 
-    queryset = Clearance.objects.select_related("participant", "enrollment__cohort__program")
+    from django.db.models import Prefetch
+
+    # The steps ride along in one query, already ordered — one clearance per
+    # row used to mean one extra query per row for its steps.
+    queryset = Clearance.objects.select_related(
+        "participant", "enrollment__cohort__program"
+    ).prefetch_related(Prefetch("steps", queryset=ClearanceStep.objects.order_by("step_number")))
     if status:
         queryset = queryset.filter(status=status)
     if query:
@@ -953,7 +1005,7 @@ def list_clearances(
 
     rows: list[dict[str, Any]] = []
     for clearance in queryset.order_by("-opened_on", "-id"):
-        steps = list(clearance.steps.order_by("step_number"))
+        steps = list(clearance.steps.all())  # ordered by the prefetch above
         pending = next((s.step_number for s in steps if not s.is_done), None)
         rows.append(
             {
@@ -1121,10 +1173,10 @@ __all__ = [
     "HANDOVER_ROLE_KEY",
     "SECOND_CERTIFIER_ROLE_KEY",
     "STEP_NAMES",
+    "CertificateNotIssuedError",
     "ClearanceBlockedError",
     "DepositNotSettledError",
     "EnrollmentNotClearableError",
-    "CertificateNotIssuedError",
     "ParticipantAcknowledgementRequiredError",
     "SecondCertifierRoleError",
     "StepOutOfOrderError",
@@ -1146,6 +1198,7 @@ __all__ = [
     "open_clearance",
     "opening_preview",
     "return_credit_at_clearance",
+    "role_may_take_step",
     "second_certifier_role",
     "second_certify_finance_step",
     "standard_custody_items",

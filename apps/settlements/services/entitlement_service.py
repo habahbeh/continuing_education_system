@@ -21,7 +21,7 @@ from typing import Any
 
 from django.db.models import Max
 
-from apps.billing.services.account_service import ZERO, get_account_state
+from apps.billing.services.account_service import ZERO
 from apps.settlements.models import IneligibilityReason
 from apps.settlements.services import assumptions
 
@@ -46,6 +46,54 @@ class EligibilityVerdict:
     note: str = ""
 
 
+def payment_overdue_map(enrollments: list[Any], *, as_of: date) -> dict[int, bool]:
+    """
+    ``is_payment_overdue`` لمجموعةٍ دفعةً واحدة — **القاعدة نفسها، لا نسخةٌ منها**.
+
+    Sprint 8L. التقرير الرابع كان يسأل هذا السؤال داخل حلقة الصفوف، فيكلّف كل
+    متأخّرٍ ثلاثة عشر استعلاماً إضافياً (قِيس: ٣٠ استعلاماً لصفّ واحد و٩٦
+    لستّة). والمفارقة أن التقرير يبطؤ كلّما نجح المركز في التحصيل عكسياً.
+
+    الشروط الثلاثة كما هي في التوأم المفرد سطراً بسطر، والتجاوز اليدوي كما هو.
+    ما تغيّر أن الرصيد يُجمَع مرّة للمجموعة كلها (``get_account_states``)،
+    وآخر دفعة تُقرأ باستعلامٍ مجمَّع واحد بدل استعلام لكل تسجيل.
+
+    ``is_payment_overdue`` تنادي هذه الدالة بعنصر واحد، فلا وجود لتطبيقين
+    للقاعدة يمكن أن يفترقا.
+    """
+    from apps.billing.services.account_service import get_account_states
+    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
+
+    if not enrollments:
+        return {}
+
+    states = get_account_states(enrollments)
+    last_payments = dict(
+        PaymentAllocation.objects.filter(
+            enrollment__in=enrollments, receipt__status=ReceiptStatus.ISSUED
+        )
+        .values_list("enrollment_id")
+        .annotate(latest=Max("receipt__received_on"))
+        .values_list("enrollment_id", "latest")
+    )
+    limit = timedelta(days=assumptions.overdue_days(as_of=as_of))
+
+    verdicts: dict[int, bool] = {}
+    for enrollment in enrollments:
+        if enrollment.status == "PAYMENT_OVERDUE" and enrollment.status_note_ar:
+            verdicts[enrollment.pk] = True  # Manual override with a stated reason.
+            continue
+        if states[enrollment.pk].balance <= ZERO:
+            verdicts[enrollment.pk] = False
+            continue
+        if enrollment.cohort.starts_on > as_of:
+            verdicts[enrollment.pk] = False  # The course has not started.
+            continue
+        reference = last_payments.get(enrollment.pk) or enrollment.enrolled_on
+        verdicts[enrollment.pk] = (as_of - reference) > limit
+    return verdicts
+
+
 def is_payment_overdue(enrollment: Any, *, as_of: date) -> bool:
     """
     ⚠️ ASSUMPTION (Q-16) — is this enrolment behind on payment?
@@ -63,24 +111,7 @@ def is_payment_overdue(enrollment: Any, *, as_of: date) -> bool:
     This is the predicate only. The daily job that sweeps statuses across all
     enrolments is Sprint 6 and deliberately not built here.
     """
-    from apps.cashbox.models import PaymentAllocation, ReceiptStatus
-
-    if enrollment.status == "PAYMENT_OVERDUE" and enrollment.status_note_ar:
-        return True  # Manual override with a stated reason.
-
-    state = get_account_state(enrollment)
-    if state.balance <= ZERO:
-        return False
-
-    if enrollment.cohort.starts_on > as_of:
-        return False  # The course has not started.
-
-    last_payment = PaymentAllocation.objects.filter(
-        enrollment=enrollment, receipt__status=ReceiptStatus.ISSUED
-    ).aggregate(latest=Max("receipt__received_on"))["latest"]
-
-    reference = last_payment or enrollment.enrolled_on
-    return (as_of - reference) > timedelta(days=assumptions.overdue_days(as_of=as_of))
+    return payment_overdue_map([enrollment], as_of=as_of)[enrollment.pk]
 
 
 def evaluate_eligibility(enrollment: Any, *, as_of: date) -> EligibilityVerdict:

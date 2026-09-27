@@ -75,7 +75,7 @@ def test_the_finance_officer_records_and_the_manager_approves(signed_in, finance
 
     done = signed_in(approver).post(
         reverse("expenses:expenses"),
-        {"action": "approve", "code": "EXP-UI-1", "note_ar": "مطابق للفاتورة"},
+        {"action": "approve", "code": row["code"], "note_ar": "مطابق للفاتورة"},
         follow=True,
     )
     approved = done.context["expenses"][0]

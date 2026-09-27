@@ -35,6 +35,11 @@ urlpatterns = [
     # Sprint 8K — the read-only system screens from the demo sidebar. Their
     # paths stay at the root; only the app that guards them changed (ADR-008).
     path("settings/", views.settings_view, name="settings"),
+    # أوّل خطوتين في النظام، وكانتا بلا شاشة: الفصل الدراسي تُبنى منه أرقام
+    # المشاركين (BR-001)، والفترة المالية هي ما يقبل الحركة أو يردّها (D-23).
+    # كلتاهما تحت صلاحية الإعدادات — لا خانة جديدة في المصفوفة.
+    path("semesters/", views.semesters_view, name="semesters"),
+    path("financial-periods/", views.financial_periods_view, name="financial-periods"),
     path("coverage/", views.coverage_view, name="coverage"),
     path("future/", views.future_view, name="future"),
 ]

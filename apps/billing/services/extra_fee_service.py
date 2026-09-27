@@ -221,23 +221,115 @@ def replacement_fee_for(enrollment: Any) -> ExtraFee | None:
     )
 
 
+#: Tone and icon per type, shared by the tiles and the form's cards.
+FEE_TYPE_LOOK: dict[str, tuple[str, str]] = {
+    ExtraFeeType.SUBJECT_REPEAT: ("amber", "book"),
+    ExtraFeeType.CERTIFICATE_REPLACEMENT: ("violet", "doc"),
+    ExtraFeeType.INTERNATIONAL_EXAM: ("info", "globe"),
+    ExtraFeeType.OTHER: ("teal", "plus-square"),
+}
+
+#: What the form must ask for each type — nothing else is drawn (§5.5).
+FEE_TYPE_NEEDS: dict[str, dict[str, bool]] = {
+    ExtraFeeType.SUBJECT_REPEAT: {"subject": True, "agreement": False, "decision": False},
+    ExtraFeeType.CERTIFICATE_REPLACEMENT: {"subject": False, "agreement": False, "decision": False},
+    ExtraFeeType.INTERNATIONAL_EXAM: {"subject": False, "agreement": True, "decision": False},
+    ExtraFeeType.OTHER: {"subject": False, "agreement": False, "decision": True},
+}
+
+
+def fee_type_cards(*, as_of: date) -> list[dict[str, Any]]:
+    """
+    One card per fee type for the form: its label, the seeded amount (or
+    None where the amount is always typed), who shares it, and which extra
+    fields it needs. Read from the same tables the service charges from, so
+    the form can never promise a figure the save would not use.
+    """
+    cards = []
+    for value, label in ExtraFeeType.choices:
+        cards.append(
+            {
+                "code": value,
+                "label": str(label),
+                "default_amount": default_amount_for(value, as_of=as_of),
+                "shareable": SHAREABLE_BY_TYPE.get(value),
+                "description": DESCRIPTION_BY_TYPE[value],
+                "tone": FEE_TYPE_LOOK[value][0],
+                "icon": FEE_TYPE_LOOK[value][1],
+                **FEE_TYPE_NEEDS[value],
+            }
+        )
+    return cards
+
+
+def chargeable_rows(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """The enrolments a fee can be charged on — every live or finished one, never a cancelled one."""
+    from apps.operations.models import Enrollment
+
+    policy.require(actor, Screen.EXTRA_FEES, Action.CREATE, request=request)
+
+    return [
+        {
+            "code": e.code,
+            "participant_name": e.participant.name_ar,
+            "participant_number": e.participant.participant_number,
+            "program_name": e.cohort.program.name_ar,
+            "status_display": e.get_status_display(),
+        }
+        for e in Enrollment.objects.exclude(status="CANCELLED")
+        .select_related("participant", "cohort__program")
+        .order_by("-enrolled_on", "-id")[:300]
+    ]
+
+
+def fees_summary(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Count and total per fee type over already-projected rows."""
+    out = {
+        value: {"label": str(label), "count": 0, "total": ZERO} for value, label in ExtraFeeType.choices
+    }
+    for r in rows:
+        bucket = out[r["fee_type"]]
+        bucket["count"] += 1
+        bucket["total"] += r["amount"]
+    return out
+
+
 def list_extra_fees(
-    *, actor: Any, enrollment_code: str = "", request: Any = None
+    *,
+    actor: Any,
+    enrollment_code: str = "",
+    fee_type: str = "",
+    query: str = "",
+    request: Any = None,
 ) -> list[dict[str, Any]]:
     """Extra fees as rows, each with the ledger line it created (§5.5)."""
+    from django.db.models import Q
+
     policy.require(actor, Screen.EXTRA_FEES, Action.VIEW, request=request)
 
     queryset = ExtraFee.objects.select_related(
-        "enrollment__participant", "charge_line", "created_by"
+        "enrollment__participant", "enrollment__cohort__program", "charge_line", "created_by"
     )
     if enrollment_code:
         queryset = queryset.filter(enrollment__code=enrollment_code)
+    if fee_type in ExtraFeeType.values:
+        queryset = queryset.filter(fee_type=fee_type)
+    if query.strip():
+        q = query.strip()
+        queryset = queryset.filter(
+            Q(enrollment__code__icontains=q)
+            | Q(enrollment__participant__name_ar__icontains=q)
+            | Q(enrollment__participant__participant_number__icontains=q)
+            | Q(subject_name__icontains=q)
+        )
 
     return [
         {
             "id": f.pk,
             "enrollment_code": f.enrollment.code,
             "participant_name": f.enrollment.participant.name_ar,
+            "participant_number": f.enrollment.participant.participant_number,
+            "program_name": f.enrollment.cohort.program.name_ar,
             "fee_type": f.fee_type,
             "fee_type_display": f.get_fee_type_display(),
             "subject_name": f.subject_name,
@@ -254,6 +346,11 @@ def list_extra_fees(
 
 __all__ = [
     "DESCRIPTION_BY_TYPE",
+    "FEE_TYPE_LOOK",
+    "FEE_TYPE_NEEDS",
+    "chargeable_rows",
+    "fee_type_cards",
+    "fees_summary",
     "FEE_SETTING_KEYS",
     "SHAREABLE_BY_TYPE",
     "FeeAmountUnknownError",

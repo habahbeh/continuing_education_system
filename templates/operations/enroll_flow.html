@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{% translate "مسار التسجيل والدفع — مركز التعليم المستمر" %}{% endblock %}
 
@@ -21,12 +21,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "دليل العمل" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "من الإعلان عن دفعة معتمدة حتى رفع اسم المتدرب إلى الوزارة — ثماني خطوات، لكلٍّ منها منفّذها وقاعدتها وشاشتها." %}</p>
   </div>
 </div>
 
-{% guided_help "enroll-flow" %}
 
 <div class="hint boxed">
   <strong>{% translate "خريطة عمل، لا شاشة تنفيذ." %}</strong>
@@ -46,7 +45,7 @@
 
         <div class="journey-actions">
           {% for link in step.links %}
-            <a class="btn2 sm" href="{{ link.url }}">{{ link.label }}</a>
+            <a class="btn2 primary sm" href="{{ link.url }}">{{ link.label }} <span aria-hidden="true">←</span></a>
           {% endfor %}
           {% if step.rules %}
             <details class="journey-checks">
@@ -73,9 +72,9 @@
   {% for item in later %}
     {% if item.links %}
       {% for link in item.links %}
-        <a class="act-card" href="{{ link.url }}">
+        <a class="act-card lead" href="{{ link.url }}">
           <span class="t">{{ item.title }}</span>
-          <span class="d">{{ item.what }}</span>
+          <span class="btn2 primary sm mt-2">{{ link.label }} <span aria-hidden="true">←</span></span>
         </a>
       {% endfor %}
     {% else %}

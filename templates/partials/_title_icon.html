@@ -1,0 +1,4 @@
+{% comment %}
+  رمز العنوان: رمز الشاشة من القائمة الجانبية بلون مجموعتها، يُدرَج داخل
+  `<h1>` في ترويسة الصفحة. زينة — العنوان المقروء هو النصّ.
+{% endcomment %}{% if nav_active %}<span class="title-ico tone-{{ nav_active.tone }}" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ nav_active.icon }}"/></svg></span>{% endif %}

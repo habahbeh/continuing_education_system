@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui %}
 
 {% block title %}{{ claim.code }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -47,7 +47,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ claim.code }}</span></h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }} <span class="code" dir="ltr" translate="no">{{ claim.code }}</span></h1>
     <p class="sub">
       {{ claim.partner_name }} —
       {% blocktranslate with start=claim.period_from end=claim.period_to %}الفترة من {{ start }} إلى {{ end }}{% endblocktranslate %}
@@ -76,7 +76,6 @@
   </div>
 </div>
 
-{% guided_help "claim-detail" %}
 
 {% if claim.hash_verifies is False %}
   <div class="note danger" role="alert">

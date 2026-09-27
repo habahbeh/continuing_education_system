@@ -33,6 +33,18 @@ def cashier(seeded_settings):
 
 
 @pytest.fixture
+def manager(seeded_settings):
+    from apps.people.models import Role, User
+
+    return User.objects.create_user(
+        username="mgr.bill",
+        password=PASSWORD,
+        role=Role.CENTER_MANAGER,
+        full_name_ar="مدير المركز",
+    )
+
+
+@pytest.fixture
 def finance(seeded_settings):
     from apps.people.models import Role, User
 

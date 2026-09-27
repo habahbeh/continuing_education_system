@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -49,20 +49,41 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "لا يُسجَّل مشارك على دفعة لم تُعتمد (BR-013)، والملف لا يُرسَل إلا بمرفقيه الإلزاميين (BR-016). القرار يُسجَّل كما ورد من الوزارة." %}</p>
   </div>
   {% if can_open_file %}
     <div class="acts">
-      <a class="btn2 primary" href="{% url 'operations:mohe-submit' %}">{% translate "فتح ملف وزاري" %}</a>
+      <a class="btn2 primary" href="{% url 'operations:mohe-submit' %}">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc-plus"/></svg>
+        {% translate "فتح ملف وزاري" %}
+      </a>
     </div>
   {% endif %}
 </div>
 
-{% guided_help "mohe" %}
 
-<form method="get" class="filterbar" role="search">
-  <div class="fld">
+{# شريط مؤشرات: عدّ السجل كله، وكل بطاقة مرشّح بنقرة — بأسلوب لوحة المؤشرات. #}
+<div class="kpi-grid tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
+
+{# البحث فوري كسجلّ الصندوق؛ وبلا JS يعمل بمفتاح Enter. #}
+{# `hx-get` فارغاً تعني «العنوان الحالي بمعاملاته»، فيضيف htmx حقول النموذج فوق ما #}
+      {# في العنوان: ?q=ت ثم ?q=ت&q=تص مع كل حرف، فينمو الرابط ويحشو تاريخ المتصفح. #}
+      {# المسار وحده يجعل معاملات النموذج هي الاستعلام كلَّه. #}
+<form method="get" class="filterbar mohe-filters" role="search" id="mohe-form"
+      hx-get="{{ request.path }}" hx-target="#mohe-results" hx-select="#mohe-results" hx-swap="outerHTML"
+      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status" hx-push-url="true" hx-indicator="#mohe-busy">
+  <div class="fld grow">
     <label for="f_q">{% translate "بحث" %}</label>
     <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رمز الدفعة أو اسمها…' %}" spellcheck="false" id="f_q">
   </div>
@@ -76,25 +97,13 @@
       <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
     </select>
   </div>
-  <button class="btn2" type="submit">{% translate "بحث" %}</button>
+  <span class="busy" id="mohe-busy" aria-hidden="true"></span>
   {% if active_filters %}
     <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "إلغاء التصفية" %}</a>
   {% endif %}
-  <span class="count">{% blocktranslate count n=submissions|length %}نتيجة واحدة{% plural %}{{ n }} نتيجة{% endblocktranslate %}</span>
+  <span class="count">{{ submissions|length|ar_count:"نتيجة واحدة|نتيجتان|نتائج|نتيجة" }}</span>
 </form>
 
-{% if status_counts %}
-  <div class="mohe-overview">
-    <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
-    <div class="mohe-state-strip">
-      {% for s in status_counts %}
-        <div class="mohe-state {{ s.status|status_tone }}{% if status == s.status %} is-on{% endif %}">
-          <span class="chip {{ s.status|status_tone }}">{{ s.label }}: <span class="num">{{ s.count }}</span></span>
-        </div>
-      {% endfor %}
-    </div>
-  </div>
-{% endif %}
 
 {% if active_filters %}
   <div class="note">
@@ -109,8 +118,15 @@
 
 <div class="card2 mohe-register">
   <div class="card2-head">
-    <h2>{% translate "الملفات الوزارية" %}</h2>
+    <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg></span><h2>{% translate "الملفات الوزارية" %}</h2>
+    {% if status_counts %}
+      <div class="acts">
+        <small class="muted">{% translate "توزيع النتائج المعروضة" %}:</small>
+        {% for c in status_counts %}<span class="chip {{ c.status|status_tone }}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>{% endfor %}
+      </div>
+    {% endif %}
   </div>
+  <div id="mohe-results">
   <div class="tbl-wrap">
     <table class="tbl mohe-tbl">
       <thead>
@@ -129,7 +145,9 @@
       <tbody>
         {% for s in submissions %}
           <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ s.cohort_code }}</strong>
+            <td dir="ltr" translate="no">
+              {% if can_view_cohorts %}<a class="row-link num" href="{% url 'operations:cohorts' %}?q={{ s.cohort_code|urlencode }}">{{ s.cohort_code }}</a>
+              {% else %}<strong class="num">{{ s.cohort_code }}</strong>{% endif %}
               <br><small class="muted" dir="rtl">{{ s.cohort_name_ar }}</small>
             </td>
             <td>{{ s.program_name_ar }}
@@ -157,9 +175,9 @@
                 {% if s.deadline_state.severity == "EXPIRED" %}
                   <br><span class="chip danger dot">{% translate "انتهت المهلة" %}</span>
                 {% elif s.deadline_state.severity == "WARNING" %}
-                  <br><span class="chip warn dot">{% translate "قاربت المهلة" %}{% if s.deadline_state.days_left %} — <span class="num">{{ s.deadline_state.days_left }}</span> {% translate "يوماً" %}{% else %} — {% translate "آخر يوم" %}{% endif %}</span>
+                  <br><span class="chip warn dot">{% translate "قاربت المهلة" %}{% if s.deadline_state.days_left %} — {{ s.deadline_state.days_left|ar_count:"يوم واحد|يومان|أيام|يوماً" }}{% else %} — {% translate "آخر يوم" %}{% endif %}</span>
                 {% elif s.deadline_state %}
-                  <br><small class="muted"><span class="num">{{ s.deadline_state.days_left }}</span> {% translate "يوماً متبقياً" %}</small>
+                  <br><small class="muted">{{ s.deadline_state.days_left|ar_count:"يوم واحد|يومان|أيام|يوماً" }} {% translate "متبقية" %}</small>
                 {% endif %}
               {% else %}<span class="muted">{% translate "غير محدَّدة" %}</span>{% endif %}
             </td>
@@ -167,8 +185,20 @@
               {% if s.enrolled_count %}{{ s.enrolled_count }}
               {% else %}<span class="muted">0</span>{% endif %}
             </td>
-            <td class="acts">
-              <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض الملف" %}</a>
+            <td class="acts-col">
+              {# الخطوة التالية بصلاحية القارئ لا بالحالة وحدها: فلا وعدٌ ينتهي برفض. #}
+              {% if s.may_act and s.status == "DRAFT" %}
+                <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "أكمل الملف" %}</a>
+              {% elif s.may_act and s.status == "SUBMITTED" %}
+                <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "سجّل القرار" %}</a>
+              {% elif s.may_act and s.status == "REJECTED" %}
+                <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "أعد الإرسال" %}</a>
+              {% else %}
+                <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "عرض الملف" %}</a>
+              {% endif %}
+              {% if s.status == "APPROVED" and can_view_enrollments %}
+                <a class="btn2 sm ghost" href="{% url 'operations:enrollments' %}?cohort={{ s.cohort_code }}">{% translate "التسجيلات" %}</a>
+              {% endif %}
             </td>
           </tr>
           {% if s.rejection_reason_ar %}
@@ -194,6 +224,7 @@
       </tbody>
     </table>
   </div>
+  </div>
   <div class="card2-body">
     <p class="hint">
       {% translate "«مهلة التسجيل» تاريخٌ ورد في قرار الوزارة، يُعرض كما هو، وحالته محسوبة في الخدمة بعدد الأيام الذي يحدده إعداد «mohe_deadline_alert_days» — وهي القاعدة نفسها التي يتنبّه بها التقرير اليومي (BR-015). وتسجيل رفع اسم بعد انقضائها يتطلب سبب تجاوز من مدير المركز (BR-019). والإرفاق والإرسال وتسجيل القرار تتمّ من صفحة الملف، كلٌّ بصلاحيته." %}
@@ -203,10 +234,10 @@
 
 <div class="card2">
   <div class="card2-head">
-    <h2>{% translate "Trainee Names for MOHE" %}</h2>
+    <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span><h2>{% translate "رفع أسماء المتدربين للوزارة" %}</h2>
     {% if can_export_uploaded_names %}
       <div class="acts">
-        <a class="btn2 sm" href="{% url 'operations:mohe-uploaded-export' %}" download>{% translate "Export Uploaded Names" %}</a>
+        <a class="btn2 sm" href="{% url 'operations:mohe-uploaded-export' %}" download>{% translate "تصدير الأسماء المرفوعة" %}</a>
       </div>
     {% endif %}
   </div>
@@ -216,20 +247,23 @@
     </p>
   </div>
   {% for section in mohe_name_sections %}
-    <div class="card2-body">
-      <h3 dir="ltr" translate="no">{{ section.cohort_code }}</h3>
-      <p class="hint">
-        {{ section.cohort_name_ar }} — {{ section.program_name_ar }}
-        {% if section.registration_deadline %}
-          · {% translate "مهلة التسجيل" %}: <span dir="ltr">{{ section.registration_deadline|date:"Y/m/d" }}</span>
-        {% endif %}
-      </p>
-      <div class="mohe-state-strip">
+    {# دفعة لكل طيّة: مفتوحة إن بقي اسم بانتظار الرفع، مطويّة إن اكتمل الرفع. #}
+    <details class="names-box"{% if section.pending_count %} open{% endif %}>
+      <summary>
+        <span dir="ltr" translate="no" class="num code">{{ section.cohort_code }}</span>
+        <span class="t">{{ section.cohort_name_ar }} — {{ section.program_name_ar }}</span>
         <span class="chip">{% translate "المعتمدون" %}: <span class="num">{{ section.approved_count }}</span></span>
         <span class="chip ok">{% translate "رُفعت أسماؤهم" %}: <span class="num">{{ section.uploaded_count }}</span></span>
-        <span class="chip warn">{% translate "بانتظار الرفع" %}: <span class="num">{{ section.pending_count }}</span></span>
+        <span class="chip{% if section.pending_count %} warn{% endif %}">{% translate "بانتظار الرفع" %}: <span class="num">{{ section.pending_count }}</span></span>
+        {% if section.registration_deadline %}<small class="muted">{% translate "مهلة التسجيل" %}: <span dir="ltr" class="num">{{ section.registration_deadline|date:"Y/m/d" }}</span></small>{% endif %}
+        <span class="chev" aria-hidden="true">‹</span>
+      </summary>
+    {% if not section.rows %}
+      {# طيّة بلا معتمدين: سطر يشرح الفرق، لا جدول فارغ بسبعة أعمدة. #}
+      <div class="card2-body">
+        <p class="empty-inline">{% translate "لا تسجيل معتمد على هذه الدفعة بعد — ولا يُرفع اسم إلى الوزارة قبل اعتماد تسجيله؛ فعمود «المسجّلون» في السجلّ أعلاه يُحصي القائمين لا المعتمدين." %}</p>
       </div>
-    </div>
+    {% else %}
     <div class="tbl-wrap">
       <table class="tbl">
         <thead>
@@ -266,21 +300,35 @@
               </td>
               <td class="acts">
                 {% if row.can_record_upload %}
-                  <form class="inline-form" method="post" action="{% url 'operations:mohe-name-upload' row.enrollment_code %}">
-                    {% csrf_token %}
-                    <button class="btn2 sm" type="submit">{% translate "Record MOHE Upload" %}</button>
-                  </form>
+                  <button class="btn2 sm" type="button" @click="document.getElementById('up-{{ row.enrollment_code }}').showModal()">{% translate "تسجيل الرفع للوزارة…" %}</button>
+                  <dialog class="modal confirm-modal" id="up-{{ row.enrollment_code }}" dir="rtl" aria-labelledby="up-{{ row.enrollment_code }}-t">
+                    <form method="post" action="{% url 'operations:mohe-name-upload' row.enrollment_code %}">
+                      {% csrf_token %}
+                      <div class="modal-head">
+                        <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span>
+                        <h2 id="up-{{ row.enrollment_code }}-t">{% translate "تسجيل رفع الاسم إلى الوزارة" %}</h2>
+                      </div>
+                      <div class="modal-body">
+                        <p class="hint">{% blocktranslate with n=row.participant_name e=row.enrollment_code %}تُقرّ بأن اسم «{{ n }}» ({{ e }}) رُفع يدوياً إلى نظام الوزارة الخارجي. يُسجَّل الإقرار باسمك وتاريخه، والنظام لا يتصل بموقع الوزارة.{% endblocktranslate %}</p>
+                        {% if row.upload_requires_manager_reason %}
+                          <p class="note warn" role="status">{% translate "انتهت مهلة التسجيل: الرفع بعدها يتطلب سبب تجاوز من مدير المركز (BR-019)." %}</p>
+                        {% endif %}
+                      </div>
+                      <div class="modal-acts">
+                        <button class="btn2 primary" type="submit">{% translate "تسجيل الرفع" %}</button>
+                        <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "رجوع" %}</button>
+                      </div>
+                    </form>
+                  </dialog>
                 {% endif %}
               </td>
             </tr>
-          {% empty %}
-            <tr><td colspan="7" class="empty">
-              <span class="empty-title">{% translate "لا تسجيلات معتمدة في هذه الدفعة" %}</span>
-            </td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    {% endif %}
+    </details>
   {% empty %}
     <div class="card2-body">
       <p class="empty">

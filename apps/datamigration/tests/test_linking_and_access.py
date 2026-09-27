@@ -276,10 +276,12 @@ def test_the_matrix_gives_edit_to_the_registrar_alone(seeded_settings) -> None:
     """
     from apps.people.models import Role
 
+    # SUPER_ADMIN holds every action on every screen by construction — it is
+    # not a matrix row, so it says nothing about who the cell was given to.
     edit_holders = {
         role
         for role in Role.values
-        if Action.EDIT in matrix.allowed_actions(role, Screen.MIGRATION)
+        if role != Role.SUPER_ADMIN and Action.EDIT in matrix.allowed_actions(role, Screen.MIGRATION)
     }
     assert edit_holders == {Role.REGISTRATION_OFFICER}
 

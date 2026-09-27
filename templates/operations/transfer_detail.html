@@ -2,7 +2,7 @@
 {% load i18n status_ui %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ transfer.code }}</span></h1>
+  <h1>{% include "partials/_title_icon.html" %}{{ title }} <span class="code" dir="ltr" translate="no">{{ transfer.code }}</span></h1>
 </div>
 
 <div class="card2"><div class="card2-body">

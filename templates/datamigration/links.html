@@ -2,7 +2,7 @@
 {% load i18n %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ title }}</h1>
+  <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
 </div>
 <div class="note warn">
   {% translate "الربط قرار هوية لا نقل بيانات. لا يُنسخ رقم ولا مبلغ ولا تسجيل — يُسجَّل فقط أن هذا السجل التاريخي وهذا المشارك شخص واحد. ولا رَبط آلي: ثمانية أرقام في هذه الملفات تحمل اسمين مختلفين، ومطابِق آلي كان سيدمج شخصين بصمت." %}
@@ -63,6 +63,11 @@
               {% if r.linked_number %}
                 <span dir="ltr">{{ r.linked_number }}</span> — {{ r.linked_name }}
                 <br><small class="muted">{{ r.linked_by }} · {{ r.link_note_ar }}</small>
+                {% if can_propose_balance %}
+                  {% for e in r.enrollments %}
+                    <br><a class="btn2 sm ghost" href="{% url 'billing:opening-balances' %}?row={{ e.row_id }}#propose">{% translate "رصيد افتتاحي" %} · {{ e.label }}</a>
+                  {% endfor %}
+                {% endif %}
               {% else %}—{% endif %}
             </td>
             <td>

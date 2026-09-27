@@ -21,7 +21,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "ترحيل الأرشيف" %}</span>
-    <h1>{{ batch.source_filename }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ batch.source_filename }}</h1>
   </div>
   <div class="acts">
     <span class="chip {{ batch.status|status_tone }} dot">{{ batch.status_display }}</span>

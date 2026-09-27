@@ -14,6 +14,23 @@ def seeded_settings(db: None) -> None:
 
     call_command("seed_settings", verbosity=0)
 
+    # Production seeds ``external_receipt_required = True`` (§5.2: the money
+    # is taken at the university's finance department and the centre records
+    # its voucher). The suite's receipts are written as bare service calls
+    # from before that rule; they keep working against the relaxed value, and
+    # the rule itself has its own tests (``voucher_rule`` below).
+    from apps.core.models import EffectiveSetting
+
+    EffectiveSetting.objects.filter(key="external_receipt_required").update(value="False")
+
+
+@pytest.fixture
+def voucher_rule(seeded_settings: None) -> None:
+    """§5.2 in force: no receipt without the finance department's voucher number."""
+    from apps.core.models import EffectiveSetting
+
+    EffectiveSetting.objects.filter(key="external_receipt_required").update(value="True")
+
 
 @pytest.fixture
 def today() -> date:

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "تسجيل جديد — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  كان هذا النموذج بطاقةً في ذيل سجل التسجيلات، فوقع عند 1289px على شاشة 1440
+  وعند 1909 على 1024، في صفحةٍ بطول شاشتين ونصف. ورفضُ حقلٍ كان يُرسم داخل
+  البطاقة وحدها، فيعود القارئ إلى أعلى صفحةٍ لا يبدو أنّ شيئاً فيها تغيّر —
+  فاضطُرّ السجل أن يُنبت ملخّص أخطاء في رأسه يشير إلى نموذجٍ تحته بشاشتين.
+
+  الفصل يُسقط ذلك كلّه: شاشةُ قائمةٍ تَسرد، وشاشةُ نموذجٍ تُدخل — وهو بناء
+  شاشة سند القبض، مرجع النماذج في هذا النظام.
+
+  والصلاحية هي صلاحية السجل نفسها (ENROLLMENTS · CREATE): لا خانة جديدة في
+  المصفوفة ولا صفّ. ومن لا يملكها يُرفض هنا، لا يُسلَّم نموذجاً حفظُه مرفوض
+  سلفاً وتُكتب محاولتُه في سجل التدقيق (BR-085 · قواعد التحسين §3.4).
+{% endcomment %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
+    <h1>{{ title }}</h1>
+    <p class="sub">{% translate "ربط مشارك بدفعة معتمدة وزارياً. تُحمَّل الرسوم آلياً من قائمة الأسعار السارية، ويُولَّد رمز التسجيل عند الحفظ." %}</p>
+  </div>
+  <div class="acts">
+    <a class="btn2" href="{% url 'operations:enrollments' %}">{% translate "رجوع للسجل" %}</a>
+  </div>
+</div>
+
+{% if error_fields %}
+  {# الرفض يُقرأ ولا يُبحث عنه: العدد والأسماء أعلى الشاشة، وكل اسمٍ رابطٌ إلى حقله. #}
+  {# و`data-autofocus` يقرأه `static/js/ui.js`، فلا سكربت في القالب. #}
+  <div class="note danger err-summary" role="alert" tabindex="-1" id="err-summary" data-autofocus>
+    <div>
+      <strong>{% blocktranslate count total=error_fields|length %}حقلٌ واحد يحتاج تصحيحاً قبل التسجيل:{% plural %}{{ total }} حقول تحتاج تصحيحاً قبل التسجيل:{% endblocktranslate %}</strong>
+      <div class="err-links">
+        {% for field in error_fields %}<a href="#{{ field.id }}">{{ field.label }}</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="card2">
+  <div class="card2-head">
+    <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-user-plus"/></svg></span>
+    <h2>{% translate "بيانات التسجيل" %}</h2>
+  </div>
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "تُعرض الدفعات المعتمدة وزارياً فقط (BR-013)، وتُحمَّل الرسوم من قائمة الأسعار السارية تلقائياً (BR-012). والمشارك يُختار بالاسم من قائمة من أُدخلت طلبات التحاقهم." %}
+    </p>
+    {% if not form.fields.participant_number.choices %}
+      {# حالةٌ فارغة تشرح وتشير: القائمة فارغة لأن السجل فارغ، وأوّل خطوةٍ طلب التحاق. #}
+      <div class="note info">
+        <div>
+          <strong>{% translate "لا مشارك مسجَّل بعد." %}</strong>
+          {% translate "فلا اسم تختاره القائمة — يبدأ التسجيل من طلب الالتحاق." %}
+          <a href="{% url 'people:participant-new' %}">{% translate "طلب التحاق جديد" %}</a>
+        </div>
+      </div>
+    {% endif %}
+    {% if not form.fields.cohort_code.choices %}
+      <div class="note warn">
+        <div>
+          <strong>{% translate "لا دفعة معتمدة من الوزارة." %}</strong>
+          {% translate "لا تسجيل على دفعة لم تُعتمد (BR-013). تبدأ الدفعة من ملفٍ يُرفع للوزارة." %}
+          <a href="{% url 'operations:cohorts' %}">{% translate "الدفعات" %}</a>
+        </div>
+      </div>
+    {% endif %}
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% include "partials/_form.html" %}
+      <div class="form-acts">
+        <button class="btn2 primary" type="submit">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc-check"/></svg>
+          {% translate "تسجيل" %}
+        </button>
+        <a class="btn2" href="{% url 'operations:enrollments' %}">{% translate "إلغاء" %}</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

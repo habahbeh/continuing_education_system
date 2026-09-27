@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -24,6 +24,11 @@
   يُرسل شيئاً، ووجوده يوهم من يقرأ القالب أن هنا إرسالاً. الرابط هو الرابط
   نفسه بصنفه نفسه.
 
+  والمرشّح `?partner=` كان مقبولاً في العرض منذ اليوم الأول ولا شاشة ترسله.
+  سجلّ الشركاء صار يرسله من عمود «الاتفاقيات»، فوجب أن تقول الصفحة إنها
+  مرشَّحة وتعرض المخرج من الترشيح — وإلا قُرئ سجلٌّ ناقص على أنه السجل كلّه.
+  والحالة الفارغة تبعته: «لا اتفاقيات لهذا الشريك» ليست «لا اتفاقيات بعد».
+
   و«انقضت مدّتها» بالصياغة نفسها المستقرّة في بطاقة الشريك — قاعدةٌ واحدة لا
   تُقال بصيغتين (قواعد التحسين §7) — وبلا `warn`: الأصفر للحظة يُرفض فيها شيء،
   وانقضاء المدّة واقعةُ تاريخ تحسبها الخدمة في `is_expired`.
@@ -33,7 +38,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "العقود الموقّعة كما وردت: نموذج احتساب كل عقد وقيمته وتقاسم خصمه ودورة مخالصته." %}</p>
   </div>
   <div class="acts">
@@ -43,13 +48,17 @@
   </div>
 </div>
 
-{% guided_help "agreements" %}
 
 <div class="card2">
   <div class="card2-head">
     <h2>{% translate "الاتفاقيات المسجَّلة" %}</h2>
     <div class="acts">
-      <span class="count">{% blocktranslate count n=agreements|length %}اتفاقية واحدة{% plural %}{{ n }} اتفاقيات{% endblocktranslate %}</span>
+      {# مرشَّحة على شريك بعينه: تقول ذلك وتعرض المخرج منه، وإلا قُرئ الناقص كاملاً. #}
+      {% if is_filtered %}
+        <span class="chip">{% translate "الشريك" %}: {{ partner_name }}</span>
+        <a class="btn2 ghost" href="{% url 'partners:agreements' %}">{% translate "إلغاء التصفية" %}</a>
+      {% endif %}
+      <span class="count">{{ agreements|length|ar_count:"اتفاقية واحدة|اتفاقيتان|اتفاقيات|اتفاقية" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">
@@ -90,9 +99,15 @@
           </tr>
         {% empty %}
           <tr><td colspan="8" class="empty">
-            <span class="empty-title">{% translate "لا اتفاقيات بعد" %}</span>
-            <span class="empty-body">{% translate "الاتفاقية تُوقَّع على الورق ثم تُسجَّل هنا كما وردت، وتسري باعتماد منفصل من صفحتها." %}</span>
-            {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>{% endif %}
+            {% if is_filtered %}
+              <span class="empty-title">{% translate "لا اتفاقيات لهذا الشريك" %}</span>
+              <span class="empty-body">{% translate "السجل ليس فارغاً — هذه الصفحة مرشَّحة على شريك واحد لا عقد تحته بعد." %}</span>
+              <a class="btn2 empty-act" href="{% url 'partners:agreements' %}">{% translate "عرض كل الاتفاقيات" %}</a>
+            {% else %}
+              <span class="empty-title">{% translate "لا اتفاقيات بعد" %}</span>
+              <span class="empty-body">{% translate "الاتفاقية تُوقَّع على الورق ثم تُسجَّل هنا كما وردت، وتسري باعتماد منفصل من صفحتها." %}</span>
+              {% if can_create %}<a class="btn2 primary empty-act" href="{% url 'partners:agreement-new' %}">{% translate "تسجيل اتفاقية موقّعة" %}</a>{% endif %}
+            {% endif %}
           </td></tr>
         {% endfor %}
       </tbody>

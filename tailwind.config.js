@@ -19,6 +19,13 @@ module.exports = {
     "./apps/**/templates/**/*.html",
     "./apps/**/*.py",
   ],
+  // `tone-{{ x }}` is composed in the template from a name the view chose, so
+  // the scanner never sees the whole token and would purge the rule.
+  safelist: [
+    { pattern: /^tone-(brand|info|ok|warn|danger|violet|teal|amber)$/ },
+    // `lv-{{ n }}` — a chart fill as one of twenty-one classes, no width.
+    { pattern: /^lv-(\d|1\d|20)$/ },
+  ],
   theme: {
     extend: {
       colors: {

@@ -84,10 +84,28 @@ def is_verified(*, as_of: date) -> bool:
 
 
 def letterhead(*, as_of: date) -> dict[str, str]:
-    """The header every printed document shares."""
+    """
+    The header every printed document shares.
+
+    Sprint 8L — the logo joins the two names. ``LOGO_PRINT`` first because a
+    colour mark reproduces as a grey smudge on the mono printer the centre
+    actually prints on; ``LOGO_PRIMARY`` is the fallback for a centre that has
+    uploaded only one file, and an empty string is the third case — no logo has
+    been uploaded, and the document prints under its names alone, as it does
+    today. A stand-in mark on an official document is worse than none.
+    """
+    from apps.core.models import BrandAssetSlot
+    from apps.core.services import branding_service
+
+    logo = branding_service.active_asset(
+        BrandAssetSlot.LOGO_PRINT, as_of=as_of
+    ) or branding_service.active_asset(BrandAssetSlot.LOGO_PRIMARY, as_of=as_of)
+
     return {
         "university_ar": _text(UNIVERSITY_KEY, as_of=as_of, default="جامعة البترا"),
         "center_ar": _text(CENTER_KEY, as_of=as_of, default="مركز التعليم المستمر وخدمة المجتمع"),
+        "logo_url": "" if logo is None else logo.public_url,
+        "logo_alt": "" if logo is None else logo.alt_text_ar,
     }
 
 

@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "سياسات التأمين — مركز التعليم المستمر" %}{% endblock %}
+
+{% comment %}
+  الشاشة التي لم تكن موجودة، ومعها عطلٌ أعمق منها.
+
+  التأمين مبلغٌ يُؤخذ ويُردّ — أو يُصادر. والقيد C-26 يربط المبلغ بالسياسة على
+  بند السعر نفسه: لا مبلغ بلا سياسة ولا سياسة بلا مبلغ. لكنّ نموذج بند السعر
+  كان يحمل المبلغ وحده بلا حقلٍ للسياسة أصلاً، فكان القيد يرفض كل تأمينٍ يُكتب
+  — أي أن النظام على تركيبٍ جديد لا يستطيع تسعير برنامجٍ بتأمين إطلاقاً.
+  والسياسات نفسها لم يكن لها إلا لوحة إدارة Django، التي تكتب في الجدول
+  مباشرةً بلا صفٍّ في سجل التدقيق — وهو الصف الذي يُحتجّ به يوم يُصادَر تأمينُ
+  مشاركٍ بعد عام.
+
+  «مُحفّز الاسترداد» نصٌّ حرّ عمداً: Q-30 مفتوح، والعميل يملك الجواب، وتعليمُه
+  في 2026-08-15 أن تبقى هذه القيم قابلة للإعداد.
+
+  وثلاثة حقول كانت تُدخل ولا تُعرض بعدها أبداً: «خاضع للضريبة» (Q-27) و«يسمح
+  بحسم جزئي» و«الملاحظات» — تُكتب ثم تغيب، فلا يستطيع من كتبها أن يتحقّق ممّا
+  كتب. وهي الآن في صفّ تفاصيل يُفتح في مكانه، على نمط سجل التسجيلات: ما لا
+  يتّسع للسطر لا يُحذف بل يُطوى.
+
+  والسياسة تُعدَّل: مهلةٌ مكتوبة خطأً أو محفّزٌ بهجاءين لم يكن لهما طريق تصحيح
+  من أي شاشة. والسياسة ليست دليلاً مجمَّداً — D-14 يحكم قائمة الأسعار لا شروط
+  حفظ التأمين. وصفٌّ لا يُصلَح هو صفٌّ يُحتال عليه بإضافة ثانٍ.
+
+  والتعطيل يمرّ بتأكيد: هو يُخرج السياسة من خيارات التسعير فوراً، ونقرةٌ واحدة
+  لا تكفي لفعلٍ يمسّ تسعيراً قائماً.
+{% endcomment %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "شروط التأمين المسترد: متى يُردّ ومتى يُصادر وهل يُحسم منه جزئياً. تُسمّى على بند السعر بجانب المبلغ، ولا يُقبل أحدهما بلا الآخر (C-26 · BR-096)." %}</p>
+  </div>
+  <div class="acts">
+    {% if can_create %}
+      <button class="btn2 primary" type="button" data-opens="dep-new">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+        {% translate "سياسة جديدة" %}
+      </button>
+    {% endif %}
+    <a class="btn2 ghost" href="{% url 'catalog:pricelists' %}">{% translate "قوائم الأسعار" %}</a>
+  </div>
+</div>
+
+{% if error_fields %}
+  <div class="note danger err-summary" role="alert" tabindex="-1" id="err-summary" data-autofocus>
+    <div>
+      <strong>{% blocktranslate count total=error_fields|length %}حقلٌ واحد يحتاج تصحيحاً:{% plural %}{{ total }} حقول تحتاج تصحيحاً:{% endblocktranslate %}</strong>
+      <div class="err-links">
+        {% for field in error_fields %}<a href="#{{ field.id }}">{{ field.label }}</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if not can_create %}
+  <div class="note">
+    <div>{% translate "هذه الشاشة للاطلاع فقط بصلاحيتك — تعريف سياسات التأمين لمدير المركز." %}</div>
+  </div>
+{% endif %}
+
+<div class="kpi-grid tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if state == t.state %} is-on{% endif %}"
+       href="?{% if query %}q={{ query|urlencode }}&amp;{% endif %}{% if state != t.state %}state={{ t.state }}{% endif %}"
+       {% if state == t.state %}aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.count }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
+
+<div class="card2">
+  <div class="card2-head">
+    <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-shield-check"/></svg></span>
+    <h2>{% translate "السياسات المعرَّفة" %}</h2>
+    <div class="acts">
+      <span class="chip">{{ page.total }}</span>
+    </div>
+  </div>
+
+  <form method="get" class="filterbar" role="search"
+        hx-get="{% url 'catalog:deposit-policies' %}" hx-target="#dep-rows" hx-select="#dep-rows" hx-swap="outerHTML"
+        hx-trigger="input changed delay:350ms from:#f_dep" hx-push-url="true" hx-indicator="#dep-busy">
+    {% if state %}<input type="hidden" name="state" value="{{ state }}"><span class="visually-hidden"></span>{% endif %}
+    <div class="fld grow">
+      <label for="f_dep">{% translate "بحث" %}</label>
+      <input type="search" name="q" value="{{ query }}" id="f_dep" spellcheck="false" placeholder="{% translate 'الرمز أو الاسم أو مُحفّز الاسترداد…' %}">
+    </div>
+    <span class="busy" id="dep-busy" aria-hidden="true"></span>
+  </form>
+
+  {# كل ما يتغيّر بالبحث داخل المنطقة المبدَّلة: زرّ «إلغاء التصفية» كان خارجها #}
+  {# فلا يظهر أبداً بعد بحثٍ حيّ، ولا يُرى إلا بإعادة تحميل الصفحة كاملةً. #}
+  <div id="dep-rows">
+  {% if is_filtered %}
+    <div class="card2-body">
+      <p class="note" role="status">
+        {% if query %}<strong>{% translate "بحث:" %}</strong> {{ query }}{% endif %}
+        {% if state %}<span class="chip">{% for t in tiles %}{% if t.state == state %}{{ t.label }}{% endif %}{% endfor %}</span>{% endif %}
+        <a class="btn2 ghost" href="{% url 'catalog:deposit-policies' %}">{% translate "إلغاء التصفية" %}</a>
+      </p>
+    </div>
+  {% endif %}
+  <div class="tbl-wrap">
+    <table class="tbl dep-tbl">
+      <thead>
+        <tr>
+          <th aria-label="{% translate 'تفاصيل' %}"></th>
+          <th>{% translate "الرمز" %}</th>
+          <th>{% translate "السياسة" %}</th>
+          <th>{% translate "مُحفّز الاسترداد" %}</th>
+          <th>{% translate "حالات المصادرة" %}</th>
+          <th>{% translate "مهلة المطالبة" %}</th>
+          <th>{% translate "البنود" %}</th>
+          <th>{% translate "الحالة" %}</th>
+          {% if can_edit %}<th aria-label="{% translate 'إجراءات' %}"></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td class="expand">
+              <button type="button" class="row-expand" data-expands="dep-{{ row.code }}"
+                      aria-expanded="false" aria-controls="dep-{{ row.code }}"
+                      aria-label="{% translate 'تفاصيل' %} {{ row.code }}">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 4l6 6-6 6"/></svg>
+              </button>
+            </td>
+            <td dir="ltr" translate="no"><strong class="num">{{ row.code }}</strong></td>
+            <td>
+              {{ row.name_ar }}
+              {% if row.is_required %}<br><span class="chip">{% translate "إلزامي" %}</span>{% else %}<br><span class="chip">{% translate "اختياري" %}</span>{% endif %}
+            </td>
+            <td dir="ltr" translate="no"><span class="num">{{ row.refund_trigger }}</span></td>
+            <td>
+              {% for status in row.forfeit_on %}<span class="chip warn" dir="ltr" translate="no">{{ status }}</span>{% empty %}
+                {# فارغةٌ تعني «يُسترد دائماً» — وهي قولٌ لا فراغ، فتُكتب. #}
+                <span class="muted">{% translate "يُسترد دائماً" %}</span>
+              {% endfor %}
+            </td>
+            <td>
+              {% if row.claim_deadline_days %}<span class="num">{{ row.claim_deadline_days }}</span> {% translate "يوماً" %}
+              {% else %}<span class="muted">{% translate "بلا مهلة" %}</span>{% endif %}
+            </td>
+            <td class="num">{{ row.items }}</td>
+            <td>
+              {% if row.is_active %}<span class="chip ok">{% translate "نشطة" %}</span>
+              {% else %}<span class="chip">{% translate "مُعطَّلة" %}</span>{% endif %}
+            </td>
+            {% if can_edit %}
+              <td class="acts">
+                <button class="btn2 sm" type="button" data-opens="dep-edit-{{ row.code }}">{% translate "تعديل" %}</button>
+                <button class="btn2 sm ghost" type="button" data-opens="dep-off-{{ row.code }}">
+                  {% if row.is_active %}{% translate "تعطيل" %}{% else %}{% translate "تنشيط" %}{% endif %}
+                </button>
+              </td>
+            {% endif %}
+          </tr>
+          {# ما لا يتّسع للسطر يُطوى ولا يُحذف: هذه الحقول الثلاثة كانت تُدخل #}
+          {# ولا تُعرض في أي موضع، فلا يتحقّق كاتبها ممّا كتب. #}
+          <tr class="row-detail" id="dep-{{ row.code }}" hidden>
+            <td colspan="{% if can_edit %}9{% else %}8{% endif %}">
+              <dl class="dl detail-dl">
+                <dt>{% translate "خاضع للضريبة" %}</dt>
+                <dd>{% if row.is_taxable %}{% translate "نعم" %}{% else %}{% translate "لا — التأمين التزام لا إيراد (Q-27)" %}{% endif %}</dd>
+                <dt>{% translate "يسمح بحسم جزئي" %}</dt>
+                <dd>{% if row.allows_partial_deduction %}{% translate "نعم" %}{% else %}{% translate "لا — يُردّ كاملاً أو يُصادر كاملاً" %}{% endif %}</dd>
+                <dt>{% translate "ملاحظات" %}</dt>
+                <dd>{% if row.notes_ar %}{{ row.notes_ar }}{% else %}<span class="muted">—</span>{% endif %}</dd>
+              </dl>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="{% if can_edit %}9{% else %}8{% endif %}" class="empty">
+            <span class="empty-title">{% if is_filtered %}{% translate "لا سياسة تطابق التصفية" %}{% else %}{% translate "لا سياسة تأمين معرَّفة بعد" %}{% endif %}</span>
+            <span class="empty-body">{% if is_filtered %}{% translate "جرّب رمزاً أو اسماً آخر، أو ألغِ التصفية." %}{% else %}{% translate "وبلا سياسة لا يُقبل مبلغ تأمين على أي بند سعر (C-26) — فالبرامج كلها تُسعَّر بلا تأمين." %}{% endif %}</span>
+            {% if is_filtered %}
+              <a class="btn2 ghost empty-act" href="{% url 'catalog:deposit-policies' %}">{% translate "كل السياسات" %}</a>
+            {% elif can_create %}
+              <button class="btn2 primary empty-act" type="button" data-opens="dep-new">{% translate "إضافة سياسة" %}</button>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page.pages > 1 %}
+    <div class="tbl-foot pager">
+      <span class="muted">{{ page.start }}–{{ page.end }} {% translate "من" %} {{ page.total }}</span>
+      <span class="pager-btns">
+        {% if page.has_prev %}<a class="btn2 ghost" href="?{{ params_qs }}&amp;page={{ page.prev }}">‹ {% translate "السابق" %}</a>{% endif %}
+        <span class="chip num">{{ page.number }} / {{ page.pages }}</span>
+        {% if page.has_next %}<a class="btn2 ghost" href="?{{ params_qs }}&amp;page={{ page.next }}">{% translate "التالي" %} ›</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+  </div>
+
+  <div class="card2-body">
+    <p class="hint boxed">
+      {% translate "برنامجٌ بلا سياسة لا يحمل سطر تأمين أصلاً — وهذا غير تأمينٍ قيمته صفر (BR-096). والسياسة تُعطَّل ولا تُحذف: بنودٌ قديمة تشير إليها، وحذفها يترك تأميناً لا أحد يعرف شروطه." %}
+    </p>
+  </div>
+</div>
+
+{% if can_create %}
+  <dialog class="modal confirm-modal dep-modal" id="dep-new" dir="rtl" aria-labelledby="dep-new-t"{% if form.errors and posted_action == "create" %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+    <form method="post" novalidate>{% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2 id="dep-new-t">{% translate "سياسة تأمين جديدة" %}</h2>
+      </div>
+      <div class="modal-body">
+        {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "partials/_form.html" with only=fields_top %}
+        {% include "catalog/_forfeit_set.html" with field=form.forfeit_on other=form.forfeit_other suggestions=forfeit_seen %}
+        {% include "partials/_form.html" with only=fields_bottom %}
+        <p class="hint">{% translate "اكتب مُحفّز الاسترداد بحروف لاتينية كبيرة كما يسمّيه المركز، مثل ON_CENTRE_CANCELLATION — وهو نصّ حرّ بقرار موثّق (Q-30)." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "إضافة السياسة" %}</button>
+        <button class="btn2 ghost" type="button" data-closes="dep-new">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
+
+{% if can_edit %}
+  {% for row in rows %}
+    <dialog class="modal confirm-modal dep-modal" id="dep-edit-{{ row.code }}" dir="rtl" aria-labelledby="dep-edit-{{ row.code }}-t"{% if edit_form.errors and editing_code == row.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+      <form method="post" novalidate>{% csrf_token %}
+        <input type="hidden" name="action" value="edit">
+        <input type="hidden" name="code" value="{{ row.code }}">
+        <div class="modal-head">
+          <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-doc"/></svg></span>
+          <h2 id="dep-edit-{{ row.code }}-t">{% translate "تعديل السياسة" %} — <span dir="ltr" translate="no">{{ row.code }}</span></h2>
+        </div>
+        <div class="modal-body">
+          {% include "catalog/_dep_edit_fields.html" %}
+          <p class="hint">{% translate "الرمز لا يُعدَّل: هو ما تشير إليه بنود الأسعار. وما عداه يُصحَّح — التأمين شرطٌ يُكتب ويُراجع، لا دليلٌ مجمَّد." %}</p>
+        </div>
+        <div class="modal-acts">
+          <button class="btn2 primary" type="submit">{% translate "حفظ التعديلات" %}</button>
+          <button class="btn2 ghost" type="button" data-closes="dep-edit-{{ row.code }}">{% translate "رجوع" %}</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal confirm-modal" id="dep-off-{{ row.code }}" dir="rtl" aria-labelledby="dep-off-{{ row.code }}-t">
+      <form method="post">{% csrf_token %}
+        <input type="hidden" name="action" value="toggle">
+        <input type="hidden" name="code" value="{{ row.code }}">
+        <div class="modal-head">
+          <span class="head-ico {% if row.is_active %}tone-danger{% else %}tone-ok{% endif %}" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-alert"/></svg></span>
+          <h2 id="dep-off-{{ row.code }}-t">{% if row.is_active %}{% translate "تعطيل سياسة" %}{% else %}{% translate "تنشيط سياسة" %}{% endif %}</h2>
+        </div>
+        <div class="modal-body">
+          {% if row.is_active %}
+            <p>{% blocktranslate with name=row.name_ar %}تعطيل «{{ name }}»؟{% endblocktranslate %}</p>
+            <p class="hint">{% translate "تخرج فوراً من خيارات بنود الأسعار الجديدة، وتبقى البنود القائمة عليها كما هي — فالتأمين المحفوظ لا يفقد شروطه." %}</p>
+            {% if row.items %}
+              <div class="note warn">
+                <div>{% blocktranslate count n=row.items %}بندُ سعرٍ واحد يقف على هذه السياسة.{% plural %}{{ n }} بنود أسعار تقف على هذه السياسة.{% endblocktranslate %}</div>
+              </div>
+            {% endif %}
+          {% else %}
+            <p>{% blocktranslate with name=row.name_ar %}تنشيط «{{ name }}» لتعود في خيارات التسعير؟{% endblocktranslate %}</p>
+          {% endif %}
+        </div>
+        <div class="modal-acts">
+          <button class="btn2 {% if row.is_active %}danger{% else %}primary{% endif %}" type="submit">
+            {% if row.is_active %}{% translate "تعطيل" %}{% else %}{% translate "تنشيط" %}{% endif %}
+          </button>
+          <button class="btn2 ghost" type="button" data-closes="dep-off-{{ row.code }}">{% translate "رجوع" %}</button>
+        </div>
+      </form>
+    </dialog>
+  {% endfor %}
+{% endif %}
+{% endblock %}

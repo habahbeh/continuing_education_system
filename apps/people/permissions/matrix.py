@@ -186,18 +186,29 @@ SYSADMIN_ALLOW: dict[str, frozenset[str]] = {
 }
 
 
+#: SUPER_ADMIN — every action on every screen. Not a matrix row: the row would
+#: be «V C E A X P» repeated forty times, and the point of the role is that no
+#: screen is ever left out.
+ALL_ACTIONS: frozenset[str] = frozenset(Action.values)
+
+
 def allowed_actions(role: str, screen: str) -> frozenset[str]:
     """Allow-list lookup only. Deny rules are evaluated before this is reached."""
+    if role == Role.SUPER_ADMIN:
+        return ALL_ACTIONS
     if role == Role.SYSTEM_ADMINISTRATOR:
         return SYSADMIN_ALLOW.get(screen, frozenset())
     return ALLOW.get((screen, role), frozenset())
 
 
 def allowed_reports(role: str) -> frozenset[int]:
+    if role == Role.SUPER_ADMIN:
+        return frozenset({1, 2, 3, 4, 5, 6, 7})
     return REPORT_ACCESS.get(role, frozenset())
 
 
 __all__ = [
+    "ALL_ACTIONS",
     "ALLOW",
     "BUSINESS_ROLES",
     "DOC_REF",

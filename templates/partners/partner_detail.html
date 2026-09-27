@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ partner.name_ar }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -15,6 +15,16 @@
   آمنٌ لكل من يفتح هذه الصفحة: من وصل إليها مرّ من بوّابة الشاشة نفسها
   (`list_partners` تفرض VIEW على §3.5/23)، فلا يُدعى أحد إلى رفض.
 
+  والطريق الذي يَعِد به الإرشاد — «تُفتح بطاقة الشريك، ومنها تُسجَّل اتفاقيته
+  الموقّعة» — صار موجوداً على الصفحة: زرٌّ في الترويسة يمرّر رمز الشريك إلى
+  المحرِّر فيفتح عليه، بحارسه VIEW على §3.5/25 لا بـ CREATE، لأن المحرِّر يُفتح
+  على VIEW ويُرسل على CREATE — فحساب التدقيق يقرؤه ولا يُدعى أحد إلى رفض،
+  وهي الراية نفسها التي يرسم بها سجلّ الاتفاقيات الرابط نفسه.
+
+  وهو في الترويسة وحدها: الحالة الفارغة لا تعيد رسم الزرّ نفسه على بُعد
+  بوصتين منه (قواعد التحسين §7.3)، بل تشرح ما تحمله الاتفاقية ولا يحمله
+  سجل الشريك.
+
   و«منتهية» تُذكر حين يكون `is_expired` صحيحاً: القيمة محسوبة في الخدمة
   (Sprint 8F-1) لا في القالب، ووُجدت لهذا الغرض بعينه — أن تقول الشاشة إن
   العقد انقضى دون أن يقارن أحد التواريخ في رأسه. والحالة المخزَّنة تبقى إلى
@@ -29,7 +39,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ partner.name_ar }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ partner.name_ar }}</h1>
     <p class="sub">
       <span dir="ltr" translate="no">{{ partner.code }}</span> ·
       {{ partner.partner_type_display }} —
@@ -38,10 +48,12 @@
   </div>
   <div class="acts">
     <a class="btn2 ghost" href="{% url 'partners:partners' %}">{% translate "عودة إلى الشركاء" %}</a>
+    {% if can_record_agreement %}
+      <a class="btn2 primary" href="{% url 'partners:agreement-new' %}?partner={{ partner.code|urlencode }}">{% translate "تسجيل اتفاقية موقّعة" %}</a>
+    {% endif %}
   </div>
 </div>
 
-{% guided_help "partner-detail" %}
 
 <div class="card2">
   <div class="card2-head">
@@ -77,7 +89,7 @@
   <div class="card2-head">
     <h2>{% translate "الاتفاقيات" %}</h2>
     <div class="acts">
-      <span class="count">{% blocktranslate count n=partner.agreements|length %}اتفاقية واحدة{% plural %}{{ n }} اتفاقيات{% endblocktranslate %}</span>
+      <span class="count">{{ partner.agreements|length|ar_count:"اتفاقية واحدة|اتفاقيتان|اتفاقيات|اتفاقية" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">

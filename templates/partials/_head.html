@@ -19,4 +19,6 @@
       href="{% static 'fonts/noto-kufi-arabic-400.woff2' %}">
 <link rel="preload" as="font" type="font/woff2" crossorigin
       href="{% static 'fonts/noto-kufi-arabic-800.woff2' %}">
+{# الأيقونة مرفوعة من شاشة الإعدادات؛ بلا رفعٍ لا يُطلب ملفٌّ غير موجود. #}
+{% if brand.favicon %}<link rel="icon" href="{{ brand.favicon.url }}" type="{{ brand.favicon.mime_type }}">{% endif %}
 <link rel="stylesheet" href="{% static 'css/app.css' %}">

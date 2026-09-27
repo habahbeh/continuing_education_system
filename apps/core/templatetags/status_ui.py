@@ -104,6 +104,10 @@ _INFO = frozenset(
         "WAIVED",
         "DEFERRED",
         "RUNNING",
+        # A partner whose contract ended. Not a refusal and not a failure —
+        # a record that is no longer current, which is what this tone means.
+        # Untoned it rendered as the same neutral chip a missing value draws.
+        "FORMER",
     }
 )
 

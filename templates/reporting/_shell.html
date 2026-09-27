@@ -1,22 +1,26 @@
 {% load i18n %}
 {% comment %}
-  Shared chrome for every report: filters, export, print.
+  الهيكل المشترك للتقارير السبعة (Sprint 8L — كان في 8C-2 عنواناً وحقلَي تاريخ).
 
-  Sprint 8J — العنوان كان يأتي بعد شريط الأدوات والمرشّحات، فأول ما تقرؤه في
-  تقرير مالي زرّ «تطبيق» لا اسمَ التقرير ولا المدى الذي يغطّيه. رُتّب: العنوان
-  والفترة أولاً، ثم الإجراءات، ثم المرشّحات. الإجراءات والمرشّحات تختفي عند
-  الطباعة؛ العنوان والفترة يبقيان، لأن ورقةً بلا اسم تقريرها ولا مداها ورقة
-  لا تصلح للحفظ.
+  ثلاثة أشياء يضيفها هذا الهيكل ولم تكن:
 
-  `print:hidden` لا `.no-print` على هذين العنصرين: `.no-print` يحمل `mb-4`
-  أيضاً منذ 8C-1، وهو هامش خاطئ على سطر إجراءات داخل ترويسة.
+  * **شريط التبويب بالسبعة.** كان الانتقال من تقرير إلى تقرير يمرّ بصفحة
+    الفهرس في كل مرّة؛ والديمو يضع السبعة تبويباً واحداً. والمحجوب عن الدور
+    يبقى في الشريط معلَّماً ومعطَّلاً لا محذوفاً: أن يعرف القارئ أن التقرير
+    موجود وليس من نصيب دوره خيرٌ من أن يظنّه غير موجود.
+  * **مرشّح لكل تقرير بحسب سؤاله** (من `views._filters`). التقرير الثالث كان
+    يقرأ `?partner=` من العنوان بلا حقلٍ يكتبه.
+  * **ترويسة ورقٍ كاملة** باسم التقرير ومداه ومَن طبعه ومتى، وبالشعار المرفوع.
+
+  ترتيب العناصر مقصود منذ 8J: العنوان والفترة أولاً، ثم الإجراءات، ثم
+  المرشّحات — فأول ما يُقرأ في تقرير مالي اسمُه ومداه لا زرّ «تطبيق».
 {% endcomment %}
 
 <div class="page-head">
   <div>
     <span class="eyebrow print:hidden">{% translate "التقارير" %}</span>
-    <h1>{{ report.title }}</h1>
-    <p class="sub">
+    <h1>{% include "partials/_title_icon.html" %}{{ report.title }}</h1>
+    <p class="sub print:hidden">
       {% translate "الفترة" %}:
       <span dir="ltr" translate="no">{{ date_from }} — {{ date_to }}</span>
     </p>
@@ -24,20 +28,70 @@
   <div class="acts print:hidden">
     <a class="btn2 ghost" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
     {% if exportable %}
-      <a class="btn2" href="{% url 'reporting:report-export' report.number %}?from={{ date_from }}&to={{ date_to }}">{% translate "تصدير CSV" %}</a>
+      <a class="btn2" href="{% url 'reporting:report-export' report.number %}?{{ request.GET.urlencode }}">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc"/></svg>
+        {% translate "تصدير CSV" %}
+      </a>
     {% endif %}
-    <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
+    <button type="button" class="btn2 primary" x-data @click="window.print()">{% translate "طباعة" %}</button>
   </div>
 </div>
 
-<form method="get" class="filterbar print:hidden">
-  <div class="fld">
-    <label for="f_from">{% translate "من تاريخ" %}</label>
-    <input type="date" name="from" value="{{ date_from }}" id="f_from">
-  </div>
-  <div class="fld">
-    <label for="f_to">{% translate "إلى تاريخ" %}</label>
-    <input type="date" name="to" value="{{ date_to }}" id="f_to">
-  </div>
-  <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
-</form>
+<nav class="rpt-tabs print:hidden" aria-label="{% translate 'التقارير السبعة' %}">
+  {% for r in reports %}
+    {% if r.allowed %}
+      <a class="rpt-tab{% if r.number == report.number %} is-on{% endif %}"
+         href="{% url 'reporting:report' r.number %}?from={{ date_from }}&amp;to={{ date_to }}"{% if r.number == report.number %} aria-current="page"{% endif %}>
+        <span class="n" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ r.icon }}"/></svg>
+        </span>
+        <span class="t">{{ r.number }}. {{ r.title }}</span>
+      </a>
+    {% else %}
+      <span class="rpt-tab is-off" aria-disabled="true"
+            title="{% translate 'هذا التقرير خارج نطاق دورك (BR-099)' %}">
+        <span class="n" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ r.icon }}"/></svg>
+        </span>
+        <span class="t">{{ r.number }}. {{ r.title }}</span>
+      </span>
+    {% endif %}
+  {% endfor %}
+</nav>
+
+{% include "reporting/_print_head.html" %}
+
+{% if filters %}
+  <form method="get" class="filterbar print:hidden">
+    {% if semesters %}
+      <div class="fld">
+        <span class="lbl">{% translate "الفصل" %}</span>
+        <div class="seg-btns" role="group" aria-label="{% translate 'الفصل الدراسي' %}">
+          {% for s in semesters %}
+            <button type="submit" name="pick" value="{{ s.code }}"
+                    class="seg-btn{% if s.on %} is-on{% endif %}"{% if s.on %} aria-pressed="true"{% endif %}>{{ s.name }}</button>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+    {% for f in filters %}
+      <div class="fld">
+        <label for="f_{{ f.name }}">{{ f.label }}</label>
+        {% if f.kind == "select" %}
+          <select name="{{ f.name }}" id="f_{{ f.name }}">
+            <option value="">{% translate "الكل" %}</option>
+            {% for value, label in f.options %}
+              <option value="{{ value }}"{% if f.value == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        {% elif f.kind == "search" %}
+          <input type="search" name="{{ f.name }}" value="{{ f.value }}" id="f_{{ f.name }}"
+                 placeholder="{{ f.placeholder }}" spellcheck="false">
+        {% else %}
+          <input type="date" name="{{ f.name }}" value="{{ f.value }}" id="f_{{ f.name }}">
+        {% endif %}
+      </div>
+    {% endfor %}
+    <button class="btn2" type="submit">{% translate "تطبيق" %}</button>
+  </form>
+{% endif %}

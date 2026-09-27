@@ -47,10 +47,16 @@ from apps.core.display import person_name
 from apps.core.money import round_money
 from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
 
 ENTITY = "billing.Refund"
+
+#: Refund codes are the system's own, yearly and gapless like receipt numbers
+#: (Q-03): ``RF-2026-00001``. Nobody types one.
+REFUND_SCOPE = "refund"
+REFUND_FILTERS = ("REQUESTED", "APPROVED", "EXECUTED", "REJECTED")
 
 HUNDRED = Decimal("100")
 
@@ -159,10 +165,15 @@ def request_refund(
     official_letter_date: date,
     president_approval_ref: str,
     president_approval_date: date,
-    code: str,
+    code: str = "",
     request: Any = None,
 ) -> Refund:
-    """WORKFLOWS §4 — raise the request, with both external documents (BR-034)."""
+    """
+    WORKFLOWS §4 — raise the request, with both external documents (BR-034).
+
+    ``code`` is normally left empty and drawn from the yearly sequence; a
+    caller may still pass one (migrated rows, fixtures).
+    """
     policy.require(actor, Screen.REFUNDS, Action.CREATE, request=request)
 
     if not reason_ar.strip():
@@ -180,6 +191,9 @@ def request_refund(
             f"الاسترداد {amount} يتجاوز المقبوض فعلياً {paid} على التسجيل {enrollment.code}."
         )
 
+    if not code.strip():
+        ensure_sequence(REFUND_SCOPE, str(timezone.localdate().year), padding=5)
+
     return _request(
         actor=actor,
         enrollment=enrollment,
@@ -190,7 +204,7 @@ def request_refund(
         official_letter_date=official_letter_date,
         president_approval_ref=president_approval_ref.strip(),
         president_approval_date=president_approval_date,
-        code=code,
+        code=code.strip(),
         request=request,
     )
 
@@ -210,6 +224,9 @@ def _request(
     code: str,
     request: Any,
 ) -> Refund:
+    if not code:
+        year = str(timezone.localdate().year)
+        code = next_number(REFUND_SCOPE, year, prefix=f"RF-{year}-", padding=5)
     refund = Refund.objects.create(
         code=code,
         enrollment=enrollment,
@@ -258,7 +275,8 @@ def approve_refund(*, actor: Any, refund: Refund, request: Any = None) -> Refund
 def _approve(*, actor: Any, refund: Refund, request: Any) -> Refund:
     refund.status = RefundStatus.APPROVED
     refund.approved_by = actor
-    refund.save(update_fields=["status", "approved_by"])
+    refund.approved_at = timezone.now()
+    refund.save(update_fields=["status", "approved_by", "approved_at"])
 
     write_audit(
         action="APPROVE",
@@ -288,7 +306,10 @@ def reject_refund(*, actor: Any, refund: Refund, reason_ar: str, request: Any = 
 @transaction.atomic
 def _reject(*, actor: Any, refund: Refund, reason_ar: str, request: Any) -> Refund:
     refund.status = RefundStatus.REJECTED
-    refund.save(update_fields=["status"])
+    refund.rejected_by = actor
+    refund.rejected_at = timezone.now()
+    refund.rejection_reason_ar = reason_ar
+    refund.save(update_fields=["status", "rejected_by", "rejected_at", "rejection_reason_ar"])
 
     write_audit(
         action="REJECT",
@@ -410,12 +431,97 @@ def _execute(*, actor: Any, refund: Refund, executed_on: date, request: Any) -> 
     return refund
 
 
+def refundable_rows(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """
+    The enrolments a refund can be requested on, with what the form previews:
+    the amount actually collected (the ceiling, BR-034), what is already in
+    flight, and the partner's rate when a paid claim would have to give some
+    back (``partner_recovery_for``).
+    """
+    from apps.operations.models import Enrollment
+    from apps.partners.models import CalculationModel
+
+    policy.require(actor, Screen.REFUNDS, Action.CREATE, request=request)
+
+    rows: list[dict[str, Any]] = []
+    # No status filter on purpose: money collected is the only test the
+    # service applies — a participant who paid and withdrew before approval
+    # is exactly who §5.3 is written for.
+    queryset = Enrollment.objects.select_related(
+        "participant", "cohort__program", "cohort__agreement"
+    ).order_by("-enrolled_on", "-id")[:300]
+    for enrollment in queryset:
+        paid = refundable_amount(enrollment)
+        if paid <= ZERO:
+            continue
+        in_flight = ZERO
+        for r in Refund.objects.filter(
+            enrollment=enrollment, status__in=(RefundStatus.REQUESTED, RefundStatus.APPROVED)
+        ):
+            in_flight += r.amount
+        agreement = getattr(enrollment.cohort, "agreement", None)
+        recovers = (
+            agreement is not None
+            and agreement.calculation_model == CalculationModel.PERCENT
+            and already_claimed(enrollment)
+        )
+        rows.append(
+            {
+                "code": enrollment.code,
+                "participant_name": enrollment.participant.name_ar,
+                "participant_number": enrollment.participant.participant_number,
+                "program_name": enrollment.cohort.program.name_ar,
+                "status_display": enrollment.get_status_display(),
+                "paid": paid,
+                "in_flight": in_flight,
+                "partner_pct": (agreement.percent_rate or ZERO) if recovers else ZERO,
+            }
+        )
+    return rows
+
+
+def refunds_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts and sums over already-projected rows."""
+    out = {
+        "requested": 0,
+        "approved": 0,
+        "executed": 0,
+        "executed_total": ZERO,
+        "recovery_total": ZERO,
+    }
+    for r in rows:
+        if r["status"] == "REQUESTED":
+            out["requested"] += 1
+        elif r["status"] == "APPROVED":
+            out["approved"] += 1
+        elif r["status"] == "EXECUTED":
+            out["executed"] += 1
+            out["executed_total"] += r["amount"]
+            out["recovery_total"] += r["partner_recovery_amount"]
+    return out
+
+
 def list_refunds(
-    *, actor: Any, enrollment_code: str = "", status: str = "", request: Any = None
+    *,
+    actor: Any,
+    enrollment_code: str = "",
+    status: str = "",
+    query: str = "",
+    request: Any = None,
 ) -> list[dict[str, Any]]:
-    """Refunds as rows for the refunds screen (§5.3)."""
+    """
+    Refunds as rows for the refunds screen (§5.3), with the whole decision
+    trail: who asked, who approved or refused and why, who paid it out.
+    """
+    from django.db.models import Q
+
     queryset = Refund.objects.select_related(
-        "enrollment__participant", "requested_by", "approved_by", "executed_by"
+        "enrollment__participant",
+        "enrollment__cohort__program",
+        "requested_by",
+        "approved_by",
+        "rejected_by",
+        "executed_by",
     )
     policy.require(actor, Screen.REFUNDS, Action.VIEW, request=request)
 
@@ -423,21 +529,44 @@ def list_refunds(
         queryset = queryset.filter(enrollment__code=enrollment_code)
     if status:
         queryset = queryset.filter(status=status)
+    if query.strip():
+        q = query.strip()
+        queryset = queryset.filter(
+            Q(code__icontains=q)
+            | Q(enrollment__code__icontains=q)
+            | Q(enrollment__participant__name_ar__icontains=q)
+            | Q(enrollment__participant__participant_number__icontains=q)
+            | Q(official_letter_ref__icontains=q)
+            | Q(president_approval_ref__icontains=q)
+        )
 
+    type_labels = {"FULL": "كامل", "PARTIAL": "جزئي"}
     return [
         {
             "code": r.code,
             "enrollment_code": r.enrollment.code,
             "participant_name": r.enrollment.participant.name_ar,
+            "participant_number": r.enrollment.participant.participant_number,
+            "program_name": r.enrollment.cohort.program.name_ar,
             "refund_type": r.refund_type,
+            "refund_type_display": type_labels.get(r.refund_type, r.refund_type),
             "amount": r.amount,
             "reason_ar": r.reason_ar,
             "official_letter_ref": r.official_letter_ref,
+            "official_letter_date": r.official_letter_date,
             "president_approval_ref": r.president_approval_ref,
+            "president_approval_date": r.president_approval_date,
             "status": r.status,
             "status_display": r.get_status_display(),
             "requested_by": person_name(r.requested_by),
             "requested_by_id": r.requested_by_id,
+            "requested_at": r.created_at,
+            "approved_by": person_name(r.approved_by) if r.approved_by_id else "",
+            "approved_at": r.approved_at,
+            "rejected_by": person_name(r.rejected_by) if r.rejected_by_id else "",
+            "rejected_at": r.rejected_at,
+            "rejection_reason_ar": r.rejection_reason_ar,
+            "executed_by": person_name(r.executed_by) if r.executed_by_id else "",
             "partner_recovery_amount": r.partner_recovery_amount,
             "executed_at": r.executed_at,
         }
@@ -451,6 +580,7 @@ def get_refund(*, actor: Any, code: str, request: Any = None) -> Refund:
 
 
 __all__ = [
+    "REFUND_FILTERS",
     "RefundExceedsPaidError",
     "RefundStateError",
     "already_claimed",
@@ -460,6 +590,8 @@ __all__ = [
     "list_refunds",
     "partner_recovery_for",
     "refundable_amount",
+    "refundable_rows",
+    "refunds_summary",
     "reject_refund",
     "request_refund",
 ]

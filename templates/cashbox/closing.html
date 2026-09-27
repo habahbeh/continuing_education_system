@@ -1,109 +1,245 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  شاشة الإقفال اليومي، وهي الوحيدة على المسار اليومي التي لم تمرّ بجولة تحسين.
-  التحسين عرضٌ فقط: لا خدمة تغيّرت ولا رايةٌ أُعيد حسابها، والأفعال هي نفسها
-  بنفس حرّاسها — «فتح إقفال» على CREATE و«اعتماد» على APPROVE، كلاهما من العرض.
+  الإقفال اليومي = «مطابقة المقبوض بالوصولات» (§5.2): ما سجّله المركز من دفعات
+  اليوم مقابل سندات الدائرة المالية التي بيده. الشاشة تجيب أولاً عن سؤال
+  المالي كل مساء «أي صندوق لم يُقفل؟» (طابور الأيام المفتوحة)، ثم تفتح إقفالاً
+  بمعاينة حيّة للجهة النظامية قبل الحفظ (htmx)، ويظهر الفرق ملوّناً فور إدخال
+  إجمالي الوصولات (Alpine)، ثم سجل الإقفالات باعتمادٍ عبر حوار.
 
-  BR-027 خرج من `.note info`: الأزرق تنبيه، وشرحُ قاعدةٍ ليس تنبيهاً (قواعد
-  التحسين §6.5). النصّ نفسه لم يتغيّر حرفاً، وانتقل إلى `.hint` أسفل الجدول
-  حيث الأعمدة التي يشرحها — فلا تتراكم كتلتان مؤطَّرتان فوق الصفحة.
-
-  وBR-028 ليس هنا: كتلة الإرشاد أعلاه تقوله مرّة واحدة، وقاعدةٌ تُقال مرّتين
-  على شاشة واحدة تُقرأ مرّةً واحدة على أي حال.
-
-  اسم عمود الإجراءات بـ `aria-label` لا بـ `.sr-only`: الأخير
-  `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة ويجرّها أفقياً.
-
-  العدّ يُحصى فوق الصفوف المرسومة لا فوق السجل كلّه، فالشريحة تصف ما على الشاشة.
+  الاعتماد لا يُعرض لصاحب اليوم (BR-028) ولا لمن لا يملك APPROVE؛ الخدمة تبقى
+  الحارس. التسوية إلزامية في الحوار حين يكون فرق أو سندات بلا وصل (BR-027).
+  لا alert ولا confirm للمتصفح.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
-    <p class="sub">{% translate "يوم صندوقٍ واحد في كل صف: ما تقوله السندات الصادرة، وما عُدّ فعلاً، والفرق بينهما وحالته." %}</p>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
+    <p class="sub">{% translate "يوم صندوقٍ واحد في كل صف: ما سجّله النظام من دفعات، وما بيد المركز من سندات الدائرة المالية، والفرق بينهما وحالته." %}</p>
   </div>
 </div>
 
-{% guided_help "cashbox-closing" %}
-
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "الإقفالات" %}</h2>
-    <div class="acts">
-      <span class="count">{% blocktranslate count n=closings|length %}إقفال واحد{% plural %}{{ n }} إقفالات{% endblocktranslate %}</span>
-    </div>
-  </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "الرمز" %}</th>
-          <th>{% translate "التاريخ" %}</th>
-          <th>{% translate "الصندوق" %}</th>
-          <th>{% translate "النظامي" %}</th>
-          <th>{% translate "المعدود" %}</th>
-          <th>{% translate "الفرق" %}</th>
-          <th>{% translate "السندات" %}</th>
-          <th>{% translate "الحالة" %}</th>
-          <th aria-label="{% translate 'الإجراء' %}"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in closings %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
-            <td class="num"><span dir="ltr">{{ c.closing_date|date:"Y/m/d" }}</span></td>
-            <td>{{ c.cashier }}</td>
-            <td class="num">{{ c.system_total }}</td>
-            <td class="num">{{ c.counted_total }}</td>
-            <td class="num">{{ c.variance }}</td>
-            <td class="num">{{ c.receipt_count }}</td>
-            <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
-            <td class="acts">
-              {% if can_approve and c.status != "RECONCILED" %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="reconcile">
-                  <input type="hidden" name="code" value="{{ c.code }}">
-                  <input name="variance_resolution_ar" aria-label="{% translate 'تسوية الفرق' %}" placeholder="{% translate 'تسوية الفرق إن وُجد…' %}">
-                  <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="9" class="empty">
-            <span class="empty-title">{% translate "لا إقفالات" %}</span>
-            <span class="empty-body">{% translate "الإقفال يُفتح ليوم أمين صندوق: يُحتسب النظامي من سنداته الصادرة، ويُدخَل المعدود، فيظهر الصف بفرقه وحالته. ولا يُعدَّل إقفال بعد اعتماده (BR-026)." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card2-body">
-    <p class="hint">
-      {% translate "الإجمالي النظامي محتسب من السندات الصادرة — لا يُدخَل يدوياً. والفرق يُغلق بتسوية مكتوبة لا صامتاً (BR-027)." %}
-    </p>
-  </div>
+<div class="kpi-grid tiles closing-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt"><span class="label">{{ t.label }}</span><span class="value num">{{ t.value }}</span></span>
+    </a>
+  {% endfor %}
 </div>
 
-{% if can_create %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "فتح إقفال" %}</h2></div>
-    <div class="card2-body">
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="open">
-        {% include "partials/_form.html" %}
-        <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "فتح الإقفال" %}</button>
+<div class="dash-cols">
+  <div class="dash-main">
+    {# --- الطابور: أيام لها سندات صادرة ولم تُقفل --- #}
+    <div class="card2 next-card tone-amber" id="open-days">
+      <div class="card2-head">
+        <span class="head-ico tone-amber" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-clock"/></svg></span>
+        <h2>{% translate "أيام بلا إقفال" %}</h2>
+        <div class="acts"><span class="count">{{ open_days|length|ar_count:"يوم واحد|يومان|أيام|يوماً" }}</span></div>
+      </div>
+      {% if open_days %}
+        <div class="tbl-wrap">
+          <table class="tbl open-days">
+            <thead><tr><th>{% translate "التاريخ" %}</th><th>{% translate "الصندوق" %}</th><th class="num">{% translate "النظامي" %}</th><th class="num">{% translate "السندات" %}</th><th aria-label="{% translate 'الإجراء' %}"></th></tr></thead>
+            <tbody>
+              {% for d in open_days %}
+                <tr>
+                  <td class="num"><span dir="ltr">{{ d.closing_date|date:"Y/m/d" }}</span>{% if d.closing_date == today %} <span class="chip">{% translate "اليوم" %}</span>{% endif %}</td>
+                  <td>{{ d.cashier }}</td>
+                  <td class="num">{{ d.total }}</td>
+                  <td class="num">{{ d.count }}</td>
+                  <td class="acts">
+                    <a class="btn2 ghost" href="{% url 'cashbox:payments' %}?from={{ d.closing_date|date:'Y-m-d' }}&amp;to={{ d.closing_date|date:'Y-m-d' }}">{% translate "السندات" %}</a>
+                    {% if can_create %}<a class="btn2 primary" href="{% url 'cashbox:closing' %}?cashier={{ d.cashier_id }}&amp;on={{ d.closing_date|date:'Y-m-d' }}#close-day">{% translate "أقفل هذا اليوم" %}</a>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
-      </form>
+      {% else %}
+        <div class="card2-body"><p class="hint ok-line">✓ {% translate "كل الأيام التي لها سندات أُقفلت." %}</p></div>
+      {% endif %}
+    </div>
+
+    {# --- السجل --- #}
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-vault"/></svg></span>
+        <h2>{% translate "الإقفالات" %}</h2>
+        <div class="acts">
+          {% if status %}<a class="btn2 ghost" href="{% url 'cashbox:closing' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
+          <span class="count">{{ closings|length|ar_count:"إقفال واحد|إقفالان|إقفالات|إقفالاً" }}</span>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl closings-tbl">
+          <thead>
+            <tr>
+              <th>{% translate "الرمز" %}</th>
+              <th>{% translate "التاريخ" %}</th>
+              <th>{% translate "الصندوق" %}</th>
+              <th class="num">{% translate "النظامي" %}</th>
+              <th class="num">{% translate "الوصولات" %}</th>
+              <th>{% translate "الفرق" %}</th>
+              <th class="num">{% translate "السندات" %}</th>
+              <th>{% translate "الحالة" %}</th>
+              <th aria-label="{% translate 'الإجراء' %}"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in closings %}
+              <tr>
+                <td dir="ltr" translate="no" class="num"><strong>{{ c.code }}</strong></td>
+                <td class="num"><span dir="ltr">{{ c.closing_date|date:"Y/m/d" }}</span></td>
+                <td>{{ c.cashier }}</td>
+                <td class="num">{{ c.system_total }}</td>
+                <td class="num">{{ c.counted_total }}</td>
+                <td>
+                  {% if c.variance == 0 %}<span class="chip ok dot">{% translate "مطابق" %}</span>
+                  {% elif c.variance < 0 %}<span class="chip danger dot">{% translate "عجز" %} <span class="num">{{ c.variance }}</span></span>
+                  {% else %}<span class="chip warn dot">{% translate "زيادة" %} <span class="num">{{ c.variance }}</span></span>{% endif %}
+                  {% if c.unvouched_count %}<span class="chip danger" title="{% translate 'سندات بلا رقم من الدائرة المالية' %}">{{ c.unvouched_count }} {% translate "بلا وصل" %}</span>{% endif %}
+                </td>
+                <td class="num">{{ c.receipt_count }}</td>
+                <td>
+                  <span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span>
+                  {% if c.approved_by %}<small class="muted sub-line">{{ c.approved_by }}{% if c.approved_at %} · <span class="num" dir="ltr">{{ c.approved_at|date:"Y/m/d" }}</span>{% endif %}</small>{% endif %}
+                </td>
+                <td class="acts">
+                  <a class="btn2 ghost ico-btn" href="{% url 'cashbox:payments' %}?from={{ c.closing_date|date:'Y-m-d' }}&amp;to={{ c.closing_date|date:'Y-m-d' }}" title="{% translate 'سندات اليوم' %}" aria-label="{% translate 'سندات اليوم' %}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg></a>
+                  <a class="btn2 ghost ico-btn" href="{% url 'cashbox:closing-print' c.code %}" title="{% translate 'طباعة محضر الإقفال' %}" aria-label="{% translate 'طباعة محضر الإقفال' %}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc"/></svg></a>
+                  {% if c.status != "RECONCILED" and can_approve and c.cashier_id != user_id %}
+                    <button class="btn2 primary" type="button" @click="document.getElementById('rc-{{ c.code }}').showModal()">{% translate "اعتماد…" %}</button>
+                    <dialog class="modal confirm-modal" id="rc-{{ c.code }}" dir="rtl" aria-labelledby="rc-{{ c.code }}-t"{% if posted_action == "reconcile" and posted_code == c.code %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+                      <form method="post">{% csrf_token %}
+                        <input type="hidden" name="action" value="reconcile">
+                        <input type="hidden" name="code" value="{{ c.code }}">
+                        <div class="modal-head">
+                          <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+                          <h2 id="rc-{{ c.code }}-t">{% translate "اعتماد إقفال" %} <span class="num" dir="ltr">{{ c.code }}</span></h2>
+                        </div>
+                        <div class="modal-body">
+                          <dl class="dl">
+                            <dt>{% translate "الصندوق" %}</dt><dd>{{ c.cashier }} · <span class="num" dir="ltr">{{ c.closing_date|date:"Y/m/d" }}</span></dd>
+                            <dt>{% translate "النظامي" %}</dt><dd class="num">{{ c.system_total }} <span class="muted">({{ c.receipt_count|ar_count:"سند واحد|سندان|سندات|سنداً" }})</span></dd>
+                            <dt>{% translate "الوصولات" %}</dt><dd class="num">{{ c.counted_total }}</dd>
+                            <dt>{% translate "الفرق" %}</dt><dd>{% if c.variance == 0 %}<span class="chip ok">{% translate "مطابق" %}</span>{% else %}<span class="chip {% if c.variance < 0 %}danger{% else %}warn{% endif %} num">{{ c.variance }}</span>{% endif %}</dd>
+                            {% if c.unvouched_count %}<dt>{% translate "بلا وصل" %}</dt><dd><span class="chip danger">{{ c.unvouched_count|ar_count:"سند واحد|سندان|سندات|سنداً" }}</span> {% translate "بلا رقم سند من الدائرة المالية" %}</dd>{% endif %}
+                          </dl>
+                          {% if not c.is_clean %}
+                            <div class="fld">
+                              <label for="rc-{{ c.code }}-res">{% translate "تسوية الفرق" %}<span class="req" aria-hidden="true">*</span></label>
+                              <textarea id="rc-{{ c.code }}-res" name="variance_resolution_ar" rows="2" required placeholder="{% translate 'ما سبب الفرق وكيف سُوّي؟ (يُسجَّل باسمك)' %}"></textarea>
+                              <div class="help">{% translate "لا يُقفل يوم بفرق أو بسندات بلا وصل صامتاً (BR-027)." %}</div>
+                            </div>
+                          {% else %}
+                            <p class="hint">{% translate "مطابق بلا فرق؛ الاعتماد يثبّت اليوم ولا يُعدَّل بعده (BR-026)." %}</p>
+                          {% endif %}
+                        </div>
+                        <div class="modal-acts">
+                          <button class="btn2 primary" type="submit">{% translate "تأكيد الاعتماد" %}</button>
+                          <button class="btn2 ghost" type="button" @click="document.getElementById('rc-{{ c.code }}').close()">{% translate "رجوع" %}</button>
+                        </div>
+                      </form>
+                    </dialog>
+                  {% elif c.status != "RECONCILED" and c.cashier_id == user_id %}
+                    <span class="muted">{% translate "الاعتماد لغيرك (BR-028)" %}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="9" class="empty">
+                <span class="empty-title">{% translate "لا إقفالات" %}</span>
+                <span class="empty-body">{% translate "الإقفال يُفتح ليوم صندوق: يُحتسب النظامي من سنداته الصادرة، وتُدخَل الوصولات، فيظهر الصف بفرقه وحالته. ولا يُعدَّل إقفال بعد اعتماده (BR-026)." %}</span>
+              </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if closings %}
+        <div class="card2-body">
+          <p class="hint">{% translate "الإجمالي النظامي محتسب من السندات الصادرة — لا يُدخَل يدوياً. والفرق يُغلق بتسوية مكتوبة لا صامتاً (BR-027)." %}</p>
+        </div>
+      {% endif %}
     </div>
   </div>
-{% endif %}
+
+  <div class="dash-side">
+    {% if can_create %}
+      <div class="card2 next-card tone-ok" id="close-day"
+           x-data="{ sys: null, count: 0, got: '', num(v) { return Number(String(v).replace(',', '.')) || 0 }, diff() { return this.sys === null ? null : this.num(this.got) - this.sys }, fmt(v) { return Number(v).toFixed(3).replace('.', ',') }, read() { const p = document.getElementById('closing-preview'); this.sys = p && p.dataset.total !== '' ? Number(p.dataset.total) : null; this.count = p ? Number(p.dataset.count) : 0 } }"
+           @htmx:after-swap.window="read()" x-init="read()">
+        <div class="card2-head">
+          <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-vault"/></svg></span>
+          <h2>{% translate "فتح إقفال" %}</h2>
+        </div>
+        <div class="card2-body">
+          <form method="post" id="closing-form">
+{% csrf_token %}
+            <input type="hidden" name="action" value="open">
+            {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+
+            <div class="step-lbl"><span class="n">1</span>{% translate "الصندوق واليوم" %}</div>
+            <div class="fld{% if form.cashier_id.errors %} has-error{% endif %}">
+              <label for="id_cashier_id">{{ form.cashier_id.label }}<span class="req" aria-hidden="true">*</span></label>
+              <select id="id_cashier_id" name="cashier_id" required>
+                {% for value, label in form.fields.cashier_id.choices %}<option value="{{ value }}"{% if form.cashier_id.value|stringformat:"s" == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+              {% for e in form.cashier_id.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="fld{% if form.closing_date.errors %} has-error{% endif %}">
+              <label for="id_closing_date">{{ form.closing_date.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="date" id="id_closing_date" name="closing_date" required value="{{ form.closing_date.value|date:'Y-m-d'|default:form.closing_date.value|default:'' }}">
+              {% for e in form.closing_date.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="step-lbl"><span class="n">2</span>{% translate "ما سجّله النظام" %}</div>
+            {# المعاينة على حاويةٍ لا على النموذج: htmx يتحقّق من صحة النموذج قبل أي طلب، والوصولات فارغة بعد. #}
+            <div hx-get="{% url 'cashbox:closing-preview' %}" hx-trigger="load, change from:#id_cashier_id, change from:#id_closing_date"
+                 hx-target="#closing-preview" hx-swap="outerHTML"
+                 hx-vals='js:{cashier: document.getElementById("id_cashier_id").value, on: document.getElementById("id_closing_date").value}'>
+              {% include "cashbox/_closing_preview.html" with summary=None %}
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !count }"><span class="n">3</span>{% translate "الوصولات بيد المركز" %}</div>
+            <div class="fld{% if form.counted_total.errors %} has-error{% endif %}">
+              <label for="id_counted_total">{{ form.counted_total.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="number" step="0.001" min="0" inputmode="decimal" dir="ltr" id="id_counted_total" name="counted_total" required x-model="got" value="{{ form.counted_total.value|default:'' }}" placeholder="0.000">
+              <div class="help">{{ form.counted_total.help_text }}</div>
+              {% for e in form.counted_total.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              <div class="help live" x-cloak>
+                <span x-show="sys !== null && got !== '' && diff() === 0" class="is-ok">✓ {% translate "مطابق للنظامي" %}</span>
+                <span x-show="sys !== null && got !== '' && diff() < 0" class="is-danger">{% translate "عجز" %} <b class="num" x-text="fmt(Math.abs(diff()))"></b> {% translate "عن النظامي — سيُفتح «قيد المطابقة» ويحتاج تسوية" %}</span>
+                <span x-show="sys !== null && got !== '' && diff() > 0" class="is-warn">{% translate "زيادة" %} <b class="num" x-text="fmt(diff())"></b> {% translate "عن النظامي — سيُفتح «قيد المطابقة» ويحتاج تسوية" %}</span>
+              </div>
+            </div>
+            <div class="form-acts">
+              <button class="btn2 primary" type="submit" :disabled="!count || got === ''">
+                <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-vault"/></svg>
+                {% translate "فتح الإقفال" %}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    {% endif %}
+    <div class="card2">
+      <div class="card2-head"><h2>{% translate "كيف تُطابَق" %}</h2></div>
+      <div class="card2-body">
+        <ul class="todo">
+          <li><span class="n">1</span><span>{% translate "النظامي = دفعات اليوم المسجَّلة على هذا الصندوق (لا يُدخل يدوياً)." %}</span></li>
+          <li><span class="n">2</span><span>{% translate "الوصولات = مجموع سندات الدائرة المالية التي بيد المركز." %}</span></li>
+          <li><span class="n">3</span><span>{% translate "كل دفعة يجب أن تحمل رقم سندها من الدائرة المالية؛ الناقص يظهر بالاسم." %}{% if not vouchers_required %} <span class="muted">({% translate "للاطلاع فقط بالإعداد الحالي" %})</span>{% endif %}</span></li>
+          <li><span class="n">4</span><span>{% translate "يعتمد الإقفال غيرُ صاحب اليوم (BR-028)، والفرق لا يُقفل بلا تسوية مكتوبة (BR-027)." %}</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}

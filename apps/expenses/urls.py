@@ -10,4 +10,5 @@ app_name = "expenses"
 
 urlpatterns = [
     path("expenses/", views.expenses_view, name="expenses"),
+    path("expenses/period-check/", views.period_check_view, name="period-check"),
 ]

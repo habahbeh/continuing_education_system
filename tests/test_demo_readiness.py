@@ -172,14 +172,13 @@ def test_the_clearance_reaches_a_certificate_through_the_screens(
         reverse("operations:clearances"),
         {
             "action": "open",
+            "confirmed": "1",
             "enrollment_code": settled_enrollment.code,
-            "case_type": "GRADUATION",
-            "opened_on": TERM_END.isoformat(),
-            "code": "CLR-DEMO",
+            "opened_on": date(2026, 9, 15).isoformat(),
         },
         follow=True,
     )
-    clearance = Clearance.objects.get(code="CLR-DEMO")
+    clearance = Clearance.objects.get(enrollment=settled_enrollment)
     detail = reverse("operations:clearance-detail", args=[clearance.code])
 
     # 2 — custody, the centre's own step.
@@ -322,7 +321,7 @@ def _stage_button(url: str) -> str:
     The sidebar links most of these screens too, so a bare ``href in body``
     test would pass on the menu alone and prove nothing about the guide.
     """
-    return f'<a class="btn2 sm" href="{url}">'
+    return f'<a class="btn2 primary sm" href="{url}">'
 
 
 def _primary_section(body: str) -> str:
@@ -488,7 +487,7 @@ def test_the_guided_flow_never_offers_a_step_the_reader_may_not_open(
     for route, screen in GUIDE_STAGE_SCREENS + GUIDE_LATER_SCREENS:
         may_open = Action.VIEW in allowed_actions(role, screen)
         offered = _stage_button(reverse(route)) in body or (
-            f'<a class="act-card" href="{reverse(route)}">' in body
+            f'<a class="act-card lead" href="{reverse(route)}">' in body
         )
         assert offered is may_open, (
             f"{role} {'may' if may_open else 'may NOT'} open {screen}, "
@@ -617,26 +616,6 @@ def test_the_guided_screens_use_no_class_this_project_never_defined(template: st
     for dead in DEAD_DEMO_CLASSES:
         assert f".{dead}" not in css, f"{dead} now exists — drop it from DEAD_DEMO_CLASSES"
         assert dead not in source, f"{template} still uses the demo-only class «{dead}»"
-
-
-@pytest.mark.parametrize(
-    ("route", "role", "phrase"),
-    [
-        ("operations:special-cases", Role.CENTER_MANAGER, "صفحة إرشادية"),
-        ("settlements:entitlement", Role.FINANCE_OFFICER, "صفحة دليل"),
-        ("people:settings", Role.FINANCE_OFFICER, "قراءة فقط"),
-        ("people:future", Role.CENTER_MANAGER, "هذه ليست نواقص"),
-    ],
-)
-def test_each_guided_screen_says_out_loud_what_it_is(
-    client: Client, seeded_settings: None, route: str, role: str, phrase: str
-) -> None:
-    """A read-only page that does not say so reads as a broken functional one."""
-    client.force_login(_user(role, f"g3c.{role.lower()}.{route.replace(':', '.')}"))
-
-    body = client.get(reverse(route)).content.decode("utf-8")
-
-    assert phrase in body
 
 
 # ---------------------------------------------------------------------------
@@ -814,167 +793,12 @@ def test_the_coverage_matrix_uses_no_class_this_project_never_defined() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The shared guided-help block — Sprint 8K-5
+# The shared guided-help block — Sprint 8K-5 — REMOVED
 # ---------------------------------------------------------------------------
-#: (route, guidance key, screen that guards the route) for every screen the
-#: sprint asked to be taught. Written out here rather than derived from the
-#: registry, so a template that quietly loses its tag is caught.
-GUIDED_HELP_SCREENS = [
-    ("operations:dashboard", "dashboard", "dashboard"),
-    ("people:participants", "participants", "students"),
-    ("people:participant-new", "participant-new", "student-new"),
-    ("operations:enrollments", "enrollments", "enrollments"),
-    ("operations:enroll-flow", "enroll-flow", "enroll-flow"),
-    ("cashbox:payments", "payments", "payments"),
-    ("cashbox:payment-new", "payment-new", "payment-new"),
-    ("cashbox:closing", "cashbox-closing", "closing"),
-    # Sprint 8I-1 — the discounts register joined the taught set with its
-    # own polish slice.
-    ("billing:discounts", "discounts", "discounts"),
-    ("billing:refunds", "refunds", "refunds"),
-    ("billing:extra-fees", "extra-fees", "extra-fees"),
-    ("expenses:expenses", "expenses", "expenses"),
-    ("billing:opening-balances", "opening-balances", "opening-balances"),
-    ("operations:transfers", "transfers", "transfers"),
-    ("operations:transfer-new", "transfer-new", "transfer-new"),
-    ("operations:special-cases", "special-cases", "special-cases"),
-    ("catalog:programs", "programs", "programs"),
-    ("catalog:short-courses", "short-courses", "short-courses"),
-    ("catalog:online-courses", "online-courses", "online-courses"),
-    # Sprint 8I-1 — the six polished screens joined the taught set. The two
-    # detail pages need an object to open and are proved next to their own
-    # fixtures in ``tests/test_ui_regressions.py``.
-    ("catalog:pricelists", "pricelists", "pricelists"),
-    ("operations:cohorts", "cohorts", "cohorts"),
-    ("operations:mohe", "mohe", "mohe"),
-    ("operations:mohe-submit", "mohe-submit", "mohe-submit"),
-    ("operations:clearances", "clearance", "clearance"),
-    ("operations:certificates", "certificates", "certificates"),
-    ("partners:partners", "partners", "partners"),
-    ("partners:agreements", "agreements", "agreements"),
-    ("partners:agreement-new", "agreement-new", "agreement-new"),
-    ("settlements:entitlement", "entitlement", "entitlement"),
-    ("settlements:claims", "claims", "claims"),
-    ("settlements:settlements", "settlements", "settlements"),
-    ("settlements:obligations", "obligations", "obligations"),
-    ("reporting:reports", "reports", "reports"),
-    ("people:settings", "settings", "settings"),
-    ("people:coverage", "coverage", "settings"),
-    ("people:future", "future", "settings"),
-]
-
-
-def _a_role_that_may_open(screen: str) -> str:
-    from apps.people.constants import Action
-    from apps.people.permissions.matrix import allowed_actions
-
-    for role in ALL_ROLES:
-        if Action.VIEW in allowed_actions(role, screen):
-            return role
-    raise AssertionError(f"no role may VIEW {screen}")
-
-
-@pytest.mark.parametrize(("route", "key", "screen"), GUIDED_HELP_SCREENS)
-def test_the_guided_help_reaches_every_screen_it_was_asked_to(
-    client: Client, seeded_settings: None, route: str, key: str, screen: str
-) -> None:
-    """
-    The demo taught on every screen; the real system now does too. A template
-    that loses ``{% guided_help %}`` leaves its readers with a correct form and
-    no idea which button is theirs, and that is what this catches.
-    """
-    from apps.people.guidance import GUIDES
-
-    role = _a_role_that_may_open(screen)
-    client.force_login(_user(role, f"gh.{key}.{role.lower()}"))
-
-    response = client.get(reverse(route))
-
-    assert response.status_code == 200, f"{route} did not open for {role}"
-    body = response.content.decode("utf-8")
-    assert str(GUIDES[key].what) in body, f"{route} renders no guided help"
-    assert "من يستخدمها" in body
-
-
-@pytest.mark.parametrize(("route", "key", "screen"), GUIDED_HELP_SCREENS)
-@pytest.mark.parametrize("role", ALL_ROLES)
-def test_the_guided_help_never_points_a_reader_at_a_refusal(
-    client: Client, seeded_settings: None, route: str, key: str, screen: str, role: str
-) -> None:
-    """
-    The prose is for everyone and the links are not. A next-step link the reader
-    may not follow ends in a refusal and a DENIED_ATTEMPT row (BR-085) for doing
-    exactly what the help said — so the gate is asserted in both directions.
-    """
-    from apps.people.constants import Action
-    from apps.people.guidance import GUIDES
-    from apps.people.permissions.matrix import allowed_actions
-
-    if Action.VIEW not in allowed_actions(role, screen):
-        pytest.skip("cannot open the page at all")
-    guide = GUIDES[key]
-    if not guide.links:
-        pytest.skip("this screen offers no next step")
-    client.force_login(_user(role, f"ghl.{key}.{role.lower()}"))
-
-    body = client.get(reverse(route)).content.decode("utf-8")
-    help_block = body.split("من يستخدمها", 1)[1].split("</div>", 2)[0]
-
-    for target_screen, target_route, label in guide.links:
-        may_follow = Action.VIEW in allowed_actions(role, target_screen)
-        offered = f'<a href="{reverse(target_route)}">{label}</a>' in help_block
-        assert offered is may_follow, (
-            f"{role} {'may' if may_follow else 'may NOT'} open {target_screen}, "
-            f"but the help on {route} {'offers' if offered else 'omits'} «{label}»"
-        )
-
-
-def test_the_guided_help_explains_itself_to_readers_who_get_no_links(
-    client: Client, seeded_settings: None
-) -> None:
-    """
-    Filtering the links must not filter the teaching. The registrar may not open
-    the till (D-06), and still has to learn from the enrolments screen that a
-    payment comes next and who takes it.
-    """
-    from apps.people.guidance import GUIDES
-
-    client.force_login(_user(Role.REGISTRATION_OFFICER, "gh.reg.noLinks"))
-
-    body = client.get(reverse("operations:enrollments")).content.decode("utf-8")
-
-    assert str(GUIDES["enrollments"].what) in body
-    assert str(GUIDES["enrollments"].after) in body
-    # …but the till itself is not offered.
-    assert f'<a href="{reverse("cashbox:payment-new")}">' not in body
-
-
-def test_the_guided_help_partial_uses_no_class_this_project_never_defined() -> None:
-    """One partial on twenty-three screens: a dead class here is a hole on all."""
-    from pathlib import Path
-
-    source = Path("templates/partials/_guided_help.html").read_text(encoding="utf-8")
-    css = Path("static/src/input.css").read_text(encoding="utf-8")
-
-    for dead in [*DEAD_DEMO_CLASSES, "compact", "mono"]:
-        assert f".{dead}" not in css, f"{dead} now exists — drop it from the dead list"
-        assert dead not in source, f"the guided-help partial uses «{dead}»"
-    for used in ["note", "hint", "chip"]:
-        assert f".{used}" in css, f"the partial leans on «{used}», which CSS must define"
-
-
-def test_the_guided_help_stays_calm() -> None:
-    """
-    Colour is for the moment something is actually refused, not for explaining
-    that a rule exists. The block is neutral; a screen that needs amber says so
-    on its own body, where the refusal happens.
-    """
-    from pathlib import Path
-
-    source = Path("templates/partials/_guided_help.html").read_text(encoding="utf-8")
-
-    assert "note warn" not in source
-    assert "note danger" not in source
+# The explanation block that sat above every screen was taken out at the
+# client's request (dashboard polish phase). The guidance registry stays in
+# ``apps/people/guidance.py`` for the tests that read it; no template renders
+# it any more, and no test asks it to.
 
 
 # ---------------------------------------------------------------------------
@@ -1139,17 +963,18 @@ DASHBOARD_METRICS = [
     ("الدفعات المُشغّلة", "cohorts"),
     ("سندات اليوم", "payments"),
     ("سندات لم تدخل إقفالاً", "payments"),
-    ("إقفالات لم تُعتمد", "closing"),
-    ("طلبات نقل قائمة", "transfers"),
-    ("براءات ذمة قائمة", "clearance"),
-    ("مطالبات بانتظار الاعتماد", "claims"),
+    ("إقفالات معلّقة", "closing"),
+    ("طلبات النقل", "transfers"),
+    ("براءات الذمة", "clearance"),
+    ("مطالبات معلّقة", "claims"),
 ]
 
-#: The "start here" buttons, and the screen each opens.
+#: The doors the dashboard opens into screens that START work (the workflow
+#: stops for a new application and for the till), and the screen each opens.
+#: «ابدأ من هنا» is gone; the stops are now the only such doors.
 DASHBOARD_ACTIONS = [
     ("people:participant-new", "student-new"),
     ("cashbox:payment-new", "payment-new"),
-    ("operations:transfer-new", "transfer-new"),
 ]
 
 
@@ -1219,8 +1044,8 @@ def test_the_dashboard_offers_no_action_the_reader_may_not_take(
     client: Client, seeded_settings: None, role: str
 ) -> None:
     """
-    «ابدأ من هنا» is the one place on the screen that starts work rather than
-    reporting it. D-01 keeps the manager out of «استيفاء دفعة» — BR-081 is an
+    The workflow stops are the one place on the screen that start work rather
+    than reporting it. D-01 keeps the manager out of «استيفاء دفعة» — BR-081 is an
     explicit deny, not a missing grant — so the manager's dashboard must not
     offer it however senior the account is.
     """
@@ -1267,22 +1092,20 @@ def test_the_dashboard_renders_on_a_database_with_no_work_in_it(
     body = response.content.decode("utf-8")
 
     assert response.status_code == 200
-    # A queue with nothing in it draws no line at all.
-    for label, _screen in DASHBOARD_METRICS:
-        if label in ("أرصدة غير مسوّاة", "التسجيلات", "الدفعات المُشغّلة", "سندات اليوم"):
-            continue
-        assert label not in body, f"empty queue «{label}» drew a line anyway"
-    assert "لا شيء ينتظر قراراً" in body or "لا عدّادات ضمن صلاحيات دورك" in body
+    # Every queue is a tab that says zero; none pretends to hold work.
+    assert 'class="chip warn num"' not in body, "an empty queue shows a non-zero count"
+    assert "لا شيء في هذا الطابور" in body or "لا عدّادات ضمن صلاحيات دورك" in body
+    # ...and no chart draws a picture of nothing.
+    assert 'class="bar' not in body
 
 
 def test_the_dashboard_keeps_its_responsive_scaffolding() -> None:
     """
-    One column on a phone, two on a wide screen, and nothing hand-rolled.
+    One column on a phone, more as the screen allows, and nothing hand-rolled.
 
-    The queue is a few short lines and used to stretch the whole width, which
-    left a gap nobody reads. From ``lg`` it sits beside the counters instead.
-    Below that it stacks: splitting a 700px viewport two ways would give the
-    queue a 240px column, which is worse than stacking, not better.
+    The stepper is eight stops in one row only where eight fit (≥1280px);
+    below that it wraps on an auto-fit grid so no stop is ever sliced thin.
+    Charts pair up from ``md``; counters keep the shared ``kpi-grid``.
     """
     from pathlib import Path
 
@@ -1297,34 +1120,21 @@ def test_the_dashboard_keeps_its_responsive_scaffolding() -> None:
     assert "sm:grid-cols-2" in rule(".kpi-grid")
     assert "xl:grid-cols-4" in rule(".kpi-grid")
 
-    # Two columns, and only from lg — never below it.
-    assert 'class="dash-cols"' in source
-    assert 'class="dash-main"' in source
-    assert 'class="dash-side"' in source
-    assert "lg:grid-cols-3" in rule(".dash-cols")
-    assert "lg:col-span-2" in rule(".dash-main ")
-    for selector in (".dash-cols", ".dash-main ", ".dash-side"):
-        assert "md:" not in rule(selector), f"{selector} splits before lg"
+    # The workflow: eight stops, auto-fit below the wide breakpoint, eight
+    # equal columns from it — never a horizontal scroll.
+    assert 'class="stepper"' in source
+    assert "auto-fit" in rule(".stepper ")
+    assert "repeat(8, minmax(0, 1fr))" in css.split("min-width: 1280px", 1)[1].split("}", 1)[0]
 
-    # Grid children need an explicit zero minimum or long content bursts the
-    # column instead of scrolling inside it.
-    assert "min-w-0" in rule(".dash-main ")
-    assert "min-w-0" in rule(".dash-side")
+    # Charts pair up from md; each card is a grid child with a zero minimum
+    # so a long label scrolls inside rather than bursting the column.
+    assert 'class="chart-grid"' in source
+    assert "md:grid-cols-2" in rule(".chart-grid ")
+    assert "min-w-0" in rule(".col ")
 
-    # Four counters squeezed into two-thirds of the width are unreadable.
-    assert "xl:grid-cols-2" in rule(".dash-main .kpi-grid")
-
-    # The action zone is a card grid now, and it collapses the same way:
-    # one column on a phone, two on a tablet, three on a desktop.
-    assert 'class="act-grid"' in source
-    assert "sm:grid-cols-2" in rule(".act-grid")
-    assert "lg:grid-cols-3" in rule(".act-grid")
-
-    # The workflow strip wraps rather than scrolling sideways, and each stop
-    # keeps a floor width so six of them never shred into slivers.
-    assert 'class="flow"' in source
-    assert "flex-wrap" in rule(".flow")
-    assert "9rem" in rule(".flow li")
+    # The pending-work tabs wrap rather than overflow.
+    assert 'class="tabs"' in source
+    assert "flex-wrap" in rule(".tabs ")
 
 
 def test_the_dashboard_layout_classes_survived_the_css_build() -> None:
@@ -1338,15 +1148,18 @@ def test_the_dashboard_layout_classes_survived_the_css_build() -> None:
     built = Path("static/css/app.css").read_text(encoding="utf-8")
 
     for name in (
-        "dash-cols",
-        "dash-main",
-        "dash-side",
+        "stepper",
+        "chart-grid",
         "sec-title",
         "bar",
         "chart-row",
         "act-grid",
         "act-card",
-        "flow",
+        "legend",
+        "colbar",
+        "tabs",
+        "tab",
+        "kpi-grid",
     ):
         assert f".{name}" in built, f"«{name}» is not in the built stylesheet — rebuild CSS"
 
@@ -1455,12 +1268,13 @@ def test_the_distribution_chart_counts_the_same_enrolments_the_counter_does(
     body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
 
     counter = re.search(
-        r'<div class="label">التسجيلات</div>\s*<div class="value num">(\d+)</div>', body
+        r'<span class="label">التسجيلات</span>\s*<span class="value num">(\d+)</span>', body
     )
     assert counter, "the enrolments counter is not on the page to compare against"
 
-    chart = body.split("توزيع التسجيلات حسب الحالة", 1)[1].split("ما يحتاج متابعة", 1)[0]
-    bars = [int(v) for v in re.findall(r'<span class="num">(\d+)</span>', chart)]
+    # From the chart's title to the next card — whichever card that is.
+    chart = body.split("توزيع التسجيلات حسب الحالة", 1)[1].split('class="card2"', 1)[0]
+    bars = [int(v) for v in re.findall(r'<span class="num">(\d+) <small', chart)]
 
     assert bars, "the chart drew no rows"
     assert sum(bars) == int(counter.group(1))
@@ -1498,23 +1312,32 @@ def test_the_dashboard_charts_need_no_script_and_no_inline_style() -> None:
     assert "<script" not in source
     assert "style=" not in source
     assert "http://" not in source and "https://" not in source
-    # The fill is expressed as a class the stylesheet owns.
-    assert 'class="bar' in source
-    assert 'class="{% if on %}on{% endif %}"' in source
+    # The fill is expressed as a class the stylesheet owns — one of twenty.
+    assert 'class="fill lv-{{' in source
+    # The ring is SVG attributes, not a style attribute.
+    assert 'stroke-dasharray="{{ part.pct }} 100"' in source
 
 
 # ---------------------------------------------------------------------------
 # The command-center sections — page polish phase
 # ---------------------------------------------------------------------------
-#: The six stops of the workflow strip, and the screen each one opens.
+#: The eight stops of the workflow stepper, and the screen each one opens.
 DASHBOARD_FLOW = [
+    ("اعتماد الوزارة", "operations:mohe", "mohe"),
     ("طلب التحاق", "people:participant-new", "student-new"),
     ("التسجيل", "operations:enrollments", "enrollments"),
-    ("استيفاء دفعة", "cashbox:payment-new", "payment-new"),
-    ("الإقفال اليومي", "cashbox:closing", "closing"),
+    ("سند القبض", "cashbox:payment-new", "payment-new"),
+    ("الاعتماد", "operations:enrollments", "enrollments"),
+    ("الإقفال", "cashbox:closing", "closing"),
     ("براءة الذمة", "operations:clearances", "clearance"),
     ("الشهادة", "operations:certificates", "certificates"),
 ]
+
+
+def _stops(body: str) -> list[str]:
+    """The stepper's items, one string each, so a label is matched to ITS button."""
+    strip = body.split('<ol class="stepper">', 1)[1].split("</ol>", 1)[0]
+    return strip.split("<li ")[1:]
 
 
 @pytest.mark.parametrize("role", ALL_ROLES)
@@ -1553,15 +1376,19 @@ def test_the_workflow_strip_links_only_the_stops_the_reader_may_open(
     client.force_login(_user(role, f"dash.flowlink.{role.lower()}"))
 
     body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
-    strip = body.split('<ol class="flow">', 1)[1].split("</ol>", 1)[0]
+    stops = _stops(body)
+    assert len(stops) == len(DASHBOARD_FLOW)
 
-    for label, route, screen in DASHBOARD_FLOW:
+    for stop, (label, route, screen) in zip(stops, DASHBOARD_FLOW, strict=True):
+        assert f'<span class="t">{label}</span>' in stop
         may = Action.VIEW in allowed_actions(role, screen)
-        linked = f'<a href="{reverse(route)}">{label}</a>' in strip
+        linked = f'href="{reverse(route)}"' in stop
         assert linked is may, (
             f"{role} {'may' if may else 'may NOT'} open {screen}, "
             f"but «{label}» is {'linked' if linked else 'unlinked'}"
         )
+        # A stop without a door says so rather than going quiet.
+        assert ("خارج صلاحيتك" in stop) is (not may)
 
 
 def test_the_manager_sees_the_till_stop_named_but_not_linked(
@@ -1571,10 +1398,10 @@ def test_the_manager_sees_the_till_stop_named_but_not_linked(
     client.force_login(_user(Role.CENTER_MANAGER, "dash.flow.mgr"))
 
     body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
-    strip = body.split('<ol class="flow">', 1)[1].split("</ol>", 1)[0]
+    till = next(stop for stop in _stops(body) if '<span class="t">سند القبض</span>' in stop)
 
-    assert "استيفاء دفعة" in strip
-    assert f'<a href="{reverse("cashbox:payment-new")}">' not in strip
+    assert f'href="{reverse("cashbox:payment-new")}"' not in till
+    assert "خارج صلاحيتك" in till
 
 
 @pytest.mark.parametrize("role", ALL_ROLES)
@@ -1638,7 +1465,7 @@ def test_the_dashboard_is_still_worth_opening_with_no_data_at_all(
     assert response.status_code == 200
     assert "مسار العمل" in body, "the workflow map is what fills a quiet morning"
     assert "صلاحياتك تغطّي" in body
-    assert "ابدأ من هنا" in body
+    assert "ابدأ من هنا" not in body, "the start-here block was removed on purpose"
     assert "حالة المركز اليوم" in body
     # A zero reads as a statement, not as a blank card.
     assert "لا يوجد حالياً" in body
@@ -1650,8 +1477,9 @@ def test_the_dashboard_action_cards_stay_permission_gated(
     client: Client, seeded_settings: None
 ) -> None:
     """
-    The buttons became cards with a line of explanation. That is presentation;
-    the gate behind them is the same one, and the manager still gets no till.
+    The buttons became workflow stops with an icon and a colour. That is
+    presentation; the gate behind them is the same one, and the manager still
+    gets no till.
     """
     from apps.people.constants import Action
     from apps.people.permissions.matrix import allowed_actions
@@ -1659,7 +1487,7 @@ def test_the_dashboard_action_cards_stay_permission_gated(
     for role in ALL_ROLES:
         client.force_login(_user(role, f"dash.cards.{role.lower()}"))
         body = client.get(reverse("operations:dashboard")).content.decode("utf-8")
-        cards = re.findall(r'<a class="act-card[^"]*" href="([^"]+)">', body)
+        cards = re.findall(r'<a class="stop" href="([^"]+)"', body)
 
         for route, screen in DASHBOARD_ACTIONS:
             may = Action.VIEW in allowed_actions(role, screen)

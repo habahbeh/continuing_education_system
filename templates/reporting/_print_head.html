@@ -1,0 +1,28 @@
+{% load i18n %}
+{% comment %}
+  ترويسة التقرير على الورق — لا تُرى على الشاشة.
+
+  ورقةٌ مالية تخرج من المركز وتُحفَظ في ملف يجب أن تقول بنفسها: لمن هي، وما
+  اسم التقرير، وأيّ مدى يغطّي، ومَن طبعها ومتى. الشاشة تقول ذلك بسياقها
+  (القائمة الجانبية، اسم المستخدم في الشريط)، والورقة لا سياق لها.
+
+  الشعار من `document_settings.chrome` كبقية المستندات — وحين لا شعار مرفوع
+  تُطبع الترويسة باسميها كما تُطبع اليوم.
+{% endcomment %}
+<div class="doc-head print-only">
+  {% if chrome.logo_url %}
+    <img class="doc-logo" src="{{ chrome.logo_url }}" alt="{{ chrome.logo_alt }}">
+  {% endif %}
+  <div>
+    <div class="org">{{ chrome.university_ar }}<small>{{ chrome.center_ar }}</small></div>
+    <div class="rpt-name">{{ report.title }}</div>
+  </div>
+  <div class="meta">
+    <div>{% translate "الفترة" %}: <span dir="ltr">{{ date_from }} — {{ date_to }}</span></div>
+    <div>{% translate "طبعه" %}: {{ printed_by }}</div>
+    <div>{% translate "تاريخ الطباعة" %}: <span dir="ltr">{% now "Y/m/d H:i" %}</span></div>
+  </div>
+</div>
+{% if not chrome.is_verified and chrome.unverified_note_ar %}
+  <div class="doc-warn print-only">{{ chrome.unverified_note_ar }}</div>
+{% endif %}

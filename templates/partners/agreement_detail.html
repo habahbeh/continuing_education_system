@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui %}
 
 {% block title %}{{ agreement.agreement_number }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -36,7 +36,7 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }} <span class="code" dir="ltr" translate="no">{{ agreement.agreement_number }}</span></h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }} <span class="code" dir="ltr" translate="no">{{ agreement.agreement_number }}</span></h1>
     <p class="sub">
       {{ agreement.partner_name }} —
       {% translate "بنود العقد كما وُقّعت. لا تُعدَّل اتفاقية موقّعة؛ التصحيح يكون بملحق يحلّ محلّها." %}
@@ -55,7 +55,6 @@
   </div>
 </div>
 
-{% guided_help "agreement-detail" %}
 
 <div class="card2">
   <div class="card2-head"><h2>{% translate "الأطراف والسريان" %}</h2></div>

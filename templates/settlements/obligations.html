@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -34,12 +34,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشركاء والمخالصات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "ما على الشريك للجامعة: مبلغه، وما استُوفي منه بالحسم، وما بقي مفتوحاً لمطالبة لاحقة." %}</p>
   </div>
 </div>
 
-{% guided_help "obligations" %}
 
 <p class="hint">{% translate "التزامات الشريك تجاه الجامعة تُستوفى بالحسم من مطالباته لا نقداً — ولا يُستوفى شيء من هذا السجل: الحسم يقع على بطاقة المطالبة." %}</p>
 
@@ -47,7 +46,7 @@
   <div class="card2-head">
     <h2>{% translate "الالتزامات المسجَّلة" %}</h2>
     <div class="acts">
-      <span class="count muted">{% blocktranslate count n=obligations|length %}التزام واحد{% plural %}{{ n }} التزامات{% endblocktranslate %}</span>
+      <span class="count muted">{{ obligations|length|ar_count:"التزام واحد|التزامان|التزامات|التزاماً" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">

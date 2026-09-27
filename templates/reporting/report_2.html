@@ -1,30 +1,190 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n money_ui chart_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.2 — صافي دخل المركز بعد حصص الشركاء (Sprint 8L).
+
+  التقرير الوحيد الذي يقرأ الدفترين معاً، فترتيبه سلّمٌ لا جدول: المقبوض، ثم
+  ما خرج منه، ثم ما بقي. وكل طرحٍ فيه يقف على شيءٍ اعتمده إنسان — مطالبة
+  معتمدة ومصروف معتمد — فما لم يُعتمد لا يُطرح وإن كان واقعاً.
+
+  وثلاثة أرقام تُفصَح ولا تُطرح، وكان المشروع يحتسبها ولا يعرضها منذ 8D:
+
+  * **التأمينات** — مالٌ في يد المركز ليس له (C-21)، فطرحُه من الدخل خطأ
+    واحتسابُه دخلاً خطأ أكبر.
+  * **ذمم السنوات السابقة** — دخلٌ حقيقي، لكنه دخل سنةٍ مضت؛ ضمُّه إلى الشهر
+    يجعل شهراً سيّئاً يبدو جيداً لأن أحدهم سدّد ذمّة 2022.
+  * **الاستردادات التاريخية** — نقدٌ خرج من الصندوق ولم يكلّف السنة شيئاً:
+    يُنقص النقد ويُنقص الالتزام معاً. حذفُه من الورقة يترك قارئاً يقابل البنك
+    بهذه الأرقام حائراً، وطرحُه يُنقص الدخل بلا سبب. فيُفصح.
+{% endcomment %}
+
 {% block content %}
 {% include "reporting/_shell.html" %}
-<div class="note info">
-  {% translate "لا يُطرح إلا ما اعتُمد: حصص الشركاء من مطالبات معتمدة، والمصروفات من قيود معتمدة. والتأمينات مستثناة من الإيراد لأنها التزام لا دخل." %}
+
+<div class="kpi-grid tiles">
+  <div class="kpi tile is-lead">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-scale"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "صافي دخل المركز" %}</span>
+      <span class="value num">{% money report.net_income %}</span>
+      <span class="foot">{% translate "بعد الشركاء والمصروفات" %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "المقبوض (بلا تأمينات)" %}</span>
+      <span class="value num">{% money report.collected %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-building"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "حصص الشركاء المعتمدة" %}</span>
+      <span class="value num">{% money report.partner_total %}</span>
+    </span>
+  </div>
+  <div class="kpi tile">
+    <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-wallet"/></svg></span>
+    <span class="txt">
+      <span class="label">{% translate "المصروفات المعتمدة" %}</span>
+      <span class="value num">{% money report.expenses_total %}</span>
+    </span>
+  </div>
 </div>
-<div class="card2"><div class="card2-body">
-  <div class="calc-row"><span>{% translate "المقبوض (بلا تأمينات)" %}</span><span class="val num">{{ report.collected }}</span></div>
-  <div class="calc-row"><span>− {% translate "حصص الشركاء المعتمدة" %}</span><span class="val num">{{ report.partner_total }}</span></div>
-  <div class="calc-row"><span>− {% translate "المصروفات المعتمدة" %}</span><span class="val num">{{ report.expenses_total }}</span></div>
-  <div class="calc-row"><strong>= {% translate "صافي دخل المركز" %}</strong><strong class="val num">{{ report.net_income }}</strong></div>
-</div></div>
-{% if report.by_partner %}
+
+<div class="split2">
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "سلّم الاحتساب" %}</h2></div>
+    <div class="card2-body">
+      <dl class="calc">
+        <div class="calc-row">
+          <dt>{% translate "المقبوض في المدى (بلا تأمينات وبلا ذمم سابقة)" %}</dt>
+          <dd class="num amt">{% money report.collected %}</dd>
+        </div>
+        <div class="calc-row is-minus">
+          <dt>− {% translate "حصص الشركاء المعتمدة" %}</dt>
+          <dd class="num amt">{% money report.partner_total %}</dd>
+        </div>
+        <div class="calc-row is-sub">
+          <dt>= {% translate "بعد الشركاء" %}</dt>
+          <dd class="num amt">{% money report.after_partners %}</dd>
+        </div>
+        <div class="calc-row is-minus">
+          <dt>− {% translate "المصروفات المعتمدة" %}</dt>
+          <dd class="num amt">{% money report.expenses_total %}</dd>
+        </div>
+        <div class="calc-row is-total">
+          <dt>= {% translate "صافي دخل المركز" %}</dt>
+          <dd class="num amt">{% money report.net_income %}</dd>
+        </div>
+      </dl>
+      <p class="hint">{% translate "لا يُطرح إلا ما اعتُمد: مطالبة الشريك بقرار، والمصروف بقرار. وما لم يُعتمد بعدُ واقعٌ لم يوقّعه أحد، فلا يُنقص دخلاً." %}</p>
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "أين ذهب كل دينار حُصِّل" %}</h2></div>
+    <div class="card2-body">
+      {% comment %}
+        السلّم يقول المبالغ، وهذا يقول النِّسب. والاثنان ليسا تكراراً: «١٠٧٥
+        ديناراً مصروفات» رقمٌ يحتاج مقارنة، و«٨٨٪ من المحصَّل» هو المقارنة.
+      {% endcomment %}
+      <dl class="split-bars">
+        <div>
+          <dt>{% translate "حصص الشركاء" %} <span class="num amt">{% money report.partner_total %}</span></dt>
+          <dd>{% percent_bar report.partner_total report.collected %}</dd>
+        </div>
+        <div>
+          <dt>{% translate "المصروفات" %} <span class="num amt">{% money report.expenses_total %}</span></dt>
+          <dd>{% percent_bar report.expenses_total report.collected %}</dd>
+        </div>
+        <div>
+          <dt>{% translate "صافي دخل المركز" %} <span class="num amt">{% money report.net_income %}</span></dt>
+          <dd>{% percent_bar report.net_income report.collected %}</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "أرقام تُفصَح ولا تُطرح" %}</h2></div>
+    <div class="card2-body">
+      <dl class="doc-grid">
+        <dt>{% translate "التأمينات المستبعدة" %}</dt>
+        <dd class="num amt">{% money report.deposits_excluded %}</dd>
+        <dt>{% translate "تحصيل ذمم سنوات سابقة" %}</dt>
+        <dd class="num amt">{% money report.prior_year_settlements %}</dd>
+        <dt>{% translate "إجمالي النقد الداخل" %}</dt>
+        <dd class="num amt">{% money report.total_cash_in %}</dd>
+        <dt>{% translate "استردادات تاريخية مدفوعة" %}</dt>
+        <dd class="num amt">{% money report.historical_refunds_paid %}</dd>
+        <dt>{% translate "منها معكوسة" %}</dt>
+        <dd class="num amt">{% money report.historical_refunds_reversed %}</dd>
+        <dt>{% translate "صافي المدفوع منها" %}</dt>
+        <dd class="num amt">{% money report.historical_refunds_net %}</dd>
+      </dl>
+      <div class="note info">
+        {% translate "التأمين التزام لا إيراد (C-21). وذمّة سنة سابقة دخلٌ حقيقي لكنه دخل سنةٍ مضت، فيُفرد حتى لا يُجمَّل به شهرٌ ضعيف. والاسترداد التاريخي يُنقص النقد والالتزام معاً فلا يكلّف السنة شيئاً — ويُذكر لأن مَن يقابل هذه الأرقام بكشف البنك يحتاج أن يعرف أين ذهب." %}
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="card2">
   <div class="card2-head"><h2>{% translate "حسب الشريك" %}</h2></div>
   <div class="tbl-wrap">
     <table class="tbl">
-      <thead><tr><th>{% translate "الشريك" %}</th><th>{% translate "المستحق" %}</th></tr></thead>
-      <tbody>{% for name, amount in report.by_partner %}<tr><td>{{ name }}</td><td class="num">{{ amount }}</td></tr>{% empty %}
-        <tr><td colspan="3" class="empty">
-          <span class="empty-title">{% translate "لا صفوف في هذه الفترة" %}</span>
-          <span class="empty-body">{% translate "غيّر «من تاريخ» و«إلى تاريخ» أعلاه. الفراغ هنا نتيجة صحيحة لا عطل: لم يقع في المدى المختار ما يُدرَج." %}</span>
-        </td></tr>
-        {% endfor %}</tbody>
+      <thead>
+        <tr>
+          <th>{% translate "الشريك" %}</th>
+          <th class="num">{% translate "المطالبات" %}</th>
+          <th class="num">{% translate "المحصَّل من برامجه" %}</th>
+          <th class="num">{% translate "حصته المستحقة" %}</th>
+          <th class="num">{% translate "حصة الجامعة" %}</th>
+          <th>{% translate "نصيب الجامعة" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in report.by_partner %}
+          <tr>
+            <td><strong>{{ p.name_ar }}</strong><br><small class="muted" dir="ltr">{{ p.code }}</small></td>
+            <td class="num">{{ p.claims }}</td>
+            <td class="num amt">{% money p.gross_collected %}</td>
+            <td class="num amt">{% money p.net_payable %}</td>
+            <td class="num amt">{% money p.university_share %}</td>
+            <td>
+              {% percent_bar p.university_share p.gross_collected %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="empty">
+            <span class="empty-title">{% translate "لا مطالبات معتمدة في هذا المدى" %}</span>
+            <span class="empty-body">
+              {% translate "الصافي هنا هو المقبوض ناقص المصروفات وحدها. ومطالبةٌ لم تُعتمد بعدُ لا تُطرح." %}
+              {% if not report.any_cohort_has_agreement %}
+                {% translate "وإن لم تظهر مطالبات إطلاقاً فالسبب أعلى من هذا التقرير: لا دفعة مرتبطة باتفاقية شريك، والمطالبة تُبنى على الاتفاقية." %}
+              {% endif %}
+            </span>
+            {% if may_open_cohorts and not report.any_cohort_has_agreement %}
+              <a class="btn2 ghost" href="{% url 'operations:cohorts' %}">{% translate "افتح الدفعات المُشغّلة" %}</a>
+            {% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+      {% if report.by_partner %}
+        <tfoot>
+          <tr>
+            <td colspan="3">{% translate "الإجمالي" %}</td>
+            <td class="num amt">{% money report.partner_total %}</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
+      {% endif %}
     </table>
   </div>
 </div>
-{% endif %}
 {% endblock %}

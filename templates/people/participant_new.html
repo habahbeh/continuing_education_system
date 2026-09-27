@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n %}
 
 {% block title %}{% translate "طلب التحاق جديد — مركز التعليم المستمر" %}{% endblock %}
 
@@ -15,13 +15,27 @@
   ⚠️ لا يُعرض الرقم الجامعي ولا يُحجز قبل الحفظ. الديمو كان يعرضه مسبقاً؛
   هنا يُستهلَّ من عدّاد مقفل داخل المعاملة عند الحفظ (BR-001)، فرقمٌ يُعرض
   قبلها ويُخالف بعدها أسوأ من ألّا يُعرض.
+
+  الصفحة بطول شاشتين ونصف مقيسة (1844px على 1440 · 1911 على 1024 · 2086
+  على 768، بنافذة ارتفاعها 900)، ومنها ثلاثة أشياء:
+
+  * **ملخّص الأخطاء أعلاها.** ستة أخطاء موزّعة على خمس بطاقات كانت تُترك
+    ليجدها القارئ بالتمرير؛ الآن تُعدّ وتُسمّى وكلٌّ منها رابط إلى حقله.
+  * **شريط الحفظ لاصق.** كان عند 1691px من 2347 — أي خارج الشاشة دائماً.
+    وهو الآن عند 680 من 900 في الأعراض الثلاثة كلها.
+  * **حوار تأكيد قبل الحفظ.** الرقم الجامعي دائم لا يُصحَّح (BR-001)، فمراجعة
+    الاسم والوثيقة تكون قبل توليده لا بعده.
+
+  و«من يقرأ ولا يُنشئ» — حساب التدقيق، وصلاحيته «قراءة فقط» بنصّ العميل §8 —
+  يرى النموذج معطَّلاً بلا زرّ حفظ. كان يراه قابلاً للتعبئة، فيملؤه ويُرفض،
+  وتُكتب ضدّه محاولة في سجل التدقيق دعته إليها الشاشة (قواعد التحسين §3.4).
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
-    <h1>{% translate "طلب التحاق جديد" %}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{% translate "طلب التحاق جديد" %}</h1>
     <p class="sub">{% translate "نموذج طلب الالتحاق كاملاً. الحقول المعلَّمة بنجمة إلزامية، وما عداها يُملأ متى توفّر." %}</p>
   </div>
   <div class="acts">
@@ -29,16 +43,93 @@
   </div>
 </div>
 
-{% guided_help "participant-new" %}
+{% if not can_create %}
+  {# نصّ العميل §8: «حساب التدقيق — قراءة فقط لجميع الحركات». فلا زرّ حفظ، ولا حقلٌ يُغري بالتعبئة. #}
+  <div class="note info">
+    <div>
+      <strong>{% translate "نموذج للاطّلاع." %}</strong>
+      {% translate "إنشاء طلب الالتحاق من صلاحية موظف التسجيل ومدير المركز؛ حسابك يقرأ ولا يُنشئ. الحقول معروضة معطَّلة كما يراها من يملؤها." %}
+    </div>
+  </div>
+{% endif %}
+
+{% if semester_error %}
+  {# BR-001 — يُقال قبل ملء اثنين وعشرين حقلاً، لا بعدها. #}
+  <div class="note danger" role="alert">
+    <div>
+      <strong>{% translate "لا يمكن حفظ طلب التحاق الآن." %}</strong>
+      {{ semester_error }}
+      {% translate "الرقم الجامعي يُولَّد من الفصل النشط، فلا طلب يُحفظ قبل تعريفه." %}
+    </div>
+  </div>
+{% endif %}
 
 <div class="note info">
   <div>
     <strong>{% translate "الرقم الجامعي لا يُكتب هنا." %}</strong>
     {% translate "يولّده النظام عند الحفظ من الفصل الدراسي النشط: السنة (٤) + رمز النوع (١) + التسلسل (٤). وهو دائم لا يُصحَّح لاحقاً، ولذلك لا يُعرض ولا يُحجز قبل أن يُحفظ الطلب فعلاً (BR-001)." %}
+    {% if active_semester %}
+      <span class="chip ok">{% translate "الفصل النشط" %}: <span class="num" dir="ltr" translate="no">{{ active_semester.code }}</span></span>
+    {% endif %}
   </div>
 </div>
 
-<form method="post" novalidate>
+{% if error_fields %}
+  {# الصفحة بطول شاشتين ونصف: ما لا يُعدّ أعلاها يُبحَث عنه بالتمرير. #}
+  <div class="note danger err-summary" role="alert" tabindex="-1" id="err-summary" data-autofocus>
+    <div>
+      <strong>{% blocktranslate count total=error_fields|length %}حقلٌ واحد يحتاج تصحيحاً قبل الحفظ:{% plural %}{{ total }} حقول تحتاج تصحيحاً قبل الحفظ:{% endblocktranslate %}</strong>
+      <div class="err-links">
+        {% for field in error_fields %}<a href="#{{ field.id }}">{{ field.label }}</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if duplicates %}
+  {# BR-005 — الرفض يسمّي رقماً؛ والرقم وحده يعني نسخَه والبحث عنه. #}
+  <div class="note warn" role="alert">
+    <div>
+      <strong>{% translate "وثيقة الهوية مسجَّلة سلفاً." %}</strong>
+      {% translate "للمتابعة اكتب سبباً موثّقاً في «سبب المتابعة رغم تكرار وثيقة الهوية» (BR-005)، أو افتح السجل القائم:" %}
+      {# يُفتح في تبويب جديد عمداً: المغادرة من هنا تعني ترك عشرين خانة مملوءة، والمراجعة لا تستحق ذلك الثمن. #}
+      <div class="err-links">
+        {% for d in duplicates %}
+          <a href="{% url 'people:participant-detail' d.number %}" target="_blank" rel="noopener"><span class="num" dir="ltr" translate="no">{{ d.number }}</span> — {{ d.name }}</a>
+        {% endfor %}
+      </div>
+      <p class="hint">{% translate "يُفتح السجل في تبويب جديد، فلا يضيع ما ملأتَه هنا." %}</p>
+    </div>
+  </div>
+{% endif %}
+
+{# الصفحة 1911px على اللوحي و2086px على الهاتف: التمرير وحده لا يقول أين أنت ولا أين الأحمر. #}
+<nav class="sec-nav" aria-label="{% translate 'أقسام النموذج' %}">
+  {% for sec in nav_sections %}
+    <a href="#sec-{{ sec.key }}"{% if sec.errors %} class="has-error"{% endif %}>
+      <span class="n" aria-hidden="true">{{ sec.n }}</span>
+      <span class="t">{{ sec.title }}</span>
+      {% if sec.errors %}<span class="chip danger num">{{ sec.errors }}</span>{% endif %}
+    </a>
+  {% endfor %}
+</nav>
+
+<form method="post" novalidate
+      x-data="{ exempt: {% if form.is_exempt.value %}true{% else %}false{% endif %}, confirmed: false, review: {} }"
+      x-ref="form"
+      @change="exempt = $refs.form.is_exempt.checked"
+      @submit="if (!confirmed) {
+                 $event.preventDefault();
+                 const f = $refs.form;
+                 review = {
+                   name: f.name_ar.value,
+                   category: f.category.selectedOptions[0]?.text,
+                   docType: f.id_document_type.selectedOptions[0]?.text,
+                   docNumber: f.id_document_number.value,
+                   registered: f.registered_on.value,
+                 };
+                 $refs.confirm.showModal();
+               }">
   {% csrf_token %}
 
   {% if form.non_field_errors %}
@@ -46,7 +137,8 @@
   {% endif %}
   {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
 
-  <div class="card2">
+  <fieldset {% if not can_create %}disabled{% endif %} class="plain-set">
+  <div class="card2" id="sec-identity">
     <div class="card2-head">
       <span class="step-num" aria-hidden="true">1</span>
       <h2>{% translate "الفئة وتاريخ التسجيل" %}</h2>
@@ -57,18 +149,23 @@
     </div>
   </div>
 
-  <div class="card2">
+  <div class="card2" id="sec-personal">
     <div class="card2-head">
       <span class="step-num" aria-hidden="true">2</span>
       <h2>{% translate "البيانات الشخصية ووثيقة الهوية" %}</h2>
     </div>
     <div class="card2-body">
-      <p class="hint">{% translate "الاسم رباعياً بالعربية كما في وثيقة الهوية. «سبب المتابعة رغم التكرار» يبقى فارغاً إلا إذا نبّه النظام إلى سجل بنفس الوثيقة." %}</p>
+      <p class="hint">{% translate "الاسم رباعياً بالعربية كما في وثيقة الهوية." %}</p>
       {% include "partials/_form.html" with only=sections.personal %}
+      {# «سبب المتابعة» حقلُ نموذج يُرسَل مع الطلب، ولافتة التكرار فوقه تقول لماذا ظهر. #}
+      {# ويبقى مرسوماً ما دام مكتوباً وإن غابت اللافتة: حقلٌ يختفي بما فيه يمحو كلام صاحبه بلا كلمة. #}
+      {% if duplicates or form.duplicate_override_reason.value %}
+        {% include "partials/_form.html" with only=sections.duplicate_reason %}
+      {% endif %}
     </div>
   </div>
 
-  <div class="card2">
+  <div class="card2" id="sec-contact">
     <div class="card2-head">
       <span class="step-num" aria-hidden="true">3</span>
       <h2>{% translate "الاتصال والعنوان" %}</h2>
@@ -79,7 +176,7 @@
     </div>
   </div>
 
-  <div class="card2">
+  <div class="card2" id="sec-background">
     <div class="card2-head">
       <span class="step-num" aria-hidden="true">4</span>
       <h2>{% translate "المؤهل والعمل" %}</h2>
@@ -90,20 +187,73 @@
     </div>
   </div>
 
-  <div class="card2">
+  <div class="card2" id="sec-consent">
     <div class="card2-head">
       <span class="step-num" aria-hidden="true">5</span>
       <h2>{% translate "الإعفاء والتعهّد" %}</h2>
     </div>
     <div class="card2-body">
       <p class="hint">{% translate "حقول الإعفاء تُترك فارغة في الحالة العادية، ولا تُملأ إلا بموافقة رئيس الجامعة برقمها — ومتى فُعِّل الإعفاء صار رقم الموافقة إلزامياً. أمّا التعهّد فلا يُحفظ الطلب بدون الإقرار به." %}</p>
-      {% include "partials/_form.html" with only=sections.consent %}
+      {# حقلا الموافقة يُكشفان لحظة التأشير، لا بعد رفض الحفظ: القاعدة نفسها (forms.clean) تبقى حَكَماً، وهذا إظهارُها قبل أن تَرفض. وكل حقل يُرسَم مرّة واحدة. #}
+      {% include "partials/_form.html" with only=sections.consent_flag %}
+      {# لا `x-cloak` عمداً: بلا JS يبقى الحقلان ظاهرَين، فالطيّ تحسينٌ لا شرطٌ للعمل. #}
+      <div x-show="exempt">{% include "partials/_form.html" with only=sections.consent_exemption %}</div>
+      {% include "partials/_form.html" with only=sections.consent_pledge %}
     </div>
   </div>
+  </fieldset>
 
-  <div class="action-bar">
-    <button type="submit" class="btn2 primary">{% translate "حفظ الطلب" %}</button>
-    <a class="btn2" href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
-  </div>
+  {% if can_create %}
+    <div class="action-bar is-sticky">
+      <button type="submit" class="btn2 primary">{% translate "حفظ الطلب" %}</button>
+      <a class="btn2" href="{% url 'people:participants' %}">{% translate "إلغاء" %}</a>
+      <span class="spacer"></span>
+      <span class="hint">{% translate "يُولَّد الرقم الجامعي عند الحفظ، ولا يُصحَّح بعده." %}</span>
+    </div>
+
+    {# الرقم دائم لا يُصحَّح، فالمراجعة قبل توليده لا بعده — كحوار سند القبض. #}
+    <dialog class="modal confirm-modal" x-ref="confirm" dir="rtl" aria-labelledby="pn-confirm-t" @close="confirmed = false">
+      <div class="modal-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-user-plus"/></svg></span>
+        <h2 id="pn-confirm-t">{% translate "حفظ طلب الالتحاق؟" %}</h2>
+      </div>
+      <div class="modal-body">
+        <dl class="dl">
+          <dt>{% translate "الاسم" %}</dt>
+          <dd x-text="review.name || '—'"></dd>
+          <dt>{% translate "الفئة" %}</dt>
+          <dd><span class="chip" x-text="review.category || '—'"></span></dd>
+          <dt>{% translate "وثيقة الهوية" %}</dt>
+          <dd>
+            <span x-text="review.docType || '—'"></span>
+            <span class="num" dir="ltr" translate="no" x-text="review.docNumber || '—'"></span>
+          </dd>
+          <dt>{% translate "تاريخ التسجيل" %}</dt>
+          <dd class="num" dir="ltr" x-text="review.registered || '—'"></dd>
+        </dl>
+        <p class="hint">
+          {% if active_semester %}
+            {% blocktranslate with code=active_semester.code %}يُولَّد الرقم الجامعي عند الحفظ من الفصل {{ code }}، وهو دائم لا يُصحَّح لاحقاً (BR-001).{% endblocktranslate %}
+          {% else %}
+            {% translate "يُولَّد الرقم الجامعي عند الحفظ من الفصل الدراسي النشط، وهو دائم لا يُصحَّح لاحقاً (BR-001)." %}
+          {% endif %}
+        </p>
+      </div>
+      <div class="modal-acts">
+        <button type="button" class="btn2 primary" @click="confirmed = true; $refs.confirm.close(); $refs.form.requestSubmit()">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-doc-check"/></svg>
+          {% translate "احفظ وولّد الرقم" %}
+        </button>
+        <button type="button" class="btn2 ghost" @click="$refs.confirm.close()">{% translate "رجوع للتعديل" %}</button>
+      </div>
+    </dialog>
+  {% else %}
+    <div class="action-bar">
+      <a class="btn2" href="{% url 'people:participants' %}">{% translate "رجوع للسجل" %}</a>
+    </div>
+  {% endif %}
 </form>
+
+{# بعد رفض، القارئ يعود إلى أعلى الصفحة: التركيز يقف على الملخّص ليُقرأ، لا على حقل يُخمَّن. #}
+{# و`data-autofocus` على الملخّص نفسه إعلانٌ يقرأه `static/js/ui.js`، فلا سكربت في القالب ولا شرطَ حوله. #}
 {% endblock %}

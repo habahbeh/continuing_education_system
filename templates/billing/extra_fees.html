@@ -1,107 +1,256 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n l10n arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  سجل الرسوم الإضافية ونموذج تحميلها. التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل
-  ولا حارس ولا مرشّح، ولا عمود بدّل موضعه. الزرّ الوحيد على الشاشة هو «تحميل
-  الرسم» خلف `can_create` نفسه، ويُفحص ثانيةً في العرض عند الإرسال.
+  الرسوم الإضافية (§5.5): السجل وبطاقات الأنواع على اليمين، ونموذج التحميل على
+  اليسار لاصقاً. النوع بطاقات أربع، وكل بطاقة تحمل من الخدمة نفسها: المبلغ
+  المُعدّ (إعادة مادة · بدل فاقد) أو «يُكتب»، ومن يقتسمه، وأي حقل تحتاجه —
+  فلا يُرسم إلا ما يخصّ النوع المختار: اسم المادة لإعادة المادة، الاتفاق المسبق
+  للامتحان الدولي (BR-040)، وقرار القسمة نعم/لا لنوع «أخرى». والمعاينة تقول
+  قبل الحفظ: «سيُضاف بند X بمبلغ Y — يقتسمه الشريك / للمركز وحده».
 
-  المبلغان المكتوبان في الجملة العلوية — «75 ديناراً» و«15 ديناراً» — حُذفا.
-  كلاهما إعداد مؤرَّخ (`subject_repeat_fee` · `certificate_replacement_fee`)
-  يُقرأ في `default_amount_for` عند التحميل، فالنصّ الجامد يبقى على الشاشة بعد
-  أن يتغيّر الإعداد فتقول الصفحة رسماً لا يُحمَّل. وهو العيب نفسه الذي أُصلح في
-  شاشة استيفاء الدفعة (BR-020). وما يبقى صحيحاً مهما تغيّر الرقم — من يقتسم كل
-  رسم، وأن الامتحان الدولي خارج الرسوم — يبقى مكتوباً، والمبالغ تُقرأ من عمود
-  «المبلغ» حيث كل رقم هو ما حُمِّل فعلاً.
+  التحميل يُنشئ بنداً في حساب المشارك فوراً ولا يُحذف، فيسبقه حوار تأكيد. لا
+  تنبيه متصفح. الزر خلف `can_create` ويُفحص ثانيةً بـ `policy.require`.
 
-  والجملة نزلت من `.note info` إلى `.hint` تحت الجدول: الأزرق تنبيه، وشرحُ
-  قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5).
-
-  و«باتفاق مسبق» تُذكر إلى جانب نوع الرسم الذي تخصّه وحده — الامتحان الدولي —
-  لا في عمود جديد: هي شرط BR-040 على هذا النوع بعينه، ولا معنى لها على غيره.
-  والقيمة من الصف نفسه (`prior_agreement_with_participant`)، فلا حساب هنا ولا
-  حكم: الشرط يُفحص في `charge_extra_fee` وحدها.
+  المبالغ لا تُكتب جامدة في نص: كل رقم على الشاشة قُرئ من إعداده المؤرَّخ.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "الرسوم المحمَّلة خارج رسوم البرنامج، كلٌّ ببنده في حساب المشارك وبقابليته للقسمة مع الشريك." %}</p>
   </div>
 </div>
 
-{% guided_help "extra-fees" %}
-
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "الرسوم المحمَّلة" %}</h2>
-    <div class="acts">
-      <span class="count">{% blocktranslate count n=fees|length %}رسم واحد{% plural %}{{ n }} رسوم{% endblocktranslate %}</span>
-    </div>
-  </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "التسجيل" %}</th>
-          <th>{% translate "المشارك" %}</th>
-          <th>{% translate "النوع" %}</th>
-          <th>{% translate "المادة" %}</th>
-          <th class="num">{% translate "المبلغ" %}</th>
-          <th class="num">{% translate "التاريخ" %}</th>
-          <th>{% translate "قابل للقسمة" %}</th>
-          <th>{% translate "بند الرسوم" %}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for f in fees %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ f.enrollment_code }}</strong></td>
-            <td>{{ f.participant_name }}</td>
-            <td>
-              {{ f.fee_type_display }}
-              {% if f.fee_type == "INTERNATIONAL_EXAM" and f.prior_agreement_with_participant %}
-                <span class="chip ok">{% translate "باتفاق مسبق" %}</span>
-              {% endif %}
-            </td>
-            <td>{{ f.subject_name|default:"—" }}</td>
-            <td class="num">{{ f.amount }}</td>
-            <td class="num"><span dir="ltr">{{ f.charged_on|date:"Y/m/d" }}</span></td>
-            <td>
-              {% if f.is_partner_shareable %}<span class="chip ok dot">{% translate "نعم" %}</span>
-              {% else %}<span class="chip dot">{% translate "لا" %}</span>{% endif %}
-            </td>
-            <td>{{ f.charge_line_description|default:"—" }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="8" class="empty">
-            <span class="empty-title">{% translate "لا رسوم إضافية" %}</span>
-            <span class="empty-body">{% translate "الرسم الإضافي يُحمَّل على تسجيل قائم فيصير بنداً في حساب المشارك يُقبض مع بقية رسومه — إعادة مادة أو بدل فاقد شهادة أو امتحان دولي (§5.5)." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card2-body">
-    <p class="hint">{% translate "رسم إعادة المادة يقتسمه الطرفان عبر وعاء الشريك · بدل فاقد الشهادة للمركز وحده · الامتحانات الدولية خارج الرسوم ولا تُحمَّل بلا اتفاق مسبق مع المشارك. ومبلغ كل رسم هو ما يظهر في عموده، ويُقرأ عند التحميل من إعداده المؤرَّخ." %}</p>
-  </div>
+<div class="kpi-grid tiles xf-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+        <span class="foot num">{{ t.foot }} {% translate "د.أ" %}</span>
+      </span>
+    </a>
+  {% endfor %}
 </div>
 
-{% if can_create %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "تحميل رسم" %}</h2></div>
-    <div class="card2-body">
-      <form method="post">{% csrf_token %}
-        {% include "partials/_form.html" %}
-        <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "تحميل الرسم" %}</button>
+<div class="dash-cols xf-cols">
+  <div class="dash-main">
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2>{% translate "الرسوم المحمَّلة" %}</h2>
+        <div class="acts">
+          <span class="count">{{ fees|length|ar_count:"رسم واحد|رسمان|رسوم|رسماً" }}</span>
         </div>
+      </div>
+
+      {# البحث فوري: كل تغيير يعيد رسم الجدول (htmx)؛ وبلا JS يعمل بمفتاح Enter. #}
+      <form method="get" class="filterbar xf-filters" role="search" id="xf-form"
+            hx-get="{% url 'billing:extra-fees' %}" hx-target="#xf-results" hx-select="#xf-results" hx-swap="outerHTML"
+            hx-trigger="input changed delay:350ms from:#f_q, change from:#f_type" hx-push-url="true" hx-indicator="#xf-busy">
+        {% if enrollment_code %}<input type="hidden" name="enrollment" value="{{ enrollment_code }}">{% endif %}
+        <div class="fld grow">
+          <label for="f_q">{% translate "بحث" %}</label>
+          <input type="search" name="q" value="{{ query }}" id="f_q" spellcheck="false" placeholder="{% translate 'رمز التسجيل، اسم المشارك أو رقمه، اسم المادة…' %}">
+        </div>
+        <div class="fld">
+          <label for="f_type">{% translate "النوع" %}</label>
+          <select name="type" id="f_type">
+            <option value="">{% translate "الكل" %}</option>
+            {% for c in type_cards %}<option value="{{ c.code }}"{% if fee_type == c.code %} selected{% endif %}>{{ c.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <span class="busy" id="xf-busy" aria-hidden="true"></span>
+        {% if is_filtered %}<a class="btn2 ghost" href="{% url 'billing:extra-fees' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
       </form>
+
+      <div id="xf-results">
+        {% if enrollment_code %}
+          <p class="hint boxed xf-scope">{% translate "رسوم التسجيل" %} <span class="num" dir="ltr">{{ enrollment_code }}</span> {% translate "وحده" %} — <a class="row-link" href="{% url 'billing:extra-fees' %}">{% translate "كل الرسوم" %}</a></p>
+        {% endif %}
+        <div class="tbl-wrap">
+          <table class="tbl xf-tbl">
+            <thead>
+              <tr>
+                <th>{% translate "التسجيل" %}</th>
+                <th>{% translate "المشارك" %}</th>
+                <th>{% translate "النوع" %}</th>
+                <th class="num">{% translate "المبلغ" %}</th>
+                <th class="num">{% translate "التاريخ" %}</th>
+                <th>{% translate "القسمة" %}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in fees %}
+                <tr>
+                  <td class="code-cell"><a class="row-link num" dir="ltr" translate="no" href="{% url 'operations:account' f.enrollment_code %}">{{ f.enrollment_code }}</a><small class="muted sub-line">{{ f.program_name }}</small></td>
+                  <td class="who-cell">{{ f.participant_name }}<small class="muted num sub-line" dir="ltr">{{ f.participant_number }}</small></td>
+                  <td>
+                    {{ f.fee_type_display }}
+                    {% if f.fee_type == "INTERNATIONAL_EXAM" and f.prior_agreement_with_participant %}<span class="chip ok">{% translate "باتفاق مسبق" %}</span>{% endif %}
+                    <small class="muted sub-line">{% if f.subject_name %}{{ f.subject_name }}{% else %}{{ f.charge_line_description|default:"—" }}{% endif %}</small>
+                  </td>
+                  <td class="num amt">{{ f.amount }}</td>
+                  <td class="num"><span dir="ltr">{{ f.charged_on|date:"Y/m/d" }}</span><small class="muted sub-line">{{ f.created_by }}</small></td>
+                  <td>
+                    {% if f.is_partner_shareable %}<span class="chip ok dot">{% translate "يقتسمه الشريك" %}</span>
+                    {% else %}<span class="chip dot">{% translate "للمركز وحده" %}</span>{% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="6" class="empty">
+                  <span class="empty-title">{% if is_filtered %}{% translate "لا رسوم تطابق التصفية" %}{% else %}{% translate "لا رسوم إضافية" %}{% endif %}</span>
+                  <span class="empty-body">{% if is_filtered %}{% translate "وسّع البحث أو ألغِ التصفية." %}{% else %}{% translate "الرسم الإضافي يُحمَّل على تسجيل قائم فيصير بنداً في حساب المشارك يُقبض مع بقية رسومه — إعادة مادة أو بدل فاقد شهادة أو امتحان دولي (§5.5)." %}{% endif %}</span>
+                  {% if is_filtered %}<a class="btn2 ghost empty-act" href="{% url 'billing:extra-fees' %}">{% translate "كل الرسوم" %}</a>{% endif %}
+                </td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card2-body">
+        <p class="hint">{% translate "رسم إعادة المادة يقتسمه الطرفان عبر وعاء الشريك · بدل فاقد الشهادة للمركز وحده · الامتحانات الدولية خارج الرسوم ولا تُحمَّل بلا اتفاق مسبق مع المشارك. ومبلغ كل رسم هو ما يظهر في عموده، ويُقرأ عند التحميل من إعداده المؤرَّخ." %}</p>
+      </div>
     </div>
   </div>
-{% endif %}
+
+  <div class="dash-side">
+    {% if can_create %}
+      <div class="card2 next-card tone-info xf-side" id="charge"
+           x-data="{ en: '{{ form.enrollment_code.value|default:''|escapejs }}', kind: '{{ form.fee_type.value|default:''|escapejs }}', amt: '{{ form.amount.value|default:''|escapejs }}', subj: '{{ form.subject_name.value|default:''|escapejs }}', agreed: {% if form.prior_agreement_with_participant.value %}true{% else %}false{% endif %}, share: '{{ form.is_partner_shareable.value|default:''|escapejs }}', on: '{{ form.charged_on.value|date:'Y-m-d'|default:form.charged_on.value|default:''|escapejs }}',
+                     name: '', prog: '', confirmed: false,
+                     num(v) { return Number(String(v).replace(',', '.')) || 0 },
+                     card() { const r = this.kind ? $root.querySelector('input[name=fee_type][value=' + this.kind + ']') : null; if (!r) return {}; const d = r.dataset; return { label: d.label, amount: d.amount, share: d.share, subject: d.subject === '1', agreement: d.agreement === '1', decision: d.decision === '1' } },
+                     pick(el) { const o = el.options[el.selectedIndex]; const d = o ? o.dataset : {}; this.en = el.value; this.name = d.name || ''; this.prog = d.prog || '' },
+                     choose(k) { this.kind = k; const c = this.card(); this.amt = c.amount ? Number(c.amount).toFixed(3) : '' },
+                     a() { return this.num(this.amt) },
+                     shareable() { const c = this.card(); return c.share === '1' ? true : c.share === '0' ? false : (this.share === 'true' ? true : this.share === 'false' ? false : null) },
+                     ready() { const c = this.card(); return this.en && this.kind && this.a() > 0 && (!c.subject || this.subj.trim()) && (!c.agreement || this.agreed) && (!c.decision || this.share) },
+                     fmt(v) { return Number(v).toFixed(3) } }"
+           x-init="pick($refs.sel); if (kind && !amt) choose(kind)">
+        <div class="card2-head">
+          <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+          <h2>{% translate "تحميل رسم" %}</h2>
+        </div>
+        <div class="card2-body">
+          <form method="post" id="fee-form" x-ref="form" @submit="if (!confirmed) { $event.preventDefault(); $refs.confirm.showModal() }">
+{% csrf_token %}
+            {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+
+            <div class="step-lbl"><span class="n">1</span>{% translate "التسجيل" %}</div>
+            <div class="fld{% if form.enrollment_code.errors %} has-error{% endif %}">
+              <label for="id_enrollment_code">{{ form.enrollment_code.label }}<span class="req" aria-hidden="true">*</span></label>
+              <select id="id_enrollment_code" name="enrollment_code" required x-ref="sel" @change="pick($el)">
+                <option value="">{% translate "— اختر تسجيلاً —" %}</option>
+                {% for r in candidates %}
+                  <option value="{{ r.code }}"{% if form.enrollment_code.value == r.code %} selected{% endif %} data-name="{{ r.participant_name }}" data-prog="{{ r.program_name }}">{{ r.code }} — {{ r.participant_name }} · {{ r.program_name }} ({{ r.status_display }})</option>
+                {% endfor %}
+              </select>
+              {% for e in form.enrollment_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">2</span>{% translate "نوع الرسم" %}</div>
+            <div class="fld{% if form.fee_type.errors %} has-error{% endif %}">
+              <div class="seg-cards two xf-types" role="radiogroup" aria-label="{{ form.fee_type.label }}">
+                {% for c in type_cards %}
+                  <label class="seg-card tone-{{ c.tone }}" :class="{ 'is-on': kind === '{{ c.code }}' }">
+                    <input type="radio" name="fee_type" value="{{ c.code }}" class="seg-radio" required :checked="kind === '{{ c.code }}'" @change="choose('{{ c.code }}')"
+                           data-label="{{ c.label }}" data-amount="{% if c.default_amount is not None %}{{ c.default_amount|unlocalize }}{% endif %}" data-share="{% if c.shareable is True %}1{% elif c.shareable is False %}0{% endif %}"
+                           data-subject="{% if c.subject %}1{% else %}0{% endif %}" data-agreement="{% if c.agreement %}1{% else %}0{% endif %}" data-decision="{% if c.decision %}1{% else %}0{% endif %}">
+                    <span class="t">{{ c.label }}</span>
+                    <span class="c">{% if c.default_amount is not None %}<span class="num">{{ c.default_amount }}</span> {% translate "د.أ" %}{% else %}{% translate "المبلغ يُكتب" %}{% endif %} · {% if c.shareable is True %}{% translate "يقتسمه الشريك" %}{% elif c.shareable is False %}{% translate "للمركز" %}{% else %}{% translate "بقرار" %}{% endif %}</span>
+                  </label>
+                {% endfor %}
+              </div>
+              {% for e in form.fee_type.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="fld{% if form.subject_name.errors %} has-error{% endif %}" x-show="card().subject" x-cloak>
+              <label for="id_subject_name">{{ form.subject_name.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="id_subject_name" name="subject_name" maxlength="150" x-model="subj" :required="card().subject" value="{{ form.subject_name.value|default:'' }}" placeholder="{% translate 'المادة التي تُعاد' %}">
+              {% for e in form.subject_name.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="fld{% if form.prior_agreement_with_participant.errors %} has-error{% endif %}" x-show="card().agreement" x-cloak>
+              <label class="check-row"><input type="checkbox" name="prior_agreement_with_participant" value="on" x-model="agreed"> {{ form.prior_agreement_with_participant.label }}<span class="req" aria-hidden="true">*</span></label>
+              <div class="help">{% translate "الامتحانات الدولية خارج الرسوم ولا تُحمَّل بلا اتفاق مسبق مع المشارك (BR-040)." %}</div>
+              {% for e in form.prior_agreement_with_participant.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="fld{% if form.is_partner_shareable.errors %} has-error{% endif %}" x-show="card().decision" x-cloak>
+              <span class="lbl">{{ form.is_partner_shareable.label }}<span class="req" aria-hidden="true">*</span></span>
+              <div class="seg-btns" role="radiogroup" aria-label="{{ form.is_partner_shareable.label }}">
+                <label class="seg-btn" :class="{ 'is-on': share === 'true' }"><input type="radio" name="is_partner_shareable" value="true" class="seg-radio" x-model="share"> {% translate "نعم، يقتسمه الشريك" %}</label>
+                <label class="seg-btn" :class="{ 'is-on': share === 'false' }"><input type="radio" name="is_partner_shareable" value="false" class="seg-radio" x-model="share"> {% translate "لا، للمركز وحده" %}</label>
+              </div>
+              {% for e in form.is_partner_shareable.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+
+            <div class="step-lbl" :class="{ 'is-off': !kind }"><span class="n">3</span>{% translate "المبلغ والتاريخ" %}</div>
+            <div class="grid2">
+              <div class="fld{% if form.amount.errors %} has-error{% endif %}">
+                <label for="id_amount">{{ form.amount.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="number" step="0.001" min="0" inputmode="decimal" id="id_amount" name="amount" dir="ltr" x-model="amt" required value="{{ form.amount.value|default:'' }}" placeholder="0.000">
+                {% for e in form.amount.errors %}<div class="err">{{ e }}</div>{% endfor %}
+                <div class="help live" x-cloak>
+                  <span x-show="card().amount && a() === num(card().amount)">{% translate "القيمة المُعدّة لهذا النوع." %}</span>
+                  <span class="is-warn" x-show="card().amount && a() !== num(card().amount)">{% translate "يخالف القيمة المُعدّة" %} (<b class="num" x-text="fmt(card().amount || 0)"></b>).</span>
+                  <span x-show="kind && !card().amount">{% translate "لا قيمة مُعدّة لهذا النوع؛ يُكتب المبلغ." %}</span>
+                </div>
+              </div>
+              <div class="fld{% if form.charged_on.errors %} has-error{% endif %}">
+                <label for="id_charged_on">{{ form.charged_on.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="date" id="id_charged_on" name="charged_on" required x-model="on" value="{{ form.charged_on.value|date:'Y-m-d'|default:form.charged_on.value|default:'' }}">
+                {% for e in form.charged_on.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+            </div>
+
+            <div class="xf-preview" x-cloak x-show="en && kind && a() > 0">
+              {% translate "سيُضاف إلى حساب" %} <b x-text="name"></b> {% translate "بند" %} «<span x-text="card().label"></span>» {% translate "بمبلغ" %} <b class="num" x-text="fmt(a())"></b> —
+              <span x-show="shareable() === true">{% translate "يقتسمه الشريك عبر وعاء المطالبة." %}</span>
+              <span x-show="shareable() === false">{% translate "للمركز وحده." %}</span>
+              <span x-show="shareable() === null">{% translate "قرّر القسمة أولاً." %}</span>
+            </div>
+
+            <div class="form-acts">
+              <button class="btn2 primary" type="submit" :disabled="!ready()">{% translate "تحميل الرسم" %}</button>
+            </div>
+          </form>
+
+          <dialog class="modal confirm-modal" x-ref="confirm" dir="rtl" aria-labelledby="xf-confirm-t" @close="confirmed = false">
+            <div class="modal-head">
+              <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+              <h2 id="xf-confirm-t">{% translate "تأكيد تحميل الرسم" %}</h2>
+            </div>
+            <div class="modal-body">
+              <div class="confirm-amt"><b class="num" x-text="fmt(a())"></b> <small>{% translate "د.أ" %}</small></div>
+              <dl class="dl">
+                <dt>{% translate "التسجيل" %}</dt><dd><span class="num" dir="ltr" x-text="en"></span> — <span x-text="name"></span> · <span x-text="prog"></span></dd>
+                <dt>{% translate "النوع" %}</dt><dd><span x-text="card().label"></span><span x-show="subj"> — <span x-text="subj"></span></span></dd>
+                <dt>{% translate "القسمة" %}</dt><dd><span x-show="shareable() === true">{% translate "يقتسمه الشريك" %}</span><span x-show="shareable() === false">{% translate "للمركز وحده" %}</span></dd>
+                <dt>{% translate "التاريخ" %}</dt><dd><span class="num" dir="ltr" x-text="on"></span></dd>
+              </dl>
+              <p class="hint">{% translate "يصير الرسم بنداً في حساب المشارك فوراً ويُقبض مع بقية رسومه؛ لا يُحذف بعد التحميل." %}</p>
+            </div>
+            <div class="modal-acts">
+              <button class="btn2 primary" type="button" @click="confirmed = true; $refs.confirm.close(); $refs.form.requestSubmit()">{% translate "تحميل الرسم" %}</button>
+              <button class="btn2 ghost" type="button" @click="$refs.confirm.close()">{% translate "رجوع" %}</button>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    {% else %}
+      <div class="card2">
+        <div class="card2-head"><h2>{% translate "تحميل رسم" %}</h2></div>
+        <div class="card2-body">
+          <p class="hint">{% translate "تحميل الرسوم الإضافية لمدير المركز والموظف المالي (§3.4/21)؛ هذه الشاشة للاطلاع من هنا." %}</p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

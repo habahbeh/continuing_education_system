@@ -491,6 +491,18 @@ class Refund(models.Model):
         blank=True,
         related_name="refunds_approved",
     )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    # A refusal is a decision (WORKFLOWS §4): who, when and why sit on the row
+    # the screen reads, not only in the audit trail.
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="refunds_rejected",
+    )
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason_ar = models.TextField(blank=True)
     executed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

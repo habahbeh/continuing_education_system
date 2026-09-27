@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from django import forms
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.people.models import Gender, IdDocumentType, ParticipantCategory
@@ -19,6 +20,28 @@ from apps.people.services import reference_data
 #: Typed loosely on purpose: choice labels are lazily translated strings,
 #: which are not ``str`` until they are rendered.
 BLANK: list[tuple[str, Any]] = [("", "—")]
+
+
+def _today() -> Any:
+    """Callable, not a value: a module imported at boot must not freeze a date."""
+    return timezone.localdate()
+
+
+#: The three dates this form asks for, none of which can lie in the future: a
+#: birth date, the day an application was handed in, and the day a president
+#: signed an exemption have all already happened. Nothing enforced that, so
+#: «2099» was a legal answer in a registry whose rows go to the ministry.
+#:
+#: The bound is the widget's ``max``, not a new validation rule — the service
+#: and the database decide what is accepted, exactly as before — and it is set
+#: per REQUEST in ``__init__``. Setting it in the class body would read the
+#: clock once, when the module is imported, and a server running since Monday
+#: would then refuse today in the browser's own date picker.
+PAST_ONLY_DATES: tuple[str, ...] = (
+    "date_of_birth",
+    "registered_on",
+    "exemption_approval_date",
+)
 
 
 class ParticipantForm(forms.Form):
@@ -39,7 +62,14 @@ class ParticipantForm(forms.Form):
         help_text=_("إن تكرّر الرقم عرض النظام السجل المطابق وسمح بالمتابعة بسبب موثّق (BR-005)."),
     )
 
-    nationality = forms.CharField(max_length=60, required=False, label=_("الجنسية"))
+    # The client's requirements list «الجنسية» as a field and — unlike the
+    # qualification, which §2.2 enumerates — never enumerates its values. So it
+    # stays free text: inventing a vocabulary the client did not approve is
+    # what ``reference_data`` exists to avoid. A default is not a vocabulary;
+    # it is the common answer, and it clears with one keystroke.
+    nationality = forms.CharField(
+        max_length=60, required=False, label=_("الجنسية"), initial=_("الأردن")
+    )
     gender = forms.ChoiceField(
         choices=BLANK + list(Gender.choices), required=False, label=_("الجنس")
     )
@@ -57,10 +87,16 @@ class ParticipantForm(forms.Form):
     email = forms.EmailField(required=False, label=_("البريد الإلكتروني"))
     employer = forms.CharField(max_length=150, required=False, label=_("جهة العمل"))
 
+    # Required, and the answer is today on all but the rare back-dated entry.
+    # It was arriving empty, so every application cost the clerk one hand-typed
+    # date the system already knew. ``initial`` is a suggestion the clerk
+    # overwrites, not a value the form imposes — and on the edit screen the
+    # stored date wins, because the view passes its own ``initial``.
     registered_on = forms.DateField(
         label=_("تاريخ التسجيل"),
         widget=forms.DateInput({"type": "date"}),
-        help_text=_("تاريخ تقديم طلب الالتحاق."),
+        initial=_today,
+        help_text=_("تاريخ تقديم طلب الالتحاق. اليوم مقترح، ويُعدَّل عند إدخال طلب سابق."),
     )
 
     no_refund_pledge_accepted = forms.BooleanField(
@@ -102,6 +138,16 @@ class ParticipantForm(forms.Form):
         city = cast(forms.ChoiceField, self.fields["city"])
         qualification.choices = BLANK + list(reference_data.qualifications())
         city.choices = BLANK + list(reference_data.cities())
+
+        # Read the clock here, not in the class body — see PAST_ONLY_DATES.
+        today = _today().isoformat()
+        for name in PAST_ONLY_DATES:
+            self.fields[name].widget.attrs["max"] = today
+
+        # The first field anyone fills, and the one the rest depend on: the
+        # category decides the price at enrolment and the type digit inside a
+        # permanent number (BR-002).
+        self.fields["category"].widget.attrs["autofocus"] = True
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean() or {}

@@ -107,18 +107,29 @@
 
 ## 9. الاختبارات — بعد كل شاشة
 
-بوابة إلزامية بعد كل صفحة، لا بعد المرحلة كلها:
+بوابة إلزامية بعد كل صفحة، لا بعد المرحلة كلها — **على درجتين**، لأن بوابةً
+تأخذ ثلاث دقائق بعد كل تعديل هي بوابة تُتخطّى:
+
+**أ — بوابة الشاشة، بعد كل شاشة:**
 
 ```bash
-pytest tests/test_demo_readiness.py apps/people/tests/test_navigation.py \
-       apps/people/tests/test_permission_matrix.py
-pytest
-ruff check .
-ruff format --check .
-mypy apps config
-python manage.py makemigrations --check
-git diff --check
+scripts/screen_gate.sh <ملفات اختبار الشاشة>
 ```
+
+تشغّل ملفات الشاشة التي تمرّرها، وثلاثة حرّاس يمسكون ما يتسرّب من شاشة إلى
+أخرى (`test_architecture` · `test_ui_regressions` · `test_demo_readiness`)،
+ثم `ruff` و`mypy` و`makemigrations --check` و`git diff --check`. مصفوفة
+الصلاحيات تُضاف تلقائياً إن مُسّ `apps/people/permissions/`.
+
+**ب — السويت الكاملة، قبل الـ commit وحده:**
+
+```bash
+pytest -q
+```
+
+**ملفُّ الشاشة وحده لا يكفي.** الشاشة تقرأ خدمةً يقرأها غيرها، وتُبنى على
+`app.css` تشترك فيه كل الشاشات؛ والحرّاس الثلاثة هم ما يُثبت أن تحسين شاشةٍ
+لم يكسر جارتها.
 
 يُضاف لكل شاشة ما يُثبت:
 

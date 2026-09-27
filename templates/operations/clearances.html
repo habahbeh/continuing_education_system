@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
@@ -26,7 +26,7 @@
     القائمة، لا إنذار؛
   * العمود الثامن كان بلا اسم، فسُمّي بـ `aria-label` — لا `.sr-only`، فهي
     `position:absolute` بلا جدٍّ مموضَع وتجرّ الصفحة عرضاً في RTL؛
-  * تاريخ الفتح يُصاغ Y/m/d داخل `dir="ltr"`، ورمز البراءة ورقم المشارك
+  * تاريخ الفتح يُصاغ d/m/Y داخل `dir="ltr"`، ورمز البراءة ورقم المشارك
     `translate="no"` فلا يترجمهما المتصفّح؛
   * شريحة الحالة أخذت `dot` كما في كل سجلّ مصقول؛
   * الحالة الفارغة كانت تقول ما البراءة ولا تقول الخطوة التالية، فصارت تدلّ
@@ -44,12 +44,11 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الإنهاء والشهادات" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "إخلاء طرف المشارك قبل الشهادة: أين وقفت كل براءة، ومَن الخطوة القائمة عليه." %}</p>
   </div>
 </div>
 
-{% guided_help "clearance" %}
 
 <p class="hint boxed">
   {% translate "نموذج CS Fm 7.18 Rev A — خطوات لا تُعاد ترتيبها: استرجاع العُهد (المركز) · التحقق المالي بتوقيعين (المالية) · تسليم الشهادة (المركز) لبراءة التخرج وحدها، فلا شهادة لمنسحب أو مفصول. ولا شهادة بلا براءة ذمة مكتملة." %}
@@ -67,7 +66,7 @@
   <div class="card2-head">
     <h2>{% translate "البراءات المسجَّلة" %}</h2>
     <div class="acts">
-      <span class="count muted">{% blocktranslate count n=clearances|length %}براءة واحدة{% plural %}{{ n }} براءات{% endblocktranslate %}</span>
+      <span class="count muted">{{ clearances|length|ar_count:"براءة واحدة|براءتان|براءات|براءة" }}</span>
     </div>
   </div>
   <div class="tbl-wrap">
@@ -91,7 +90,7 @@
             <td>{{ c.participant_name }}<br><small class="muted" dir="ltr" translate="no">{{ c.participant_number }}</small></td>
             <td>{{ c.program_name }}</td>
             <td>{{ c.case_type_display }}</td>
-            <td class="num"><span dir="ltr">{{ c.opened_on|date:"Y/m/d" }}</span></td>
+            <td class="num"><span dir="ltr">{{ c.opened_on|date:"d/m/Y" }}</span></td>
             <td>{% if c.pending_step %}{{ c.pending_step }} — {{ c.pending_step_name }}{% else %}—{% endif %}</td>
             <td><span class="chip {{ c.status|status_tone }} dot">{{ c.status_display }}</span></td>
             <td class="acts">
@@ -127,9 +126,11 @@
       </form>
 
       {% if confirm %}
-        {# خطوة التأكيد: ما طُلب في الإرسال الأول، مقروءاً من الخدمة، بانتظار إرسال ثانٍ يحمل confirmed.
-           حوارٌ أصلي: `open` يجعله لوحةً في الصفحة بلا سكربت، والسكربت يرفعه إلى حوارٍ مشروط
-           (Escape يغلقه، والتركيز يدخل إليه ويعود إلى الزرّ عند الإغلاق). #}
+        {% comment %}
+          خطوة التأكيد: ما طُلب في الإرسال الأول، مقروءاً من الخدمة، بانتظار إرسال ثانٍ يحمل confirmed.
+          حوارٌ أصلي: `open` يجعله لوحةً في الصفحة بلا سكربت، والسكربت يرفعه إلى حوارٍ مشروط
+          (Escape يغلقه، والتركيز يدخل إليه ويعود إلى الزرّ عند الإغلاق).
+        {% endcomment %}
         <dialog class="modal" id="clearance-confirm" open
                 aria-labelledby="clearance-confirm-title" aria-describedby="clearance-confirm-copy">
           <div class="modal-head"><h2 id="clearance-confirm-title">{% translate "تأكيد فتح براءة الذمة" %}</h2></div>
@@ -140,7 +141,7 @@
               <dt>{% translate "المشارك" %}</dt><dd>{{ confirm.participant_name }}</dd>
               <dt>{% translate "حالة التسجيل" %}</dt><dd>{{ confirm.status_display }}</dd>
               <dt>{% translate "سبب البراءة" %}</dt><dd><span class="chip">{{ confirm.case_type_display }}</span></dd>
-              <dt>{% translate "تفتح في" %}</dt><dd dir="ltr">{{ confirm.opened_on|date:"Y/m/d" }}</dd>
+              <dt>{% translate "تفتح في" %}</dt><dd dir="ltr">{{ confirm.opened_on|date:"d/m/Y" }}</dd>
             </dl>
           </div>
           <div class="modal-acts">

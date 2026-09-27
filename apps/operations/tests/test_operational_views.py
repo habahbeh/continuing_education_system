@@ -141,12 +141,12 @@ def test_an_unapproved_cohort_is_not_offered_and_cannot_be_forced(
     cohort = make_cohort("SC-NET", code="CO-UNAPPROVED")
     participant = make_participant(index=41)
 
-    listing = signed_in(registrar).get(reverse("operations:enrollments"))
-    offered = dict(listing.context["form"].fields["cohort_code"].choices)
+    form_page = signed_in(registrar).get(reverse("operations:enrollment-new"))
+    offered = dict(form_page.context["form"].fields["cohort_code"].choices)
     assert cohort.code not in offered
 
     response = signed_in(registrar).post(
-        reverse("operations:enrollments"),
+        reverse("operations:enrollment-new"),
         {
             "participant_number": participant.participant_number,
             "cohort_code": cohort.code,
@@ -172,7 +172,7 @@ def test_an_approved_cohort_enrols_and_raises_the_charges(
     participant = make_participant(index=42)
 
     response = signed_in(registrar).post(
-        reverse("operations:enrollments"),
+        reverse("operations:enrollment-new"),
         {
             "participant_number": participant.participant_number,
             "cohort_code": cohort.code,
@@ -207,8 +207,8 @@ def test_enrolling_the_same_participant_twice_is_a_message_not_a_crash(
         "enrolled_on": "2026-09-20",
     }
 
-    signed_in(registrar).post(reverse("operations:enrollments"), posted, follow=True)
-    response = signed_in(registrar).post(reverse("operations:enrollments"), posted, follow=True)
+    signed_in(registrar).post(reverse("operations:enrollment-new"), posted, follow=True)
+    response = signed_in(registrar).post(reverse("operations:enrollment-new"), posted, follow=True)
 
     assert response.status_code == 200
     assert "لا يمكن إنشاء تسجيل مكرر" in response.content.decode("utf-8")
@@ -222,8 +222,8 @@ def test_the_enrolment_screen_does_not_ask_for_a_code(signed_in, registrar):
     ``EN-AHMAD-001`` came from a QA script. In production the code identifies
     the row in the ministry's correspondence, so it is minted, not recalled.
     """
-    listing = signed_in(registrar).get(reverse("operations:enrollments"))
-    assert "code" not in listing.context["form"].fields
+    form_page = signed_in(registrar).get(reverse("operations:enrollment-new"))
+    assert "code" not in form_page.context["form"].fields
 
 
 def test_approval_without_a_voucher_is_refused_on_screen(
@@ -612,12 +612,32 @@ def test_the_dismissal_dialog_requires_decision_and_reason_and_is_red(
 
 
 def test_the_dialogs_are_wired_for_the_keyboard(signed_in, manager, active_enrollment) -> None:
+    """
+    Two halves, and both are asserted: the page declares the wiring, and the
+    shared script performs it.
+
+    The behaviour used to be copied into this template, so the assertion could
+    read it here. It lives in ``static/js/ui.js`` now — one copy for every
+    screen — which is why the page is checked for the contract and the file for
+    the behaviour. Checking only the page would pass on a screen that declares
+    ``data-opens`` and loads nothing to answer it.
+    """
+    from pathlib import Path
+
+    from django.conf import settings
+
     html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
-    assert "showModal()" in html
-    assert "opener.focus()" in html, "focus returns to the opener on close"
-    assert 'closest("dialog")?.close()' in html
+
+    assert "js/ui.js" in html, "the page declares openers but loads nothing to open them"
     for action in ("complete", "withdraw", "dismiss"):
+        assert f'data-opens="{action}-{active_enrollment.code}"' in html
         assert f'aria-labelledby="{action}-{active_enrollment.code}-t"' in html
+    assert "data-closes" in html
+
+    script = (Path(settings.BASE_DIR) / "static" / "js" / "ui.js").read_text(encoding="utf-8")
+    assert "showModal()" in script
+    assert "opener.focus()" in script, "focus returns to the opener on close"
+    assert 'closest("dialog")?.close()' in script
 
 
 def test_the_registrar_gets_only_the_dismissal_dialog(
@@ -636,8 +656,350 @@ def test_a_finished_row_has_no_menu_and_no_dialogs(signed_in, manager, active_en
         actor=manager, enrollment=active_enrollment, reason_ar="سبب"
     )
     html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
-    assert "إجراءات الحالة" not in html
-    assert "<dialog" not in html
+    # Scoped to the page's own body: the shell carries the quick-jump palette,
+    # which is a <dialog> on every screen and is not this row drawing one.
+    body = html.split('id="main"', 1)[1].split("</main>", 1)[0]
+    assert "إجراءات الحالة" not in body
+    assert "<dialog" not in body
+
+
+# ---------------------------------------------------------------------------
+# The creation card at the foot of the page — what it suggests, and what it
+# says when it refuses
+# ---------------------------------------------------------------------------
+def test_the_enrolment_date_is_offered_as_today(signed_in, registrar) -> None:
+    """
+    The answer is today on all but the rare back-dated entry, and the system
+    knows today. The admission form was fixed for exactly this; the screen
+    used more often than it was still asking the clerk to type it.
+    """
+    from django.utils import timezone
+
+    html = signed_in(registrar).get(reverse("operations:enrollment-new")).content.decode()
+    today = timezone.localdate().isoformat()
+
+    assert 'name="enrolled_on"' in html
+    assert f'value="{today}"' in html, "today is not suggested"
+
+
+def test_the_suggested_date_is_read_per_request_and_not_frozen_at_import(
+    signed_in, registrar
+) -> None:
+    """
+    A module imported at boot must not freeze a date: a server running since
+    Monday would suggest Monday all week. The initial is a callable.
+    """
+    from apps.operations.forms import EnrollmentForm
+
+    assert callable(EnrollmentForm.base_fields["enrolled_on"].initial)
+
+
+def test_an_empty_post_is_still_a_submission(signed_in, registrar) -> None:
+    """
+    ``request.POST or None`` read an empty body as "not submitted", so a POST
+    carrying nothing came back as a pristine form with no error, no message
+    and a silent 200 — the reader could not tell whether anything had been
+    recorded. The method decides, not the payload.
+    """
+    response = signed_in(registrar).post(reverse("operations:enrollment-new"), {})
+
+    form = response.context["form"]
+    assert form.is_bound, "an empty POST is a submission that failed, not a page visit"
+    assert set(form.errors) == {"participant_number", "cohort_code", "enrolled_on"}
+
+
+def test_a_refusal_counts_and_names_every_field_at_the_top(
+    signed_in, registrar, active_enrollment
+) -> None:
+    """
+    The creation card sits below the fold on a page two and a half screens
+    tall, and a rejected field draws its message inside the card. Without a
+    summary the refusal landed the reader at the top of a page that looked
+    unchanged.
+    """
+    response = signed_in(registrar).post(
+        reverse("operations:enrollment-new"),
+        {"participant_number": active_enrollment.participant.participant_number},
+    )
+    html = response.content.decode()
+
+    assert 'id="err-summary"' in html
+    assert "حقول تحتاج تصحيحاً قبل التسجيل" in html
+    # Every named field is a link to the control that carries the error.
+    for name in ("cohort_code", "enrolled_on"):
+        assert f'href="#id_{name}"' in html
+    assert "participant_number" not in html.split('id="err-summary"', 1)[1].split("</div>", 2)[1]
+
+
+def test_a_page_that_refused_nothing_carries_no_summary(signed_in, registrar) -> None:
+    """A banner that is always there is a banner nobody reads."""
+    html = signed_in(registrar).get(reverse("operations:enrollments")).content.decode()
+
+    assert 'id="err-summary"' not in html
+
+
+# ---------------------------------------------------------------------------
+# The register's own navigation — the row is a junction, not a dead end
+# ---------------------------------------------------------------------------
+def test_a_search_keeps_the_participant_it_was_filtered_by(
+    signed_in, manager, active_enrollment
+) -> None:
+    """
+    The participants register links here as ?participant=<number>, and the
+    search form used to carry the cohort and the status filters and not that
+    one — so the first search silently widened the list back to everything,
+    with no word about the filter it had dropped.
+    """
+    url = reverse("operations:enrollments")
+    client = signed_in(manager)
+    number = active_enrollment.participant.participant_number
+
+    filtered = client.get(url, {"participant": number})
+    form = filtered.content.decode().split('class="filterbar"', 1)[1].split("</form>", 1)[0]
+    assert f'name="participant" value="{number}"' in form
+
+    searched = client.get(url, {"participant": number, "q": active_enrollment.code})
+    assert [row["code"] for row in searched.context["enrollments"]] == [active_enrollment.code]
+    assert any(label == "المشارك" for label, _value in searched.context["active_filters"])
+
+
+def test_the_row_links_to_the_file_and_the_cohort_for_a_reader_who_may_open_them(
+    signed_in, manager, active_enrollment
+) -> None:
+    """The two ways out of a row: whose enrolment this is, and onto what."""
+    row = _row_of(
+        signed_in(manager).get(reverse("operations:enrollments")).content.decode(),
+        active_enrollment.code,
+    )
+    number = active_enrollment.participant.participant_number
+
+    assert reverse("people:participant-detail", args=[number]) in row
+    assert f'{reverse("operations:cohorts")}?q={active_enrollment.cohort.code}' in row
+
+
+def test_the_row_offers_no_cohort_link_to_a_reader_the_register_would_refuse(
+    signed_in, seeded_settings, active_enrollment
+) -> None:
+    """
+    §3 — a link into a refusal spends a click and files a DENIED_ATTEMPT
+    (BR-085). The finance manager reads enrolments and not the cohort
+    register, so the code stays text for them while the name still links.
+    """
+    from apps.people.models import Role, User
+
+    finance_manager = User.objects.create_user(
+        username="finmgr.rowlink", password=PASSWORD, role=Role.FINANCE_MANAGER
+    )
+    row = _row_of(
+        signed_in(finance_manager).get(reverse("operations:enrollments")).content.decode(),
+        active_enrollment.code,
+    )
+
+    assert reverse("operations:cohorts") not in row
+    assert active_enrollment.cohort.code in row  # …the code is still printed
+
+
+def test_the_row_is_one_line_and_what_left_it_is_a_click_away(
+    signed_in, manager, active_enrollment
+) -> None:
+    """
+    The grid was a stack of paragraphs: a code over its date, a name over its
+    number, a cohort over its name over its programme, and a status under a
+    whole sentence. The row measured 115px — 147 on two of seven — so a
+    registrar saw two and a half enrolments on a 1440x900 screen and scrolled
+    a register meant to be scanned.
+
+    Nothing was deleted. Everything that left the line is in the detail row
+    beneath it, in the page and readable to a screen reader before anything is
+    clicked.
+    """
+    import re
+
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    row = _row_of(html, active_enrollment.code)
+    # What the eye reads, not what the markup carries: the participant number
+    # is still in the href of their file, and belongs there.
+    visible = re.sub(r"<[^>]+>", " ", row)
+    number = active_enrollment.participant.participant_number
+
+    # The line itself carries identity, balance, status, actions — and no more.
+    assert active_enrollment.code in visible
+    assert number not in visible, "the participant number moved to the detail row"
+    assert active_enrollment.cohort.name_ar not in visible, "so did the cohort's name"
+    assert "<br>" not in row, "a cell that breaks its line is a cell with two lines"
+
+    detail = html.split(f'id="det-{active_enrollment.code}"', 1)[1].split("</tr>", 1)[0]
+    assert number in detail
+    assert active_enrollment.cohort.name_ar in detail
+    assert active_enrollment.cohort.program.name_ar in detail
+    for label in ("المستحق", "المدفوع", "الخصم", "تاريخ التسجيل"):
+        assert label in detail, f"«{label}» left the row without arriving anywhere"
+
+
+def test_the_detail_row_is_hidden_by_the_markup_and_not_by_a_stylesheet(
+    signed_in, manager, active_enrollment
+) -> None:
+    """
+    ``hidden`` rather than a CSS rule: what the markup hides the button shows,
+    so the detail works on a page whose stylesheet never arrived — and a screen
+    reader is not handed seven expanded rows it did not ask for.
+    """
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    detail_tag = html.split(f'id="det-{active_enrollment.code}"', 1)[0].rsplit("<tr", 1)[1]
+
+    assert "hidden" in html.split(f'id="det-{active_enrollment.code}"', 1)[1].split(">", 1)[0]
+    assert "row-detail" in detail_tag
+    assert f'data-expands="det-{active_enrollment.code}"' in html
+    assert 'aria-expanded="false"' in html
+    assert "js/ui.js" in html, "the opener is declared but nothing would answer it"
+
+
+def test_the_empty_row_spans_the_table_that_is_actually_drawn(
+    signed_in, manager, seeded_settings
+) -> None:
+    """A hard-coded span goes stale the moment a column moves — and one just did."""
+    import re
+
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    head = html.split("<thead>", 1)[1].split("</thead>", 1)[0]
+
+    assert re.search(rf'colspan="{head.count("<th")}"[^>]*class="empty"', html)
+
+
+def test_the_status_cell_says_its_condition_without_a_sentence_in_it(
+    signed_in, manager, active_enrollment
+) -> None:
+    """
+    «معتمد مع رصيد متبقٍ — الشهادة/البراءة تتطلب التسديد» is a condition on the
+    status, not a second status, and a full sentence inside a table cell slows
+    the scan it is meant to serve. It is a dot carrying its whole text in
+    ``title`` now — so nothing is lost to the reader who needs it, and nothing
+    is spent on the reader who does not.
+    """
+    import re
+
+    # The fixture is already ACTIVE, which is to say already approved.
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    row = _row_of(html, active_enrollment.code)
+
+    assert 'class="chip' in row
+    assert "معتمد" in row  # …the fact survives, in the title and for the screen reader
+    assert row.count("<br>") == 0, "the row is one line"
+    # The sentence is in the tooltip, not spread across the cell.
+    assert "الشهادة/البراءة تتطلب التسديد" not in re.sub(r"title=\"[^\"]*\"", "", row)
+
+
+def test_the_row_actions_stay_on_the_screen_at_every_width() -> None:
+    """
+    Nine columns and four controls held on one line made the table 1366px
+    inside a 1134px wrapper at 1440 — the actions cell starting at -207, so
+    «كشف الحساب» and «اعتماد» sat behind a horizontal scroll on a full desktop
+    screen, and at 1024 the page itself was dragged 238px sideways.
+
+    The row carries seven columns now and the actions fit on one line where
+    there is room: measured at 1440 as 1134 inside 1134 with no overflow and
+    rows of 59-79px. At 1024 one line would overflow by 363px, so they wrap
+    below 1180 — a taller row being the lesser harm than a table that leaves
+    the screen.
+    """
+    from pathlib import Path
+
+    from django.conf import settings
+
+    css = (Path(settings.BASE_DIR) / "static" / "src" / "input.css").read_text(encoding="utf-8")
+    block = css.split("/* سجل التسجيلات:", 1)[1].split("/* سجل المشاركين:", 1)[0]
+
+    assert ".enr-tbl td.acts { @apply whitespace-nowrap; }" in block
+    assert "@media (max-width: 1180px)" in block
+    assert "whitespace-normal" in block
+
+
+# ---------------------------------------------------------------------------
+# The clearance step, offered on the enrolment row it belongs to (§6.4)
+# ---------------------------------------------------------------------------
+def _row_of(html: str, code: str) -> str:
+    """The one row, so a link on a neighbour's row cannot satisfy an assertion."""
+    at = html.index(code)
+    return html[html.rindex("<tr>", 0, at) : html.index("</tr>", at)]
+
+
+def test_an_exited_enrolment_offers_the_clearance_it_has_not_got_yet(
+    signed_in, manager, active_enrollment
+) -> None:
+    """
+    §6.4 — the exit is followed by a clearance, and the operator should not
+    have to leave the register and find the same person again to start it.
+    """
+    from apps.operations.models import Clearance
+    from apps.operations.services import enrollment_service
+
+    enrollment_service.dismiss_enrollment(
+        actor=manager,
+        enrollment=active_enrollment,
+        decision_reference="ق 5/2026",
+        reason_ar="مخالفة",
+    )
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    row = _row_of(html, active_enrollment.code)
+
+    assert f'href="{reverse("operations:clearances")}">فتح براءة ذمة<' in row
+    # The offer is a way in, never the act itself: no clearance was opened.
+    assert "عرض براءة الذمة" not in row
+    assert not Clearance.objects.filter(enrollment=active_enrollment).exists()
+
+
+def test_a_running_enrolment_is_offered_no_clearance(signed_in, manager, active_enrollment) -> None:
+    """An enrolment still running has nothing to clear, so it is offered nothing."""
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    row = _row_of(html, active_enrollment.code)
+
+    # The dialogs on a running row explain the clearance in prose, so the
+    # assertion is on the control — a link into the clearance screens.
+    assert f'href="{reverse("operations:clearances")}"' not in row
+
+
+def test_once_the_clearance_exists_the_row_points_at_it(
+    signed_in, manager, active_enrollment
+) -> None:
+    """The second visit is a reading, not a second opening."""
+    from apps.operations.services import clearance_service, enrollment_service
+
+    enrollment_service.dismiss_enrollment(
+        actor=manager,
+        enrollment=active_enrollment,
+        decision_reference="ق 5/2026",
+        reason_ar="مخالفة",
+    )
+    clearance = clearance_service.open_clearance(
+        actor=manager, enrollment=active_enrollment, opened_on=TERM_START
+    )
+    html = signed_in(manager).get(reverse("operations:enrollments")).content.decode()
+    row = _row_of(html, active_enrollment.code)
+
+    detail = reverse("operations:clearance-detail", args=[clearance.code])
+    assert f'href="{detail}">عرض براءة الذمة<' in row
+    assert f'href="{reverse("operations:clearances")}">فتح براءة ذمة<' not in row, (
+        "an enrolment already cleared is not offered a second"
+    )
+
+
+def test_the_row_offers_no_clearance_to_a_role_that_may_not_open_one(
+    signed_in, cashier, manager, active_enrollment
+) -> None:
+    """
+    Hiding is courtesy, not the guard — but a reader must not be shown a door
+    that would refuse them and write a DENIED_ATTEMPT for it (BR-085).
+    """
+    from apps.operations.services import enrollment_service
+
+    enrollment_service.dismiss_enrollment(
+        actor=manager,
+        enrollment=active_enrollment,
+        decision_reference="ق 5/2026",
+        reason_ar="مخالفة",
+    )
+    html = signed_in(cashier).get(reverse("operations:enrollments")).content.decode()
+    assert f'href="{reverse("operations:clearances")}">فتح براءة ذمة<' not in html
 
 
 def test_each_confirmed_exit_lands_in_clearance_with_its_case(
@@ -666,3 +1028,42 @@ def test_each_confirmed_exit_lands_in_clearance_with_its_case(
     assert "تخرج" in offered[graduate.code]
     assert "انسحاب" in offered[leaver.code]
     assert "فصل" in offered[dismissed.code]
+
+
+def test_a_pricing_refusal_reaches_the_registrar_as_a_message_not_a_500(
+    client, registrar, make_cohort, approve_cohort, make_participant
+) -> None:
+    """
+    The enrolment screen used to 500 on every pricing refusal.
+
+    Found on a fresh install: the price list carried no registration fee rule
+    for the participant's category, so ``resolve_registration_fee`` refused
+    (BR-009) — and the exception escaped the view. The registrar met a Django
+    error page, lost the typed form, and learned nothing about what was missing
+    or who could fix it. The refusal is correct; arriving as a 500 is not.
+    """
+    from apps.catalog.models import RegistrationFeeRule
+    from apps.operations.models import Enrollment
+
+    cohort = make_cohort("SC-NET", code="CO-PRICE-1")
+    approve_cohort(cohort)
+    participant = make_participant(index=77)
+    # The one row the whole pricing depends on, taken away.
+    RegistrationFeeRule.objects.all().delete()
+
+    client.force_login(registrar)
+    response = client.post(
+        reverse("operations:enrollment-new"),
+        {
+            "participant_number": participant.participant_number,
+            "cohort_code": cohort.code,
+            "enrolled_on": "2026-09-26",
+        },
+        follow=True,
+    )
+    body = response.content.decode("utf-8")
+
+    assert response.status_code == 200, "a pricing refusal is not a server error"
+    assert not Enrollment.objects.filter(participant=participant).exists()
+    assert "تعذّر تحميل الرسوم" in body
+    assert "قائمة الأسعار" in body, "the message must say where this is fixed"

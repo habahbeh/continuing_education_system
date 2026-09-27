@@ -1,110 +1,318 @@
 {% extends "base.html" %}
-{% load i18n guided_help %}
+{% load i18n l10n arabic_ui %}
 
 {% block title %}{{ title }} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  سجل الخصومات ونموذج منحها. التحسين عرضٌ فقط: لا خدمة تغيّرت ولا حقل ولا
-  حارس ولا مرشّح، ولا عمود بدّل موضعه. الزرّان اللذان على الشاشة هما نفسهما:
-  «منح الخصم» خلف `can_create`، و«اعتماد» خلف `can_approve` وشرط أن يكون
-  القارئ غير مُنشئ الخصم — وكلاهما يُفحص ثانيةً في `policy.require` عند الإرسال.
+  الخصومات: سجلٌ وبطاقاتُ مجاميع على اليمين، ونموذج المنح على اليسار لاصقاً،
+  فلا يُنزَل إليه (كالإقفال اليومي).
 
-  الجملة التي كانت في `.note info` نزلت إلى `.hint` تحت الجدول: الأزرق تنبيه،
-  وشرحُ قاعدةٍ ليس تنبيهاً (قواعد التحسين §6.5). وموضعها تحت الأعمدة التي
-  تخصّها — «الوعاء» و«الجامعة» و«الشريك» — لا فوق الصفحة، حتى لا تتراكم كتلتان
-  مؤطَّرتان فوق كتلة الإرشاد.
+  النموذج يعرض التسجيلات التي يقبلها الحفظ وحدها — تسجيل قائم، له رسوم
+  دراسية، ولم يُقبض عليه بعد على بند قابل للقسمة — وكلُّ خيار يحمل وعاءه
+  وصيغة تقاسم اتفاقيته على data-*؛ فتُحسب المعاينة حيّاً (المبلغ الناتج من
+  النسبة، والباقي من الرسوم، وحصة كل طرف) قبل أن يُضغط شيء. الحساب هنا للعرض
+  فقط؛ الخدمة تعيده وترفض ما يتجاوز الوعاء (§5.1 · BR-029).
 
-  عمود الاعتماد كان بلا اسم إطلاقاً، وسُمّي بـ `aria-label` لا بـ `.sr-only`:
-  الأخير `position:absolute` بلا سلف موضَّع، فيقع في RTL خارج حدود الصفحة
-  ويجرّها أفقياً — وهو العيب الذي أُصلح في شرائح سابقة.
+  المنح فعلٌ نهائي: لا تعديل ولا حذف، ويخفّض رصيد المشارك فور الحفظ (الاعتماد
+  الداخلي توثيق لاحق D-18)، فيسبقه حوار تأكيد يلخّصه. والاعتماد حوارٌ أيضاً
+  يُظهر من منح ومتى. لا تنبيه متصفح في الشاشة كلها.
 
-  والحالة الفارغة تقول ما يعنيه الفراغ ولا تعرض فعلاً: من يملك المنح يجد
-  نموذجه أسفل الصفحة، ومن لا يملكه لا يُدعى إلى رفض (BR-085).
+  عمود الاعتماد بـ `aria-label` لا بـ `.sr-only` (الأخير يقع في RTL خارج حدود
+  الصفحة). والحالة الفارغة تقول ما يعنيه الفراغ ولا تعرض فعلاً على من لا يملكه.
 {% endcomment %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الشؤون المالية" %}</span>
-    <h1>{{ title }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ title }}</h1>
     <p class="sub">{% translate "الخصومات الممنوحة على الرسوم الدراسية، بوعاء كل خصم وحصّة كل طرف منه وحالة اعتماده الداخلي." %}</p>
   </div>
 </div>
 
-{% guided_help "discounts" %}
-
-<div class="card2">
-  <div class="card2-head">
-    <h2>{% translate "الخصومات المسجَّلة" %}</h2>
-    <div class="acts">
-      <span class="count">{% blocktranslate count n=discounts|length %}خصم واحد{% plural %}{{ n }} خصومات{% endblocktranslate %}</span>
-    </div>
-  </div>
-  <div class="tbl-wrap">
-    <table class="tbl">
-      <thead>
-        <tr>
-          <th>{% translate "التسجيل" %}</th>
-          <th>{% translate "المشارك" %}</th>
-          <th class="num">{% translate "المبلغ" %}</th>
-          <th class="num">{% translate "الوعاء" %}</th>
-          <th>{% translate "السبب" %}</th>
-          <th>{% translate "موافقة الرئيس" %}</th>
-          <th class="num">{% translate "الجامعة" %}</th>
-          <th class="num">{% translate "الشريك" %}</th>
-          <th>{% translate "الصيغة" %}</th>
-          <th aria-label="{% translate 'الاعتماد الداخلي' %}"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for d in discounts %}
-          <tr>
-            <td dir="ltr" translate="no"><strong class="num">{{ d.enrollment_code }}</strong></td>
-            <td>{{ d.participant_name }}</td>
-            <td class="num">{{ d.amount }}</td>
-            <td class="num">{{ d.base_amount }}</td>
-            <td>{{ d.reason_ar }}</td>
-            <td dir="ltr" translate="no">{{ d.president_approval_ref|default:"—" }}</td>
-            <td class="num">{{ d.university_burden }}</td>
-            <td class="num">{{ d.partner_burden }}</td>
-            <td><span class="chip">{{ d.split_mode }}</span></td>
-            <td class="acts">
-              {% if d.is_approved %}<span class="chip ok dot">{% translate "معتمَد" %}</span>
-              {% elif can_approve and d.created_by_id != current_user_id %}
-                <form method="post">{% csrf_token %}
-                  <input type="hidden" name="action" value="approve">
-                  <input type="hidden" name="id" value="{{ d.id }}">
-                  <button class="btn2" type="submit">{% translate "اعتماد" %}</button>
-                </form>
-              {% else %}<span class="chip warn dot">{% translate "بانتظار اعتماد غير المُنشئ" %}</span>{% endif %}
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="10" class="empty">
-            <span class="empty-title">{% translate "لا خصومات مسجَّلة" %}</span>
-            <span class="empty-body">{% translate "الخصم يُمنح على تسجيل قائم قبل قبض أي مبلغ على الرسوم الدراسية، ويحمل رقم موافقة رئيس الجامعة (BR-030 · D-31)." %}</span>
-          </td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card2-body">
-    <p class="hint">{% translate "الخصم على الرسوم الدراسية وحدها ولا يمسّ رسم التسجيل، ويسبق القبض. حصة الشريك من الخصم تُحتسب من صيغة الاتفاقية وتُسجَّل هنا — ولا تُحسم مرة ثانية من وعاء المطالبة." %}</p>
-  </div>
+<div class="kpi-grid tiles disc-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value num">{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
 </div>
 
-{% if can_create %}
-  <div class="card2">
-    <div class="card2-head"><h2>{% translate "منح خصم" %}</h2></div>
-    <div class="card2-body">
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="grant">
-        {% include "partials/_form.html" %}
-        <div class="form-acts">
-          <button class="btn2 primary" type="submit">{% translate "منح الخصم" %}</button>
+<div class="dash-cols disc-cols">
+  <div class="dash-main">
+    <div class="card2">
+      <div class="card2-head">
+        <span class="head-ico tone-info" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-percent"/></svg></span>
+        <h2>{% translate "الخصومات المسجَّلة" %}</h2>
+        <div class="acts">
+          <span class="count">{{ discounts|length|ar_count:"خصم واحد|خصمان|خصومات|خصماً" }}</span>
         </div>
+      </div>
+
+      {# البحث فوري: كل تغيير يعيد رسم الجدول (htmx)؛ وبلا JS يعمل بمفتاح Enter. #}
+      <form method="get" class="filterbar disc-filters" role="search" id="disc-form"
+            hx-get="{% url 'billing:discounts' %}" hx-target="#disc-results" hx-select="#disc-results" hx-swap="outerHTML"
+            hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status" hx-push-url="true" hx-indicator="#disc-busy">
+        {% if enrollment_code %}<input type="hidden" name="enrollment" value="{{ enrollment_code }}">{% endif %}
+        <div class="fld grow">
+          <label for="f_q">{% translate "بحث" %}</label>
+          <input type="search" name="q" value="{{ query }}" id="f_q" spellcheck="false" placeholder="{% translate 'رمز التسجيل، اسم المشارك أو رقمه، رقم موافقة الرئيس…' %}">
+        </div>
+        <div class="fld">
+          <label for="f_status">{% translate "الحالة" %}</label>
+          <select name="status" id="f_status">
+            <option value="">{% translate "الكل" %}</option>
+            <option value="pending"{% if status == "pending" %} selected{% endif %}>{% translate "بانتظار الاعتماد" %}</option>
+            <option value="approved"{% if status == "approved" %} selected{% endif %}>{% translate "معتمَد" %}</option>
+          </select>
+        </div>
+        <span class="busy" id="disc-busy" aria-hidden="true"></span>
+        {% if is_filtered %}<a class="btn2 ghost" href="{% url 'billing:discounts' %}">{% translate "إلغاء التصفية" %}</a>{% endif %}
       </form>
+
+      <div id="disc-results">
+        {% if enrollment_code %}
+          <p class="hint boxed disc-scope">{% translate "خصومات التسجيل" %} <span class="num" dir="ltr">{{ enrollment_code }}</span> {% translate "وحده" %} — <a class="row-link" href="{% url 'billing:discounts' %}">{% translate "كل الخصومات" %}</a></p>
+        {% endif %}
+        <div class="tbl-wrap">
+          <table class="tbl disc-tbl">
+            <thead>
+              <tr>
+                <th>{% translate "التسجيل" %}</th>
+                <th>{% translate "المشارك" %}</th>
+                <th class="num">{% translate "الخصم" %}</th>
+                <th>{% translate "السبب" %}</th>
+                <th>{% translate "موافقة الرئيس" %}</th>
+                <th>{% translate "التحمّل" %}</th>
+                <th aria-label="{% translate 'الاعتماد الداخلي' %}"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in discounts %}
+                <tr>
+                  <td class="code-cell">
+                    <a class="row-link num" dir="ltr" translate="no" href="{% url 'operations:account' d.enrollment_code %}">{{ d.enrollment_code }}</a>
+                    <small class="muted sub-line">{{ d.program_name }}</small>
+                  </td>
+                  <td class="who-cell">{{ d.participant_name }}<small class="muted num sub-line" dir="ltr">{{ d.participant_number }}</small></td>
+                  <td class="num amt">{{ d.amount }}{% if d.discount_type == "PERCENT" and d.rate %} <small class="muted">({{ d.rate|floatformat:"-2" }}%)</small>{% endif %}<small class="muted sub-line">{% translate "من" %} {{ d.base_amount }}</small></td>
+                  <td class="disc-reason">{{ d.reason_ar }}</td>
+                  <td class="num"><span dir="ltr" translate="no">{{ d.president_approval_ref|default:"—" }}</span><small class="muted sub-line"><span dir="ltr">{{ d.president_approval_date|date:"Y/m/d" }}</span></small></td>
+                  <td class="burden"><span class="pair">{% translate "الجامعة" %} <span class="num">{{ d.university_burden }}</span></span><span class="pair">{% translate "الشريك" %} <span class="num">{{ d.partner_burden }}</span></span><small class="muted sub-line">{{ d.split_mode_display }}</small></td>
+                  <td class="acts disc-state">
+                    {% if d.is_approved %}
+                      <span class="chip ok dot">{% translate "معتمَد" %}</span>
+                      <small class="muted sub-line">{{ d.approved_by }} · <span dir="ltr">{{ d.approved_at|date:"Y/m/d" }}</span></small>
+                    {% elif can_approve and d.created_by_id != current_user_id %}
+                      <button class="btn2" type="button" @click="document.getElementById('dc-{{ d.id }}').showModal()">{% translate "اعتماد…" %}</button>
+                      <dialog class="modal confirm-modal" id="dc-{{ d.id }}" dir="rtl" aria-labelledby="dc-{{ d.id }}-t">
+                        <form method="post">{% csrf_token %}
+                          <input type="hidden" name="action" value="approve">
+                          <input type="hidden" name="id" value="{{ d.id }}">
+                          <div class="modal-head">
+                            <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-checks"/></svg></span>
+                            <h2 id="dc-{{ d.id }}-t">{% translate "اعتماد الخصم" %} — <span class="num" dir="ltr">{{ d.enrollment_code }}</span></h2>
+                          </div>
+                          <div class="modal-body">
+                            <div class="confirm-amt"><b class="num">{{ d.amount }}</b> <small>{% translate "د.أ" %}</small></div>
+                            <dl class="dl">
+                              <dt>{% translate "المشارك" %}</dt><dd>{{ d.participant_name }}</dd>
+                              <dt>{% translate "منحه" %}</dt><dd>{{ d.created_by }} · <span class="num" dir="ltr">{{ d.created_at|date:"Y/m/d" }}</span></dd>
+                              <dt>{% translate "موافقة الرئيس" %}</dt><dd><span class="num" dir="ltr">{{ d.president_approval_ref }}</span> · <span class="num" dir="ltr">{{ d.president_approval_date|date:"Y/m/d" }}</span></dd>
+                              <dt>{% translate "السبب" %}</dt><dd>{{ d.reason_ar }}</dd>
+                            </dl>
+                            <p class="hint">{% translate "الاعتماد توثيق داخلي بأن غير المانح راجع الخصم ومستنده (D-18). الأثر على حساب المشارك قائم منذ المنح." %}</p>
+                          </div>
+                          <div class="modal-acts">
+                            <button class="btn2 primary" type="submit">{% translate "اعتماد" %}</button>
+                            <button class="btn2 ghost" type="button" @click="document.getElementById('dc-{{ d.id }}').close()">{% translate "رجوع" %}</button>
+                          </div>
+                        </form>
+                      </dialog>
+                    {% elif can_approve %}
+                      <span class="chip warn dot">{% translate "بانتظار الاعتماد" %}</span>
+                      <small class="muted sub-line">{% translate "منحته أنت؛ يعتمده غيرك (D-18)" %}</small>
+                    {% else %}
+                      <span class="chip warn dot">{% translate "بانتظار الاعتماد" %}</span>
+                      <small class="muted sub-line">{{ d.created_by }}</small>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="7" class="empty">
+                  <span class="empty-title">{% if is_filtered %}{% translate "لا خصومات تطابق التصفية" %}{% else %}{% translate "لا خصومات مسجَّلة" %}{% endif %}</span>
+                  <span class="empty-body">{% if is_filtered %}{% translate "وسّع البحث أو ألغِ التصفية." %}{% else %}{% translate "الخصم يُمنح على تسجيل قائم قبل قبض أي مبلغ على الرسوم الدراسية، ويحمل رقم موافقة رئيس الجامعة (BR-030 · D-31)." %}{% endif %}</span>
+                  {% if is_filtered %}<a class="btn2 ghost empty-act" href="{% url 'billing:discounts' %}">{% translate "كل الخصومات" %}</a>{% endif %}
+                </td></tr>
+              {% endfor %}
+            </tbody>
+            {% if discounts %}
+              <tfoot>
+                <tr>
+                  <td colspan="2">{% translate "الإجمالي" %}</td>
+                  <td class="num amt"><strong>{{ summary.total }}</strong></td>
+                  <td colspan="2"></td>
+                  <td class="burden"><span class="pair"><strong>{% translate "الجامعة" %} <span class="num">{{ summary.university }}</span></strong></span><span class="pair"><strong>{% translate "الشريك" %} <span class="num">{{ summary.partner }}</span></strong></span></td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            {% endif %}
+          </table>
+        </div>
+      </div>
+      <div class="card2-body">
+        <p class="hint">{% translate "الخصم على الرسوم الدراسية وحدها ولا يمسّ رسم التسجيل، ويسبق القبض. حصة الشريك من الخصم تُحتسب من صيغة الاتفاقية وتُسجَّل هنا — ولا تُحسم مرة ثانية من وعاء المطالبة." %}</p>
+      </div>
     </div>
   </div>
-{% endif %}
+
+  <div class="dash-side">
+    {% if can_create %}
+      <div class="card2 next-card tone-ok disc-grant" id="grant"
+           x-data="{ en: '{{ form.enrollment_code.value|default:''|escapejs }}', kind: '{{ form.discount_type.value|default:'PERCENT'|escapejs }}', rate: '{{ form.rate.value|default:''|escapejs }}', amt: '{{ form.amount.value|default:''|escapejs }}',
+                     base: 0, already: 0, ppct: 0, mode: '', agr: '', ok: true, name: '', prog: '', confirmed: false, pref: '', pdate: '',
+                     num(v) { return Number(String(v).replace(',', '.')) || 0 },
+                     pick(el) { const o = el.options[el.selectedIndex]; const d = o ? o.dataset : {}; this.en = el.value; this.base = this.num(d.base); this.already = this.num(d.already); this.ppct = this.num(d.ppct); this.mode = d.mode || ''; this.agr = d.agr || ''; this.ok = d.ok !== '0'; this.name = d.name || ''; this.prog = d.prog || '' },
+                     a() { return this.kind === 'PERCENT' ? Math.round(this.base * this.num(this.rate) / 100 * 1000) / 1000 : this.num(this.amt) },
+                     room() { return Math.max(this.base - this.already, 0) },
+                     over() { return this.a() > this.room() + 0.0005 },
+                     rest() { return this.room() - this.a() },
+                     partner() { return Math.round(this.a() * this.ppct / 100 * 1000) / 1000 },
+                     univ() { return Math.round((this.a() - this.partner()) * 1000) / 1000 },
+                     ready() { return this.en && this.a() > 0 && !this.over() && this.ok },
+                     fmt(v) { return Number(v).toFixed(3) } }"
+           x-init="pick($refs.sel)">
+        <div class="card2-head">
+          <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-percent"/></svg></span>
+          <h2>{% translate "منح خصم" %}</h2>
+        </div>
+        <div class="card2-body">
+          <form method="post" id="grant-form" x-ref="form" @submit="if (!confirmed) { $event.preventDefault(); $refs.confirm.showModal() }">
+{% csrf_token %}
+            <input type="hidden" name="action" value="grant">
+            {% for e in form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+
+            {# 1 — التسجيل: ما يقبله الحفظ فقط، وكل خيار يحمل وعاءه وصيغة اتفاقيته #}
+            <div class="step-lbl"><span class="n">1</span>{% translate "التسجيل" %}</div>
+            <div class="fld{% if form.enrollment_code.errors %} has-error{% endif %}">
+              <label for="id_enrollment_code">{{ form.enrollment_code.label }}<span class="req" aria-hidden="true">*</span></label>
+              <select id="id_enrollment_code" name="enrollment_code" required x-ref="sel" @change="pick($el)">
+                <option value="" data-base="0">{% translate "— اختر تسجيلاً —" %}</option>
+                {% for r in candidates %}
+                  <option value="{{ r.code }}"{% if form.enrollment_code.value == r.code %} selected{% endif %}
+                          data-base="{{ r.tuition_base|unlocalize }}" data-already="{{ r.already_discounted|unlocalize }}" data-ppct="{{ r.split.partner_pct|unlocalize }}"
+                          data-mode="{{ r.split.mode_display }}" data-agr="{{ r.split.agreement_number }}" data-ok="{% if r.split.supported %}1{% else %}0{% endif %}"
+                          data-name="{{ r.participant_name }}" data-prog="{{ r.program_name }}">{{ r.code }} — {{ r.participant_name }} · {{ r.program_name }}</option>
+                {% endfor %}
+              </select>
+              {% for e in form.enrollment_code.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              {% if not candidates %}
+                <div class="help">{% translate "لا تسجيل قابل للخصم الآن: الخصم على تسجيل قائم له رسوم دراسية ولم يُقبض عليه بعد (§5.1 · §6.2)." %}</div>
+              {% else %}
+                <div class="help live" x-cloak>
+                  <span x-show="en">{% translate "الرسوم الدراسية" %} <b class="num" x-text="fmt(base)"></b>{% translate "؛ سبق خصم" %} <b class="num" x-text="fmt(already)"></b> · <span x-text="mode"></span><span x-show="agr"> (<span class="num" dir="ltr" x-text="agr"></span>)</span></span>
+                  <span x-show="!en">{% translate "تُعرض التسجيلات القائمة التي لها رسوم دراسية ولم يُقبض عليها بعد." %}</span>
+                </div>
+                <div class="err" x-cloak x-show="en && !ok">{% translate "صيغة تقاسم الخصم في اتفاقية هذه الدفعة لا تُحتسب آلياً — يُراجَع نمط التقاسم في الاتفاقية قبل المنح." %}</div>
+              {% endif %}
+            </div>
+
+            {# 2 — النوع والمقدار: بطاقتان، ويظهر حقل واحد بحسب النوع #}
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">2</span>{% translate "النوع والمقدار" %}</div>
+            <div class="fld{% if form.discount_type.errors %} has-error{% endif %}">
+              <span class="lbl">{{ form.discount_type.label }}<span class="req" aria-hidden="true">*</span></span>
+              <div class="seg-cards two" role="radiogroup" aria-label="{{ form.discount_type.label }}">
+                <label class="seg-card tone-info" :class="{ 'is-on': kind === 'PERCENT' }">
+                  <input type="radio" name="discount_type" value="PERCENT" x-model="kind" class="seg-radio">
+                  <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-percent"/></svg></span>
+                  <span class="t">{% translate "نسبة" %}</span>
+                </label>
+                <label class="seg-card tone-ok" :class="{ 'is-on': kind === 'AMOUNT' }">
+                  <input type="radio" name="discount_type" value="AMOUNT" x-model="kind" class="seg-radio">
+                  <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-coins"/></svg></span>
+                  <span class="t">{% translate "مبلغ" %}</span>
+                </label>
+              </div>
+              {% for e in form.discount_type.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="fld{% if form.rate.errors %} has-error{% endif %}" x-show="kind === 'PERCENT'">
+              <label for="id_rate">{{ form.rate.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="number" step="0.01" min="0" max="100" inputmode="decimal" id="id_rate" name="rate" dir="ltr" x-model="rate" :required="kind === 'PERCENT'" value="{{ form.rate.value|default:'' }}" placeholder="10">
+              {% for e in form.rate.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="fld{% if form.amount.errors %} has-error{% endif %}" x-show="kind === 'AMOUNT'">
+              <label for="id_amount">{{ form.amount.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="number" step="0.001" min="0" inputmode="decimal" id="id_amount" name="amount" dir="ltr" x-model="amt" :required="kind === 'AMOUNT'" value="{{ form.amount.value|default:'' }}" placeholder="0.000">
+              {% for e in form.amount.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="disc-preview" x-cloak x-show="en && a() > 0">
+              <div class="row"><span>{% translate "الخصم" %}</span><b class="num" x-text="fmt(a())"></b></div>
+              <div class="row"><span>{% translate "يبقى من الرسوم الدراسية" %}</span><b class="num" :class="{ 'is-danger': over() }" x-text="fmt(rest())"></b></div>
+              <div class="row split"><span>{% translate "تتحمّل الجامعة" %} <b class="num" x-text="fmt(univ())"></b></span><span>{% translate "الشريك" %} <b class="num" x-text="fmt(partner())"></b></span></div>
+              <div class="err" x-show="over()">{% translate "الخصم يتجاوز ما بقي من الرسوم الدراسية — سيرفضه الحفظ (BR-029)." %}</div>
+            </div>
+
+            {# 3 — السبب وموافقة الرئيس #}
+            <div class="step-lbl" :class="{ 'is-off': !en }"><span class="n">3</span>{% translate "السبب وموافقة الرئيس" %}</div>
+            <div class="fld{% if form.reason_ar.errors %} has-error{% endif %}">
+              <label for="id_reason_ar">{{ form.reason_ar.label }}<span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="id_reason_ar" name="reason_ar" maxlength="255" required value="{{ form.reason_ar.value|default:'' }}" placeholder="{% translate 'مثال: منحة لأبناء العاملين' %}">
+              {% for e in form.reason_ar.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="grid2">
+              <div class="fld{% if form.president_approval_ref.errors %} has-error{% endif %}">
+                <label for="id_president_approval_ref">{{ form.president_approval_ref.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="text" id="id_president_approval_ref" name="president_approval_ref" maxlength="64" required dir="ltr" autocomplete="off" x-model="pref" value="{{ form.president_approval_ref.value|default:'' }}">
+                {% for e in form.president_approval_ref.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+              <div class="fld{% if form.president_approval_date.errors %} has-error{% endif %}">
+                <label for="id_president_approval_date">{{ form.president_approval_date.label }}<span class="req" aria-hidden="true">*</span></label>
+                <input type="date" id="id_president_approval_date" name="president_approval_date" required x-model="pdate" value="{{ form.president_approval_date.value|date:'Y-m-d'|default:form.president_approval_date.value|default:'' }}">
+                {% for e in form.president_approval_date.errors %}<div class="err">{{ e }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="help">{% translate "موافقة الرئيس تصدر خارج النظام؛ رقمها وتاريخها هما المستند (BR-030 · D-31)." %}</div>
+
+            <div class="form-acts">
+              <button class="btn2 primary" type="submit" :disabled="!ready()">{% translate "منح الخصم" %}</button>
+            </div>
+          </form>
+
+          {# تأكيد المنح: لا تعديل ولا حذف بعده، ويخفّض الرصيد فوراً. #}
+          <dialog class="modal confirm-modal" x-ref="confirm" dir="rtl" aria-labelledby="grant-confirm-t" @close="confirmed = false">
+            <div class="modal-head">
+              <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-percent"/></svg></span>
+              <h2 id="grant-confirm-t">{% translate "تأكيد منح الخصم" %}</h2>
+            </div>
+            <div class="modal-body">
+              <div class="confirm-amt"><b class="num" x-text="fmt(a())"></b> <small>{% translate "د.أ" %}</small></div>
+              <dl class="dl">
+                <dt>{% translate "التسجيل" %}</dt><dd><span class="num" dir="ltr" x-text="en"></span> — <span x-text="name"></span> · <span x-text="prog"></span></dd>
+                <dt>{% translate "الوعاء" %}</dt><dd><span class="num" x-text="fmt(base)"></span> {% translate "رسوماً دراسية؛ يبقى" %} <span class="num" x-text="fmt(rest())"></span></dd>
+                <dt>{% translate "التحمّل" %}</dt><dd>{% translate "الجامعة" %} <span class="num" x-text="fmt(univ())"></span> · {% translate "الشريك" %} <span class="num" x-text="fmt(partner())"></span></dd>
+                <dt>{% translate "موافقة الرئيس" %}</dt><dd><span class="num" dir="ltr" x-text="pref"></span> · <span class="num" dir="ltr" x-text="pdate"></span></dd>
+              </dl>
+              <p class="hint">{% translate "الخصم لا يُعدَّل ولا يُحذف بعد منحه، ويظهر في كشف حساب المشارك ويخفّض رصيده فوراً. اعتماده الداخلي يوثّقه مدير غيرك (D-18)." %}</p>
+            </div>
+            <div class="modal-acts">
+              <button class="btn2 primary" type="button" @click="confirmed = true; $refs.confirm.close(); $refs.form.requestSubmit()">{% translate "منح الخصم" %}</button>
+              <button class="btn2 ghost" type="button" @click="$refs.confirm.close()">{% translate "رجوع" %}</button>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    {% else %}
+      <div class="card2">
+        <div class="card2-head"><h2>{% translate "منح الخصم" %}</h2></div>
+        <div class="card2-body">
+          <p class="hint">{% translate "منح الخصم واعتماده الداخلي لمدير المركز (§3.4/19)؛ هذه الشاشة للاطلاع من هنا." %}</p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

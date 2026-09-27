@@ -1,98 +1,420 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n status_ui arabic_ui %}
+
+{% comment %}
+  ملف المشارك — مركز العمل على شخص واحد (Sprint 8I).
+
+  نصفان: بيانات الطلب تصل من `participant_service` مُسقَطةً على ما يجوز
+  للدور رؤيته (BR-101, T-283) — الحقل المحجوب غائب لا مخفيّ. والنصف
+  التشغيلي — التسجيلات وأرصدتها، وبراءات الذمة، والشهادات، والخطوة
+  التالية — يصل في `hub` من `participant_hub_service`، وكل كتلة فيه
+  مفتاحٌ لا يوجد إلا لدور تُدخله شاشتُها أصلاً. فالقالب حين يفحص المفتاح
+  يفحص الصلاحية.
+
+  «الخطوة التالية» جملةٌ لإنسان لا قاعدة للنظام: تكرّر ما تفرضه الشاشات
+  ولا تفرض شيئاً.
+{% endcomment %}
+
+{% block title %}{{ name_ar }} — {% translate "ملف المشارك" %}{% endblock %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "المشاركون والتسجيل" %}</span>
-    <h1>{{ name_ar }}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{{ name_ar }}</h1>
     <p class="sub">
       {% translate "الرقم الجامعي" %}:
-      <span dir="ltr" translate="no">{{ number }}</span>
+      <span dir="ltr" translate="no" class="num">{{ number }}</span>
+      {% if values.category %}· <span class="chip">{{ values.category }}</span>{% endif %}
     </p>
   </div>
-  {% comment %}
-    The actions area. Same two links as before, same targets, same
-    permission gate — only labelled as a group so the staff eye lands on
-    the one thing they can DO here before the details below.
-  {% endcomment %}
   <div class="acts" role="group" aria-label="{% translate 'إجراءات المشارك' %}">
     {% if can_edit %}
-      <a class="btn2 primary" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a>
+      <a class="btn2 primary" href="{% url 'people:participant-edit' number %}">{% translate "تعديل البيانات" %}</a>
+    {% endif %}
+    {% if "enrollments" in hub %}
+      <a class="btn2" href="{% url 'operations:enrollments' %}?participant={{ number }}">{% translate "التسجيلات في شاشتها" %}</a>
     {% endif %}
     <a class="btn2 ghost" href="{% url 'people:participants' %}">{% translate "عودة للقائمة" %}</a>
   </div>
 </div>
 
-{% comment %}
-  Summary strip — presentation over the SAME projected rows the table below
-  prints, nothing fetched for it. Only the status-like fields are lifted
-  here (category, registration date, exemption, no-refund pledge); the
-  financial, academic and certificate states are not in this page's context
-  and are deliberately not invented. A restricted role (BR-101) gets only
-  number and name, so for them the strip has nothing to say and is skipped.
-{% endcomment %}
-{% if rows|length > 2 %}
-  {% translate "نعم" as yes %}
-  <div class="kpi-grid">
-    {% for key, label, value in rows %}
-      {% if key == "category" %}
-        <div class="kpi">
-          <div class="label">{{ label }}</div>
-          <div class="foot"><span class="chip brand">{{ value|default:"—" }}</span></div>
-        </div>
-      {% elif key == "registered_on" %}
-        <div class="kpi">
-          <div class="label">{{ label }}</div>
-          <div class="foot"><span class="chip num">{{ value|default:"—" }}</span></div>
-        </div>
-      {% elif key == "is_exempt" %}
-        <div class="kpi">
-          <div class="label">{{ label }}</div>
-          <div class="foot">
-            <span class="chip {% if value == yes %}info{% endif %}">{{ value|default:"—" }}</span>
-          </div>
-        </div>
-      {% elif key == "no_refund_pledge_accepted" %}
-        <div class="kpi">
-          <div class="label">{{ label }}</div>
-          <div class="foot">
-            <span class="chip {% if value == yes %}ok{% else %}warn{% endif %}">{{ value|default:"—" }}</span>
-          </div>
-        </div>
-      {% endif %}
-    {% endfor %}
-  </div>
+{# الخطوة التالية — إرشاد يقرأ حالة آخر تسجيل ويشير إلى شاشته. #}
+{% if hub.next_action %}
+  {% with a=hub.next_action %}
+    <div class="note">
+      <div>
+        <span class="chip {% if a.tone == 'ok' %}ok{% elif a.tone == 'warn' %}warn{% else %}info{% endif %}">{% translate "الخطوة التالية" %}</span>
+        {{ a.text }}
+        {% if a.goto == "enrollments" %}
+          <a href="{% url 'operations:enrollments' %}?participant={{ number }}">{% translate "شاشة التسجيلات" %}</a>
+        {% elif a.goto == "account" %}
+          <a href="{% url 'operations:account' a.arg %}">{% translate "كشف الحساب" %}</a>
+        {% elif a.goto == "payments" %}
+          <a href="{% url 'cashbox:payments' %}">{% translate "الدفعات" %}</a>
+        {% elif a.goto == "clearances" %}
+          <a href="{% url 'operations:clearances' %}">{% translate "براءة الذمة" %}</a>
+        {% elif a.goto == "clearance" %}
+          <a href="{% url 'operations:clearance-detail' a.arg %}">{% translate "براءة الذمة" %}</a>
+        {% elif a.goto == "certificates" %}
+          <a href="{% url 'operations:certificates' %}">{% translate "الشهادات" %}</a>
+        {% elif a.goto == "refunds" %}
+          <a href="{% url 'billing:refunds' %}">{% translate "الاستردادات" %}</a>
+        {% endif %}
+      </div>
+    </div>
+  {% endwith %}
 {% endif %}
 
+{# شريط الملخّص: كل بطاقة تُرسم فقط إن وصلت بياناتها. القيم تصل مقروءةً («نعم»/«لا») لا منطقية. #}
+{% translate "نعم" as yes %}
+{% if values.registered_on or "enrollments" in hub or "clearances" in hub or "certificates" in hub %}
+<div class="kpi-grid">
+  {% if values.registered_on %}
+    <div class="kpi">
+      <div class="label">{% translate "تاريخ التسجيل" %}</div>
+      <div class="foot"><span class="chip num">{{ values.registered_on }}</span>
+        {% if values.is_exempt == yes %}<span class="chip info">{% translate "معفى" %}</span>{% endif %}
+        {% if values.no_refund_pledge_accepted == yes %}<span class="chip ok">{% translate "تعهّد عدم الاسترداد" %}</span>{% endif %}</div>
+    </div>
+  {% endif %}
+  {% if "enrollments" in hub %}
+    <div class="kpi">
+      <div class="label">{% translate "آخر تسجيل" %}</div>
+      {% if hub.latest %}
+        <div class="foot">
+          <span dir="ltr" translate="no" class="num">{{ hub.latest.code }}</span><br>
+          <span class="chip {{ hub.latest.status|status_tone }}">{{ hub.latest.status_display }}</span>
+          {% if hub.latest.is_approved and not hub.latest.is_final %}<span class="chip ok">{% translate "معتمد" %}</span>{% endif %}
+        </div>
+      {% else %}
+        <div class="foot muted">{% translate "لا تسجيلات بعد" %}</div>
+      {% endif %}
+    </div>
+    <div class="kpi {% if hub.totals.participant_owes %}primary{% endif %}">
+      <div class="label">{% translate "الرصيد الإجمالي" %}</div>
+      <div class="value num">{{ hub.totals.balance }}</div>
+      <div class="foot">
+        {% if hub.totals.participant_owes %}<span class="chip danger dot">{% translate "عليه" %}</span>
+        {% elif hub.totals.centre_owes %}<span class="chip warn dot">{% translate "له" %}</span>
+        {% else %}<span class="chip ok dot">{% translate "مسوّى" %}</span>{% endif %}
+        · {% translate "المستحق" %} <span class="num">{{ hub.totals.total_due }}</span>
+        · {% translate "المدفوع" %} <span class="num">{{ hub.totals.total_paid }}</span>
+        {% if hub.totals.total_discount %}· {% translate "الخصم" %} <span class="num">{{ hub.totals.total_discount }}</span>{% endif %}
+        {% if hub.totals.extra_fees_total %}· {% translate "رسوم إضافية" %} <span class="num">{{ hub.totals.extra_fees_total }}</span>{% endif %}
+        {% if hub.totals.refunds_executed_total %}· {% translate "استردادات منفَّذة" %} <span class="num">{{ hub.totals.refunds_executed_total }}</span>{% endif %}
+      </div>
+    </div>
+  {% endif %}
+  {% if "clearances" in hub or "certificates" in hub %}
+    <div class="kpi">
+      <div class="label">{% translate "براءة الذمة والشهادة" %}</div>
+      <div class="foot">
+        {% if "clearances" in hub %}
+          {% with c=hub.clearances|first %}
+            {% if c %}<span class="chip {{ c.status|status_tone }}">{% translate "براءة" %}: {{ c.status_display }}</span>
+            {% else %}<span class="chip">{% translate "لا براءة ذمة" %}</span>{% endif %}
+          {% endwith %}
+        {% endif %}
+        {% if "certificates" in hub %}
+          {% with c=hub.certificate_live %}
+            {% if c %}<span class="chip ok">{% translate "الشهادة الحالية" %} <span dir="ltr" class="num">{{ c.certificate_number }}</span></span>
+            {% else %}<span class="chip">{% translate "لا شهادة" %}</span>{% endif %}
+          {% endwith %}
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ---- بيانات الطلب ---------------------------------------------------- #}
 <div class="card2">
   <div class="card2-head">
-    <h2>{% translate "بيانات المشارك" %}</h2>
+    <h2>{% translate "بيانات طلب الالتحاق" %}</h2>
+    {% if can_edit %}<div class="acts"><a class="btn2 sm ghost" href="{% url 'people:participant-edit' number %}">{% translate "تعديل" %}</a></div>{% endif %}
   </div>
-
   {% comment %}
     Only the fields the service projected reach this template. A field the
     role may not see is absent from the response entirely (BR-101, T-283).
-
-    A block comment and not a hash comment: Django's hash form is
-    SINGLE-LINE, so the second line of the old two-line version rendered as
-    visible page text — a developer note about BR-101 printed above the
-    participant's details. Found in the Sprint 8I browser pass.
   {% endcomment %}
+  {% if rows|length > 2 %}
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <tbody>
+          {% for key, label, value in rows %}
+            {% if key != "name_ar" and key != "participant_number" %}
+              <tr>
+                <th>{{ label }}</th>
+                <td>{{ value|default:"—" }}</td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    {# BR-101: this role receives number and name only; say so instead of drawing an empty table. #}
+    <div class="card2-body">
+      <p class="muted">{% translate "بحسب صلاحيتك يظهر من بيانات المشارك الرقم الجامعي والاسم فقط؛ البيانات الشخصية محجوبة عن هذا الدور (BR-101)." %}</p>
+    </div>
+  {% endif %}
+</div>
+
+{# ---- التسجيلات وكشوف الحساب ------------------------------------------ #}
+{% if "enrollments" in hub %}
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "التسجيلات وكشوف الحساب" %}</h2>
+    <div class="acts">
+      <span class="chip">{{ hub.totals.count|ar_count:"تسجيل واحد|تسجيلان|تسجيلات|تسجيلاً" }}</span>
+      <a class="btn2 sm ghost" href="{% url 'operations:enrollments' %}?participant={{ number }}">{% translate "فتح في شاشة التسجيلات" %}</a>
+    </div>
+  </div>
   <div class="tbl-wrap">
     <table class="tbl">
+      <thead><tr>
+        <th>{% translate "الرمز" %}</th><th>{% translate "الدفعة / البرنامج" %}</th>
+        <th>{% translate "تاريخ التسجيل" %}</th><th>{% translate "الحالة" %}</th>
+        <th class="num">{% translate "المستحق" %}</th><th class="num">{% translate "المدفوع" %}</th><th>{% translate "الرصيد" %}</th>
+        <th><span class="sr-only">{% translate "إجراءات" %}</span></th>
+      </tr></thead>
       <tbody>
-        {% for key, label, value in rows %}
-          {% if key != "name_ar" and key != "participant_number" %}
-            <tr>
-              <th>{{ label }}</th>
-              <td>{{ value|default:"—" }}</td>
-            </tr>
-          {% endif %}
+        {% for e in hub.enrollments %}
+          <tr>
+            <td dir="ltr" translate="no"><strong class="num">{{ e.code }}</strong></td>
+            <td><span dir="ltr" translate="no">{{ e.cohort_code }}</span><br><small class="muted">{{ e.cohort_name }} — {{ e.program_name }}</small></td>
+            <td class="num">{{ e.enrolled_on|date:"Y-m-d" }}</td>
+            <td>
+              <span class="chip {{ e.status|status_tone }}">{{ e.status_display }}</span>
+              {% if e.is_approved and not e.is_final %}<br><span class="chip ok">{% translate "معتمد" %}</span>
+              {% elif e.voucher_received and not e.is_approved %}<br><span class="chip">{% translate "الوصل مستلم" %}</span>{% endif %}
+            </td>
+            <td class="num">{{ e.total_due }}</td>
+            <td class="num">{{ e.total_paid }}</td>
+            <td>
+              {% if e.participant_owes %}<span class="chip danger dot">{{ e.balance }} {% translate "عليه" %}</span>
+              {% elif e.centre_owes %}<span class="chip warn dot">{{ e.balance }} {% translate "له" %}</span>
+              {% else %}<span class="chip ok dot">{% translate "مسوّى" %}</span>{% endif %}
+            </td>
+            <td class="acts"><a class="btn2 ghost" href="{% url 'operations:account' e.code %}">{% translate "كشف الحساب" %}</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="empty">
+            <span class="empty-title">{% translate "لا تسجيلات لهذا المشارك" %}</span>
+            <span class="empty-body">{% translate "التسجيل في دفعة يبدأ من شاشة التسجيلات؛ سندات القبض وكشف الحساب يتبعان التسجيل لا المشارك." %}</span>
+            <a class="btn2 empty-act" href="{% url 'operations:enrollments' %}">{% translate "شاشة التسجيلات" %}</a>
+          </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-
+  {% if hub.enrollments %}
+    <div class="card2-body"><p class="hint">{% translate "سندات القبض والخصومات والاستردادات تظهر بنداً بنداً في كشف حساب كلّ تسجيل (التقرير 5)." %}</p></div>
+  {% endif %}
 </div>
+{% endif %}
+
+{# ---- الحركات المالية بنداً بنداً (التقرير 5) ----------------------------- #}
+{% if "receipts" in hub or "discounts" in hub or "extra_fees" in hub or "transfers" in hub or "refunds" in hub %}
+<div class="card2">
+  <div class="card2-head">
+    <h2>{% translate "الحركات المالية" %}</h2>
+    <div class="acts"><span class="muted">{% translate "تظهر الحركات المالية حسب صلاحيات المستخدم، وكل الأرصدة أعلاه محسوبة في كشف الحساب." %}</span></div>
+  </div>
+  <div class="card2-body">
+
+    {% if "receipts" in hub %}
+      <span class="sec-title">{% translate "سندات القبض" %}</span>
+      {% if hub.receipts %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "رقم السند" %}</th><th>{% translate "التاريخ" %}</th><th class="num">{% translate "المبلغ" %}</th><th>{% translate "التفصيل" %}</th><th>{% translate "الطريقة" %}</th><th>{% translate "أمين الصندوق" %}</th><th>{% translate "الحالة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+            <tbody>
+              {% for r in hub.receipts %}
+                <tr>
+                  <td dir="ltr" translate="no"><strong class="num">{{ r.internal_receipt_number }}</strong>{% if r.external_receipt_ref %}<br><small class="muted num">{{ r.external_receipt_ref }}</small>{% endif %}</td>
+                  <td class="num">{{ r.received_on|date:"Y-m-d" }}</td>
+                  <td class="num">{{ r.amount }}</td>
+                  <td><small>{{ r.breakdown_text_ar|default:"—" }}</small></td>
+                  <td>{{ r.payment_method }}</td>
+                  <td><small>{{ r.cashier|default:"—" }}</small></td>
+                  <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span>{% if r.is_closed %}<br><small class="muted">{% translate "ضمن إقفال يومي" %}</small>{% endif %}</td>
+                  <td class="acts"><a class="btn2 ghost sm" href="{% url 'cashbox:receipt-detail' r.internal_receipt_number %}">{% translate "عرض السند" %}</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا توجد سندات قبض." %}</p>
+      {% endif %}
+    {% endif %}
+
+    {% if "discounts" in hub %}
+      <span class="sec-title" style="margin-top:1rem">{% translate "الخصومات" %}</span>
+      {% if hub.discounts %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "النوع" %}</th><th class="num">{% translate "النسبة" %}</th><th class="num">{% translate "المبلغ" %}</th><th>{% translate "السبب" %}</th><th>{% translate "موافقة الرئيس" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+            <tbody>
+              {% for d in hub.discounts %}
+                <tr>
+                  <td dir="ltr" translate="no" class="num">{{ d.enrollment_code }}</td>
+                  <td>{{ d.discount_type_display }}</td>
+                  <td class="num">{% if d.rate %}{{ d.rate|floatformat:"-2" }}%{% else %}—{% endif %}</td>
+                  <td class="num">{{ d.amount }}</td>
+                  <td><small>{{ d.reason_ar|default:"—" }}</small></td>
+                  <td><small dir="ltr">{{ d.president_approval_ref|default:"—" }}</small>{% if d.president_approval_date %}<br><small class="muted num">{{ d.president_approval_date|date:"Y-m-d" }}</small>{% endif %}</td>
+                  <td>{% if d.is_approved %}<span class="chip ok">{% translate "معتمد" %}</span>{% else %}<span class="chip warn">{% translate "بانتظار الاعتماد" %}</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا توجد خصومات." %}</p>
+      {% endif %}
+    {% endif %}
+
+    {% if "extra_fees" in hub %}
+      <span class="sec-title" style="margin-top:1rem">{% translate "الرسوم الإضافية" %}</span>
+      {% if hub.extra_fees %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "التسجيل" %}</th><th>{% translate "النوع" %}</th><th>{% translate "التفصيل" %}</th><th class="num">{% translate "المبلغ" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "أُدخلت بواسطة" %}</th></tr></thead>
+            <tbody>
+              {% for f in hub.extra_fees %}
+                <tr>
+                  <td dir="ltr" translate="no" class="num">{{ f.enrollment_code }}</td>
+                  <td><span class="chip">{{ f.fee_type_display }}</span></td>
+                  <td><small>{{ f.subject_name|default:f.charge_line_description|default:"—" }}</small></td>
+                  <td class="num">{{ f.amount }}</td>
+                  <td class="num">{{ f.charged_on|date:"Y-m-d" }}</td>
+                  <td><small>{{ f.created_by|default:"—" }}</small></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا توجد رسوم إضافية." %}</p>
+      {% endif %}
+    {% endif %}
+
+    {% if "transfers" in hub %}
+      <span class="sec-title" style="margin-top:1rem">{% translate "حركات النقل بين الدورات" %}</span>
+      {% if hub.transfers %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التاريخ" %}</th><th>{% translate "من" %}</th><th>{% translate "إلى" %}</th><th>{% translate "السبب" %}</th><th class="num">{% translate "فرق الرسوم" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+            <tbody>
+              {% for t in hub.transfers %}
+                <tr>
+                  <td dir="ltr" translate="no"><strong class="num">{{ t.code }}</strong></td>
+                  <td class="num">{{ t.requested_on|date:"Y-m-d" }}</td>
+                  <td><span dir="ltr" translate="no">{{ t.from_cohort_code }}</span><br><small class="muted">{{ t.from_program_name }}</small></td>
+                  <td><span dir="ltr" translate="no">{{ t.to_cohort_code }}</span><br><small class="muted">{{ t.to_program_name }}</small>{% if t.to_enrollment_code %}<br><small class="num" dir="ltr">{{ t.to_enrollment_code }}</small>{% endif %}</td>
+                  <td><small>{{ t.reason_display }}</small></td>
+                  <td class="num">{{ t.fee_difference|default:"—" }}{% if t.registration_fee_transferred %}<br><small class="muted">{% translate "رسم التسجيل مُرحَّل" %}</small>{% endif %}</td>
+                  <td><span class="chip {{ t.status|status_tone }}">{{ t.status_display }}</span>{% if t.rejection_reason_ar %}<br><small class="muted">{{ t.rejection_reason_ar }}</small>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا توجد حركات نقل." %}</p>
+      {% endif %}
+    {% endif %}
+
+    {% if "refunds" in hub %}
+      <span class="sec-title" style="margin-top:1rem">{% translate "الاستردادات" %}</span>
+      {% if hub.refunds %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "النوع" %}</th><th class="num">{% translate "المبلغ" %}</th><th>{% translate "السبب" %}</th><th>{% translate "المراجع" %}</th><th>{% translate "الحالة" %}</th></tr></thead>
+            <tbody>
+              {% for r in hub.refunds %}
+                <tr>
+                  <td dir="ltr" translate="no"><strong class="num">{{ r.code }}</strong></td>
+                  <td dir="ltr" translate="no" class="num">{{ r.enrollment_code }}</td>
+                  <td>{{ r.refund_type }}</td>
+                  <td class="num">{{ r.amount }}</td>
+                  <td><small>{{ r.reason_ar|default:"—" }}</small></td>
+                  <td><small dir="ltr">{{ r.official_letter_ref|default:"—" }}</small>{% if r.president_approval_ref %}<br><small class="muted" dir="ltr">{{ r.president_approval_ref }}</small>{% endif %}</td>
+                  <td><span class="chip {{ r.status|status_tone }}">{{ r.status_display }}</span>{% if r.executed_at %}<br><small class="muted num">{{ r.executed_at|date:"Y-m-d" }}</small>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا توجد استردادات." %}</p>
+      {% endif %}
+    {% endif %}
+
+  </div>
+</div>
+{% endif %}
+
+{# ---- براءة الذمة والشهادات -------------------------------------------- #}
+{% if "clearances" in hub or "certificates" in hub %}
+<div class="card2">
+  <div class="card2-head"><h2>{% translate "براءة الذمة والشهادات" %}</h2></div>
+  <div class="card2-body">
+    {% if "clearances" in hub %}
+      <span class="sec-title">{% translate "براءات الذمة" %}</span>
+      {% if hub.clearances %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "الرمز" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "النوع" %}</th><th>{% translate "فُتحت في" %}</th><th>{% translate "الحالة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+            <tbody>
+              {% for c in hub.clearances %}
+                <tr>
+                  <td dir="ltr" translate="no"><strong class="num">{{ c.code }}</strong></td>
+                  <td dir="ltr" translate="no" class="num">{{ c.enrollment_code }}</td>
+                  <td>{{ c.case_type_display }}</td>
+                  <td class="num">{{ c.opened_on|date:"Y-m-d" }}</td>
+                  <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span>
+                    {% if c.pending_step_name %}<br><small class="muted">{% translate "المنتظر" %}: {{ c.pending_step_name }}</small>{% endif %}</td>
+                  <td class="acts"><a class="btn2 ghost" href="{% url 'operations:clearance-detail' c.code %}">{% translate "عرض البراءة" %}</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا براءة ذمة بعد — تُفتح من شاشتها بعد أن يبلغ التسجيل مخرجاً (تخرج، انسحاب، فصل)." %}</p>
+      {% endif %}
+    {% endif %}
+
+    {% if "certificates" in hub %}
+      <span class="sec-title" style="margin-top:1rem">{% translate "الشهادات" %}</span>
+      {% if hub.certificates %}
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>{% translate "رقم الشهادة" %}</th><th>{% translate "التسجيل" %}</th><th>{% translate "البرنامج" %}</th><th>{% translate "تاريخ الإصدار" %}</th><th>{% translate "الحالة" %}</th><th><span class="sr-only">{% translate "إجراءات" %}</span></th></tr></thead>
+            <tbody>
+              {% for c in hub.certificates %}
+                <tr>
+                  <td dir="ltr" translate="no"><strong class="num">{{ c.certificate_number }}</strong></td>
+                  <td dir="ltr" translate="no" class="num">{{ c.enrollment_code }}</td>
+                  <td>{{ c.program_name }}</td>
+                  <td class="num">{{ c.issued_on|date:"Y-m-d" }}</td>
+                  <td><span class="chip {{ c.status|status_tone }}">{{ c.status_display }}</span>
+                    {% if c.is_replacement %}<br><small class="muted">{% translate "بدل فاقد عن" %} <span dir="ltr">{{ c.replaces }}</span></small>{% endif %}</td>
+                  <td class="acts"><a class="btn2 ghost" href="{% url 'operations:certificate-print' c.certificate_number %}">{% translate "عرض الشهادة" %}</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">{% translate "لا شهادة بعد — تصدر من شاشة الشهادات بعد اكتمال براءة ذمة التخرج (BR-075)." %}</p>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 {% endblock %}

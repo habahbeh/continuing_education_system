@@ -38,10 +38,14 @@ from apps.billing.services.account_service import ZERO, get_account_state
 from apps.core.display import person_name
 from apps.core.services import period_service
 from apps.core.services.audit_service import write_audit
+from apps.core.services.numbering_service import ensure_sequence, next_number
 from apps.people.constants import Action, Screen
 from apps.people.permissions import policy
 
 ENTITY = "billing.CreditReturn"
+
+#: ``CR-2026-00001`` — the system's own yearly sequence; nobody types one.
+CREDIT_SCOPE = "credit_return"
 
 
 class NoCreditToReturnError(ValidationError):
@@ -66,11 +70,13 @@ def return_credit(
     enrollment: Any,
     returned_on: date,
     reason_ar: str,
-    code: str,
+    code: str = "",
     request: Any = None,
 ) -> CreditReturn:
     """
     Return the whole credit balance so clearance can close (BR-071, BR-073).
+
+    ``code`` is normally empty and drawn from the yearly sequence.
 
     The full amount, deliberately: BR-073 requires the balance to be EXACTLY
     zero before the financial step closes, so a partial return would leave the
@@ -101,13 +107,16 @@ def return_credit(
             f"لا رصيد دائن على التسجيل {enrollment.code} — لا شيء يُعاد (BR-071)."
         )
 
+    if not code.strip():
+        ensure_sequence(CREDIT_SCOPE, str(returned_on.year), padding=5)
+
     return _return_credit(
         actor=actor,
         enrollment=enrollment,
         amount=amount,
         returned_on=returned_on,
         reason_ar=reason_ar.strip(),
-        code=code,
+        code=code.strip(),
         request=request,
     )
 
@@ -125,6 +134,9 @@ def _return_credit(
 ) -> CreditReturn:
     from apps.cashbox.models import AllocationType, PaymentAllocation, ReceiptStatus
 
+    if not code:
+        year = str(returned_on.year)
+        code = next_number(CREDIT_SCOPE, year, prefix=f"CR-{year}-", padding=5)
     record = CreditReturn.objects.create(
         code=code,
         enrollment=enrollment,
@@ -195,6 +207,36 @@ def _return_credit(
     return record
 
 
+def creditable_rows(*, actor: Any, request: Any = None) -> list[dict[str, Any]]:
+    """
+    The enrolments holding a credit balance — the only ones a return can be
+    recorded on (BR-071) — each with the amount that would go back in full.
+    """
+    from apps.operations.models import Enrollment
+
+    policy.require(actor, Screen.REFUNDS, Action.CREATE, request=request)
+
+    rows: list[dict[str, Any]] = []
+    for enrollment in (
+        Enrollment.objects.select_related("participant", "cohort__program")
+        .order_by("-enrolled_on", "-id")[:300]
+    ):
+        credit = outstanding_credit(enrollment)
+        if credit <= ZERO:
+            continue
+        rows.append(
+            {
+                "code": enrollment.code,
+                "participant_name": enrollment.participant.name_ar,
+                "participant_number": enrollment.participant.participant_number,
+                "program_name": enrollment.cohort.program.name_ar,
+                "status_display": enrollment.get_status_display(),
+                "credit": credit,
+            }
+        )
+    return rows
+
+
 def list_credit_returns(
     *, actor: Any, enrollment_code: str = "", request: Any = None
 ) -> list[dict[str, Any]]:
@@ -214,6 +256,7 @@ def list_credit_returns(
             "returned_on": c.returned_on,
             "reason_ar": c.reason_ar,
             "returned_by": person_name(c.returned_by),
+            "participant_number": c.enrollment.participant.participant_number,
         }
         for c in queryset.order_by("-returned_on", "-id")
     ]
@@ -221,6 +264,7 @@ def list_credit_returns(
 
 __all__ = [
     "NoCreditToReturnError",
+    "creditable_rows",
     "list_credit_returns",
     "outstanding_credit",
     "return_credit",

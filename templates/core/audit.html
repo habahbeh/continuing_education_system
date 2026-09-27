@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n arabic_ui %}
 
 {% block content %}
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "الرقابة" %}</span>
-    <h1>{% translate "سجل التدقيق" %}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{% translate "سجل التدقيق" %}</h1>
     <p class="sub">
       {% translate "السجل غير قابل للتعديل ولا الحذف لأي دور — بلا استثناء (BR-084 · D-11)." %}
     </p>
@@ -33,7 +33,7 @@
            placeholder="{% translate 'نوع الكيان…' %}" spellcheck="false">
   </div>
   <button type="submit" class="btn2">{% translate "تصفية" %}</button>
-  <span class="count">{% blocktranslate count n=events|length %}قيد واحد{% plural %}{{ n }} قيداً{% endblocktranslate %}</span>
+  <span class="count">{{ events|length|ar_count:"قيد واحد|قيدان|قيود|قيداً" }}</span>
 </form>
 
 <div class="card2">

@@ -16,6 +16,8 @@ urlpatterns = [
     # screen. Mounted at the root because the app now serves several distinct
     # sections; the auth paths keep their /auth/ prefix inside the app so they
     # are never confused with a future SSO callback mount point.
+    # هوية المؤسسة: مسار عامّ يقدّم الشعار قبل المصادقة (صفحة الدخول تحتاجه).
+    path("", include("apps.core.urls")),
     path("", include("apps.people.urls")),
     path("", include("apps.catalog.urls")),
     # Sprint 8B — the operational screens. Mounted at the root like the rest

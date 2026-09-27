@@ -181,7 +181,6 @@ def test_a_refund_runs_request_approve_execute(
         {
             "action": "request",
             "enrollment_code": enrollment.code,
-            "code": "RF-UI-1",
             "refund_type": "PARTIAL",
             "amount": "100.000",
             "reason_ar": "إلغاء الدورة لعدم اكتمال العدد",
@@ -192,14 +191,19 @@ def test_a_refund_runs_request_approve_execute(
         },
         follow=True,
     )
+    # The code is the system's own yearly sequence, never typed.
+    from apps.billing.models import Refund
+
+    code = Refund.objects.get().code
+    assert code.startswith("RF-")
     signed_in(manager).post(
-        reverse("billing:refunds"), {"action": "approve", "code": "RF-UI-1"}, follow=True
+        reverse("billing:refunds"), {"action": "approve", "code": code}, follow=True
     )
     page = signed_in(finance).post(
-        reverse("billing:refunds"), {"action": "execute", "code": "RF-UI-1"}, follow=True
+        reverse("billing:refunds"), {"action": "execute", "code": code}, follow=True
     )
 
-    row = next(r for r in page.context["refunds"] if r["code"] == "RF-UI-1")
+    row = next(r for r in page.context["refunds"] if r["code"] == code)
     assert row["status"] == "EXECUTED"
 
 
@@ -256,13 +260,12 @@ def test_a_credit_return_is_offered_beside_a_refund_and_is_not_one(
         {
             "action": "return-credit",
             "enrollment_code": enrollment.code,
-            "code": "CR-UI-1",
             "returned_on": "2026-09-20",
             "reason_ar": "ردّ زيادة",
         },
         follow=True,
     )
-    row = next(r for r in response.context["credit_returns"] if r["code"] == "CR-UI-1")
+    row = next(r for r in response.context["credit_returns"] if r["code"].startswith("CR-"))
     assert row["amount"] == Decimal("30.000")
 
 
@@ -281,7 +284,7 @@ def test_an_extra_fee_uses_the_configured_amount(signed_in, manager, enrolled) -
             "subject_name": "مبادئ المحاسبة",
             "charged_on": "2026-09-20",
             "prior_agreement_with_participant": "",
-            "is_partner_shareable": "unknown",
+            "is_partner_shareable": "",
         },
         follow=True,
     )
@@ -303,7 +306,7 @@ def test_an_international_exam_fee_needs_the_prior_agreement(signed_in, manager,
             "subject_name": "",
             "charged_on": "2026-09-20",
             "prior_agreement_with_participant": "",
-            "is_partner_shareable": "unknown",
+            "is_partner_shareable": "",
         },
         follow=True,
     )

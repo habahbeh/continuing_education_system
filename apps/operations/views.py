@@ -17,26 +17,34 @@ from __future__ import annotations
 import csv
 import io
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 
 from apps.billing.services import account_service
+from apps.catalog.services import pricing_service
 from apps.billing.services.account_service import ZERO
+from apps.core.pagination import page_of
 from apps.operations.forms import (
     CertificateDateForm,
     CertificateIssueForm,
     ClearanceCancelForm,
     ClearanceOpenForm,
+    CohortCancelForm,
+    CohortEditForm,
     CohortForm,
     CreditReturnAtClearanceForm,
     CustodyForm,
@@ -48,6 +56,7 @@ from apps.operations.forms import (
     MoheResubmissionForm,
     MoheSendForm,
     MoheSubmissionForm,
+    QuickEnrollmentForm,
     TransferExecuteForm,
     TransferRejectForm,
     TransferRequestForm,
@@ -82,6 +91,64 @@ def _message_of(exc: Exception) -> str:
 #: charting library — and why it degrades to an empty strip rather than to a
 #: broken graphic when there is nothing to show.
 DASHBOARD_BAR_SEGMENTS = 12
+
+#: Rows rendered per pending-work tab. The counter on the tab is the full
+#: count; the table under it is a preview and its «افتح الشاشة» button opens
+#: the rest. A queue of four hundred enrolments rendering four hundred rows —
+#: five of them in hidden tabs — is what made the landing page slow, not the
+#: queries behind it.
+DASHBOARD_QUEUE_ROWS = 8
+
+
+def _stack(parts: list[tuple[Any, int, str]], total: int, cells: int = 24) -> list[dict[str, Any]]:
+    """
+    A one-line stacked bar as tone-classed cells — the dashboard draws with
+    classes, never with widths (no inline style survives 8J-5). Integer
+    arithmetic throughout (A-01b); the last part absorbs the rounding, and any
+    part above zero lights at least one cell.
+    """
+    if not total:
+        return []
+    out: list[dict[str, Any]] = []
+    used = 0
+    for index, (label, value, tone) in enumerate(parts):
+        if index == len(parts) - 1:
+            n = cells - used
+        else:
+            n = min(max(value * cells // total, 1 if value else 0), cells - used)
+        out.append({"label": label, "value": value, "tone": tone, "cells": range(n)})
+        used += n
+    return out
+
+
+#: Resolution of a solid bar: the fill is one of twenty-one classes
+#: (``lv-0`` … ``lv-20``), never a computed width — the same reason the cell
+#: bars exist, with a smoother fill.
+DASHBOARD_LEVELS = 20
+
+
+def _level(value: int, scale: int) -> int:
+    """``value`` out of ``scale`` in twentieths; anything above zero shows."""
+    if value <= 0 or scale <= 0:
+        return 0
+    return max(1, min(DASHBOARD_LEVELS, (value * DASHBOARD_LEVELS + scale - 1) // scale))
+
+
+def _donut(parts: list[tuple[Any, int, str]], total: int) -> list[dict[str, Any]]:
+    """
+    Segments of a ring as whole percentages: each part's share and where it
+    starts, so the template writes two SVG attributes and no style. The last
+    part absorbs the rounding so the ring always closes at 100.
+    """
+    if not total:
+        return []
+    out: list[dict[str, Any]] = []
+    used = 0
+    for index, (label, value, tone) in enumerate(parts):
+        pct = 100 - used if index == len(parts) - 1 else value * 100 // total
+        out.append({"label": label, "value": value, "tone": tone, "pct": pct, "offset": used})
+        used += pct
+    return out
 
 
 def _bar(value: int, scale: int) -> list[bool]:
@@ -131,31 +198,136 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     waiting: list[dict[str, Any]] = []
     distribution: list[dict[str, Any]] = []
 
-    def _kpi(label: Any, value: int, foot: Any, route: str, *, lead: bool = False) -> None:
+    def _kpi(
+        label: Any,
+        value: int,
+        foot: Any,
+        route: str,
+        *,
+        lead: bool = False,
+        icon: str = "dot",
+        tone: str = "brand",
+        query: str = "",
+    ) -> None:
         kpis.append(
-            {"label": label, "value": value, "foot": foot, "url": reverse(route), "lead": lead}
+            {
+                "label": label,
+                "value": value,
+                "foot": foot,
+                "url": reverse(route) + (f"?{query}" if query else ""),
+                "lead": lead,
+                "icon": icon,
+                "tone": tone,
+            }
         )
 
-    def _waiting(label: Any, value: int, foot: Any, route: str) -> None:
+    def _waiting(label: Any, value: int, foot: Any, route: str, query: str = "") -> None:
         """A queue only earns a line while something is actually in it."""
         if value:
-            waiting.append({"label": label, "value": value, "foot": foot, "url": reverse(route)})
+            url = reverse(route) + (f"?{query}" if query else "")
+            waiting.append({"label": label, "value": value, "foot": foot, "url": url})
+
+    # Sprint 8I — the pending-work table: one tab per queue, each a list of
+    # rows the reader may already open. Filled only from rows the blocks
+    # below have already fetched for their counters — no second query.
+    queues: list[dict[str, Any]] = []
+    charts: dict[str, Any] = {}
+
+    def _queue(
+        key: str,
+        label: Any,
+        rows_: list[dict[str, Any]],
+        route: str,
+        columns: Any,
+        *,
+        icon: str = "dot",
+        tone: str = "brand",
+    ) -> None:
+        """A tab exists even when empty — an empty queue is news too."""
+        queues.append(
+            {
+                "key": key,
+                "label": label,
+                "rows": rows_[:DASHBOARD_QUEUE_ROWS],
+                "count": len(rows_),
+                "more": max(len(rows_) - DASHBOARD_QUEUE_ROWS, 0),
+                "url": reverse(route),
+                "columns": columns,
+                "icon": icon,
+                "tone": tone,
+            }
+        )
 
     if _may(Screen.ENROLLMENTS):
         rows = enrollment_service.list_enrollments(actor=actor, request=request)
+        owed = sum((r["balance"] for r in rows if r["participant_owes"]), Decimal("0.000"))
+        _kpi(
+            _("ذمم المشاركين"),
+            owed,
+            _("مجموع أرصدة «عليه» في التسجيلات القائمة"),
+            "operations:enrollments",
+            lead=True,
+            icon="wallet",
+            tone="danger",
+        )
         _kpi(
             _("أرصدة غير مسوّاة"),
             sum(1 for r in rows if not r["is_settled"]),
             _("تسجيل لم يُغلق حسابه بعد"),
             "operations:enrollments",
-            lead=True,
+            icon="scale",
+            tone="warn",
         )
-        _kpi(_("التسجيلات"), len(rows), _("الإجمالي القائم"), "operations:enrollments")
+        _kpi(
+            _("التسجيلات"),
+            len(rows),
+            _("الإجمالي القائم"),
+            "operations:enrollments",
+            icon="list",
+            tone="info",
+        )
         _waiting(
             _("بانتظار الوصل"),
             sum(1 for r in rows if not r["voucher_received"]),
             _("لا يُعتمد التسجيل قبل تسجيل الوصل (BR-018)"),
             "operations:enrollments",
+        )
+        # Who owes, who is owed, who is square — the split behind the lead KPI.
+        split = [
+            (_("عليه"), sum(1 for r in rows if r["participant_owes"]), "danger"),
+            (_("مسوّى"), sum(1 for r in rows if r["is_settled"]), "ok"),
+            (_("له"), sum(1 for r in rows if r["centre_owes"]), "warn"),
+        ]
+        # A chart of nothing is not a chart — no rows, no card.
+        if rows:
+            charts["balances"] = {"parts": _donut(split, len(rows)), "total": len(rows)}
+        live = [r for r in rows if not r["is_final"]]
+        _queue(
+            "voucher",
+            _("بانتظار الوصل"),
+            [r for r in live if not r["voucher_received"]],
+            "operations:enrollments",
+            "enrollment",
+            icon="receipt",
+            tone="warn",
+        )
+        _queue(
+            "approve",
+            _("بانتظار الاعتماد"),
+            [r for r in live if r["voucher_received"] and not r["is_approved"]],
+            "operations:enrollments",
+            "enrollment",
+            icon="stamp",
+            tone="info",
+        )
+        _queue(
+            "owing",
+            _("عليه رصيد"),
+            [r for r in live if r["is_approved"] and r["participant_owes"]],
+            "operations:enrollments",
+            "enrollment",
+            icon="wallet",
+            tone="danger",
         )
         # A grouping of rows already fetched — not a query, not a calculation,
         # and not a report. Every enrolment is counted once under the status
@@ -165,36 +337,127 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         # the counter above it. The chart earns its place from two upward.
         if len(tally) > 1:
             distribution = [
-                {"label": label, "value": count, "bar": _bar(count, len(rows))}
+                {
+                    "label": label,
+                    "value": count,
+                    "level": _level(count, len(rows)),
+                    "pct": count * 100 // len(rows),
+                }
                 for label, count in tally.most_common()
             ]
 
     if _may(Screen.COHORTS):
         cohorts = cohort_service.list_cohorts(actor=actor, request=request)
-        _kpi(_("الدفعات المُشغّلة"), len(cohorts), _("دفعة قائمة"), "operations:cohorts")
+        _kpi(
+            _("الدفعات المُشغّلة"),
+            len(cohorts),
+            _("دفعة قائمة"),
+            "operations:cohorts",
+            icon="calendar",
+            tone="violet",
+        )
 
     if _may(Screen.PAYMENTS):
         from apps.cashbox.services import payment_service
 
-        receipts = payment_service.list_receipts(actor=actor, on_date=today, request=request)
-        issued = [r for r in receipts if r["status"] == "ISSUED"]
-        _kpi(_("سندات اليوم"), len(issued), _("سند قبض صادر اليوم"), "cashbox:payments")
+        # One read covers today's counter and the week's chart.
+        week_rows = [
+            r
+            for r in payment_service.list_receipts(
+                actor=actor, since=today - timedelta(days=6), request=request
+            )
+            if r["status"] == "ISSUED"
+        ]
+        issued = [r for r in week_rows if r["received_on"] == today]
+        _kpi(
+            _("سندات اليوم"),
+            len(issued),
+            _("سند قبض صادر اليوم"),
+            "cashbox:payments",
+            icon="coins",
+            tone="ok",
+            query="range=today",
+        )
+        days = []
+        for back in range(6, -1, -1):
+            day = today - timedelta(days=back)
+            day_rows = [r for r in week_rows if r["received_on"] == day]
+            days.append(
+                {
+                    "label": day.strftime("%d/%m"),
+                    "amount": sum((r["amount"] for r in day_rows), Decimal("0.000")),
+                    "count": len(day_rows),
+                }
+            )
+        peak = max((d["amount"] for d in days), default=Decimal("0"))
+        for d in days:
+            # One solid column per day, its height a class out of twenty.
+            # Whole dinars into whole levels (A-01b).
+            d["level"] = _level(int(d["amount"]), int(peak))
+            d["is_today"] = d["label"] == today.strftime("%d/%m")
+        week_total = sum((d["amount"] for d in days), Decimal("0.000"))
+        if week_total:
+            charts["week"] = {"days": days, "total": week_total}
         _waiting(
             _("سندات لم تدخل إقفالاً"),
             sum(1 for r in issued if not r["is_closed"]),
             _("من سندات اليوم، بانتظار إقفال الصندوق"),
             "cashbox:payments",
+            query="range=today&status=unclosed",
         )
 
+    alerts: list[dict[str, Any]] = []
     if _may(Screen.CLOSING):
         from apps.cashbox.services import closing_service
 
         closings = closing_service.list_closings(actor=actor, request=request)
+        # Cashier-days with receipts and no closing: the queue, and — when
+        # one is older than yesterday — a banner. A till left open is a
+        # control failure, not a backlog.
+        open_days = closing_service.open_days(actor=actor, request=request)
+        for d in open_days:
+            d["age"] = (today - d["closing_date"]).days
+            d["url"] = (
+                reverse("cashbox:closing")
+                + f"?cashier={d['cashier_id']}&on={d['closing_date'].isoformat()}#close-day"
+            )
+        overdue = [d for d in open_days if d["age"] >= 1]
+        if overdue:
+            oldest = max(d["age"] for d in overdue)
+            alerts.append(
+                {
+                    "tone": "danger" if oldest >= 3 else "warn",
+                    "icon": "vault",
+                    "title": _("%(n)s من أيام الصندوق بلا إقفال") % {"n": len(overdue)},
+                    "body": _("أقدمها منذ %(d)s يوماً. يُقفل كل صندوق في نهاية يوم عمله (BR-026).")
+                    % {"d": oldest},
+                    "url": reverse("cashbox:closing") + "#open-days",
+                    "action": _("افتح الإقفال اليومي"),
+                }
+            )
+        _queue(
+            "open_days",
+            _("أيام صندوق بلا إقفال"),
+            open_days,
+            "cashbox:closing",
+            "open_day",
+            icon="clock",
+            tone="amber",
+        )
         _waiting(
             _("إقفالات لم تُعتمد"),
             sum(1 for c in closings if c["status"] in {"OPEN", "VARIANCE_PENDING"}),
             _("من قبض المال لا يوقّع على عدّه (BR-028)"),
             "cashbox:closing",
+        )
+        _queue(
+            "closing",
+            _("إقفالات معلّقة"),
+            [c for c in closings if c["status"] in {"OPEN", "VARIANCE_PENDING"}],
+            "cashbox:closing",
+            "closing",
+            icon="vault",
+            tone="teal",
         )
 
     if _may(Screen.TRANSFERS):
@@ -209,6 +472,19 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             _("لم تُنفَّذ ولم تُرفض بعد"),
             "operations:transfers",
         )
+        _queue(
+            "transfer",
+            _("طلبات النقل"),
+            [
+                t
+                for t in transfers
+                if t["status"] in {"DRAFT", "PENDING_MANAGER", "PENDING_FINANCE"}
+            ],
+            "operations:transfers",
+            "transfer",
+            icon="swap",
+            tone="violet",
+        )
 
     if _may(Screen.CLEARANCE):
         clearances = clearance_service.list_clearances(actor=actor, request=request)
@@ -218,6 +494,30 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             _("لا شهادة بلا براءة مكتملة (BR-075)"),
             "operations:clearances",
         )
+        open_clearances = [c for c in clearances if not c["is_completed"]]
+        _queue(
+            "clearance",
+            _("براءات الذمة"),
+            open_clearances,
+            "operations:clearances",
+            "clearance",
+            icon="shield-check",
+            tone="ok",
+        )
+        # Where the open clearances stand: which step each waits on.
+        by_step = Counter(
+            str(c["pending_step_name"] or c["status_display"]) for c in open_clearances
+        )
+        if by_step:
+            charts["clearances"] = [
+                {
+                    "label": label,
+                    "value": count,
+                    "level": _level(count, len(open_clearances)),
+                    "pct": count * 100 // len(open_clearances),
+                }
+                for label, count in by_step.most_common()
+            ]
 
     if _may(Screen.CLAIMS):
         from apps.settlements.services import claim_service
@@ -228,6 +528,15 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             len(claims),
             _("مرفوعة ولم يُبتّ فيها"),
             "settlements:claims",
+        )
+        _queue(
+            "claim",
+            _("مطالبات معلّقة"),
+            claims,
+            "settlements:claims",
+            "claim",
+            icon="building",
+            tone="amber",
         )
 
     # Each queue against the longest one, so "which of these is the big one"
@@ -246,15 +555,92 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # A stop the reader may not open keeps its place and loses its link — the
     # rule the guided help follows, for the same reason: the shape of the work
     # belongs to everyone, the screens do not.
+    #
+    # Each stop carries a tone and an icon from the sidebar sprite: eight
+    # stops in one colour read as one long bar, and the colour repeats on the
+    # same screen's sidebar entry so the map and the menu agree.
     flow = [
-        {"label": label, "url": reverse(route) if _may(screen) else ""}
-        for screen, route, label in (
-            (Screen.STUDENT_NEW, "people:participant-new", _("طلب التحاق")),
-            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيل")),
-            (Screen.PAYMENT_NEW, "cashbox:payment-new", _("استيفاء دفعة")),
-            (Screen.CLOSING, "cashbox:closing", _("الإقفال اليومي")),
-            (Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
-            (Screen.CERTIFICATES, "operations:certificates", _("الشهادة")),
+        {
+            "label": label,
+            "who": who,
+            "icon": icon,
+            "tone": tone,
+            "desc": desc,
+            "url": reverse(route) if _may(screen) else "",
+        }
+        for screen, route, label, who, icon, tone, desc in (
+            (
+                Screen.MOHE,
+                "operations:mohe",
+                _("اعتماد الوزارة"),
+                _("مدير المركز"),
+                "stamp",
+                "violet",
+                _("فتح ملف الدفعة وإرساله للوزارة وتسجيل قرارها — لا تسجيل قبل الاعتماد (BR-013)."),
+            ),
+            (
+                Screen.STUDENT_NEW,
+                "people:participant-new",
+                _("طلب التحاق"),
+                _("موظف التسجيل"),
+                "user-plus",
+                "info",
+                _("إدخال بيانات المشارك وفئته، ويُولَّد رقمه الجامعي."),
+            ),
+            (
+                Screen.ENROLLMENTS,
+                "operations:enrollments",
+                _("التسجيل"),
+                _("مدير المركز"),
+                "list",
+                "brand",
+                _("تنسيب المشارك على دفعة معتمدة وتسعيره بقائمة الأسعار السارية (BR-012)."),
+            ),
+            (
+                Screen.PAYMENT_NEW,
+                "cashbox:payment-new",
+                _("سند القبض"),
+                _("الصندوق"),
+                "coins",
+                "ok",
+                _("قبض الدفعة وتوزيعها على البنود، ثم إصدار سند القبض."),
+            ),
+            (
+                Screen.ENROLLMENTS,
+                "operations:enrollments",
+                _("الاعتماد"),
+                _("التسجيل ثم المدير"),
+                "doc-check",
+                "amber",
+                _("تسجيل الوصل من موظف التسجيل، ثم اعتماد المدير للتسجيل (BR-018)."),
+            ),
+            (
+                Screen.CLOSING,
+                "cashbox:closing",
+                _("الإقفال"),
+                _("الصندوق"),
+                "vault",
+                "teal",
+                _("عدّ صندوق اليوم ومطابقته بسندات النظام، ثم اعتماد الإقفال (BR-028)."),
+            ),
+            (
+                Screen.CLEARANCE,
+                "operations:clearances",
+                _("براءة الذمة"),
+                _("المركز والمالية"),
+                "shield-check",
+                "warn",
+                _("إخلاء طرف المشارك على خطوات: العُهد، والمالية، والشهادة."),
+            ),
+            (
+                Screen.CERTIFICATES,
+                "operations:certificates",
+                _("الشهادة"),
+                _("مدير المركز"),
+                "award",
+                "danger",
+                _("إصدار الشهادة للخرّيج بعد اكتمال براءة الذمة (BR-075)."),
+            ),
         )
     ]
 
@@ -274,34 +660,6 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         if any(_may(screen) for screen in screens)
     ]
 
-    # The two or three things this reader is most likely to have come to do.
-    # ``ENROLL_FLOW`` is absent on purpose: the guided-help block above already
-    # offers it, and offering it twice on one screen is noise, not emphasis.
-    actions = [
-        {"url": reverse(route), "label": label, "hint": hint}
-        for screen, route, label, hint in (
-            (
-                Screen.STUDENT_NEW,
-                "people:participant-new",
-                _("طلب التحاق جديد"),
-                _("بيانات المشارك وفئته، ويُولَّد رقمه الجامعي"),
-            ),
-            (
-                Screen.PAYMENT_NEW,
-                "cashbox:payment-new",
-                _("استيفاء دفعة"),
-                _("قبض وتوزيع على البنود، ثم سند قبض"),
-            ),
-            (
-                Screen.TRANSFER_NEW,
-                "operations:transfer-new",
-                _("طلب نقل جديد"),
-                _("فحص الشروط وفرق الرسوم قبل التقديم"),
-            ),
-        )
-        if _may(screen)
-    ]
-
     return render(
         request,
         "operations/dashboard.html",
@@ -311,8 +669,11 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
             "today": today,
             "kpis": kpis[:4],
             "waiting": waiting,
-            "actions": actions,
             "distribution": distribution,
+            "charts": charts,
+            "alerts": alerts,
+            "queues": queues,
+            "pending_total": sum(q["count"] for q in queues),
             "flow": flow,
             "scope": scope,
         },
@@ -326,29 +687,106 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 def cohorts_view(request: HttpRequest) -> HttpResponse:
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
-    rows = cohort_service.list_cohorts(
-        actor=request.user, query=query, status=status, request=request
-    )
+
     can_create = policy.is_allowed(request.user, Screen.COHORTS, Action.CREATE)
+    can_edit = policy.is_allowed(request.user, Screen.COHORTS, Action.EDIT)
+    can_cancel = policy.is_allowed(request.user, Screen.COHORTS, Action.APPROVE)
+    action = request.POST.get("action", "") if request.method == "POST" else ""
+    posted_code = request.POST.get("cohort_code", "") if request.method == "POST" else ""
+
     form = None
+    programs: list[dict[str, Any]] = []
+    semesters: list[dict[str, Any]] = []
+    suggestions: dict[str, list[str]] = {}
     if can_create:
+        programs = cohort_service.program_options(actor=request.user, request=request)
+        semesters = cohort_service.semester_options(actor=request.user, request=request)
+        suggestions = cohort_service.field_suggestions(actor=request.user, request=request)
         form = CohortForm(
-            request.POST or None,
-            program_choices=cohort_service.program_choices(actor=request.user, request=request),
-            semester_choices=cohort_service.semester_choices(actor=request.user, request=request),
+            # الطريقة هي ما يقرّر الربط، لا وجود المفتاح: في GET تكون
+            # ``request.POST`` قاموساً فارغاً لا «لا شيء»، فيُبنى النموذج
+            # مربوطاً بلا بيانات، وتمتلئ ``errors`` بكل حقل إلزامي — فيفتح
+            # الحوار نفسه لحظة فتح الشاشة. نفس العلّة أُصلحت في نموذج التسجيل.
+            request.POST if request.method == "POST" and action in ("", "open") else None,
+            program_choices=[(p["code"], p["label"]) for p in programs],
+            semester_choices=[(s["code"], s["label"]) for s in semesters],
             agreement_choices=_agreement_choices(request),
         )
 
+    agreements = _agreement_choices(request)
+    edit_form = CohortEditForm(
+        request.POST if action == "edit" else None, agreement_choices=agreements
+    )
+    cancel_form = CohortCancelForm(request.POST if action == "cancel" else None)
+
     if request.method == "POST":
-        if form is None:
-            raise PermissionDenied
-        if form.is_valid():
-            try:
-                cohort_service.open_cohort(actor=request.user, request=request, **form.cleaned_data)
-                messages.success(request, _("فُتحت الدفعة"))
-                return redirect("operations:cohorts")
-            except DjangoValidationError as exc:
-                messages.error(request, _message_of(exc))
+        response = _handle_cohort_action(
+            request, action, form=form, edit_form=edit_form, cancel_form=cancel_form
+        )
+        if response is not None:
+            return response
+
+    rows = cohort_service.list_cohorts(
+        actor=request.user, query=query, status=status, request=request
+    )
+    for row in rows:
+        row["seat_level"] = _level(row["enrolled_count"], row["capacity"])
+        # Drawn per row so a dialog opens on the cohort it belongs to and no
+        # role sees an act it may not perform.
+        row["offers_start"] = can_edit and row["can_start"]
+        row["offers_complete"] = can_edit and row["can_complete"]
+        row["offers_cancel"] = can_cancel and row["can_cancel"]
+        row["offers_edit"] = can_edit and row["can_edit_row"]
+    # The strip above the register answers «كم دفعة تحتاج مني؟» over the whole
+    # register, not the filtered slice — a tile that shrank with the filter it
+    # opens would count itself. Counts of rows only (no money, no forecast).
+    everything = (
+        rows
+        if not (query or status)
+        else cohort_service.list_cohorts(actor=request.user, request=request)
+    )
+    base = reverse("operations:cohorts")
+
+    def _stage_tile(label: str, stage: str, icon: str, tone: str) -> dict[str, Any]:
+        return {
+            "label": label,
+            "value": sum(1 for r in everything if r["stage"] == stage),
+            "url": f"{base}?stage={stage}",
+            "icon": icon,
+            "tone": tone,
+            "on": request.GET.get("stage", "") == stage,
+        }
+
+    tiles = [
+        {
+            "label": _("كل الدفعات"),
+            "value": len(everything),
+            "url": base,
+            "icon": "calendar",
+            "tone": "brand",
+            "on": not (query or status or request.GET.get("stage")),
+        },
+        _stage_tile(_("بانتظار الملف الوزاري"), "NEEDS_FILE", "stamp", "warn"),
+        _stage_tile(_("بانتظار قرار الوزارة"), "AT_MOHE", "clock", "info"),
+        _stage_tile(_("جاهزة للتسجيل"), "ENROLLABLE", "checks", "ok"),
+        _stage_tile(_("قيد التنفيذ"), "RUNNING", "route", "ok"),
+        {
+            "label": _("مقاعد متاحة"),
+            "value": sum(
+                r["seats_left"] for r in everything if r["stage"] in ("ENROLLABLE", "RUNNING")
+            ),
+            "url": base,
+            "icon": "users",
+            "tone": "info",
+            "on": False,
+        },
+    ]
+
+    # The stage is the reader's filter; the stored status stays reachable from a
+    # URL for anyone who has one bookmarked.
+    stage = request.GET.get("stage", "").strip()
+    if stage:
+        rows = [r for r in rows if r["stage"] == stage]
 
     return render(
         request,
@@ -358,25 +796,129 @@ def cohorts_view(request: HttpRequest) -> HttpResponse:
             "active_screen": Screen.COHORTS,
             "cohorts": rows,
             "form": form,
+            "edit_form": edit_form,
+            "cancel_form": cancel_form,
             "can_create": can_create,
+            "can_edit": can_edit,
+            "can_cancel": can_cancel,
             "query": query,
             # ``status`` has been reachable from the URL all along and was
             # drawn nowhere, so a narrowed list looked like the whole register.
             # Naming it adds no filter and opens no field: the column it names
             # is in the table for every role that may open this screen.
-            "active_filters": _cohort_active_filters(rows, query, status),
+            "active_filters": _cohort_active_filters(rows, query, status, stage),
             "status_counts": _cohort_status_counts(rows),
+            # The open-cohort dialog chooses, it does not type: programmes
+            # grouped by kind with their levels, semesters with their dates,
+            # trainers and places already on record.
+            "tiles": tiles,
+            "programs": programs,
+            "semesters": semesters,
+            "suggestions": suggestions,
+            "stages": cohort_service.STAGES,
+            "stage": stage,
+            "status_choices": cohort_service.status_choices(),
+            "statuses": status,
+            "posted_action": action,
+            "posted_code": posted_code,
+            "today": timezone.localdate(),
+            "can_submit_mohe": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.VIEW),
+            # §9.7 — an expense is recorded on a cohort from its row.
+            "can_record_expense": policy.is_allowed(request.user, Screen.EXPENSES, Action.CREATE),
+            "can_view_enrollments": policy.is_allowed(
+                request.user, Screen.ENROLLMENTS, Action.VIEW
+            ),
         },
     )
 
 
+#: The acts a row offers, and the cell of §3.3/12 each one asks for. Cancelling
+#: is APPROVE because it opens a full refund (§5.3); the rest are corrections.
+COHORT_ACTIONS = {
+    "open": Action.CREATE,
+    "edit": Action.EDIT,
+    "start": Action.EDIT,
+    "complete": Action.EDIT,
+    "cancel": Action.APPROVE,
+}
+
+
+def _handle_cohort_action(
+    request: HttpRequest,
+    action: str,
+    *,
+    form: CohortForm | None,
+    edit_form: CohortEditForm,
+    cancel_form: CohortCancelForm,
+) -> HttpResponse | None:
+    """One POST target for the register; every act passes its own gate."""
+    action = action or "open"
+    if action not in COHORT_ACTIONS:
+        raise Http404(_("إجراء غير معروف"))
+    policy.require(request.user, Screen.COHORTS, COHORT_ACTIONS[action], request=request)
+
+    if action == "open":
+        if form is None:
+            raise PermissionDenied
+        if not form.is_valid():
+            return None
+        try:
+            cohort_service.open_cohort(actor=request.user, request=request, **form.cleaned_data)
+            messages.success(request, _("فُتحت الدفعة"))
+            return redirect("operations:cohorts")
+        except DjangoValidationError as exc:
+            messages.error(request, _message_of(exc))
+            return None
+
+    code = request.POST.get("cohort_code", "").strip()
+    try:
+        cohort = cohort_service.get_cohort_instance(actor=request.user, code=code, request=request)
+    except ObjectDoesNotExist:
+        raise Http404(_("لا توجد دفعة بهذا الرمز")) from None
+
+    try:
+        if action == "edit":
+            if not edit_form.is_valid():
+                return None
+            cohort_service.update_cohort(
+                actor=request.user, cohort=cohort, data=dict(edit_form.cleaned_data), request=request
+            )
+            messages.success(request, _("حُفظت بيانات الدفعة"))
+        elif action == "start":
+            cohort_service.start_cohort(actor=request.user, cohort=cohort, request=request)
+            messages.success(request, _("بدأ تنفيذ الدفعة"))
+        elif action == "complete":
+            cohort_service.complete_cohort(actor=request.user, cohort=cohort, request=request)
+            messages.success(request, _("أُنهيت الدفعة"))
+        elif action == "cancel":
+            if not cancel_form.is_valid():
+                return None
+            cohort_service.cancel_for_low_enrollment(
+                actor=request.user,
+                cohort=cohort,
+                reason_ar=cancel_form.cleaned_data["reason_ar"],
+                request=request,
+            )
+            messages.success(
+                request,
+                _("أُلغيت الدفعة لقلة التسجيل — المسجَّلون عليها يستحقون استرداداً كاملاً (§5.3)."),
+            )
+    except (DjangoValidationError, PermissionDenied) as exc:
+        messages.error(request, _message_of(exc))
+        return None
+    return redirect(f"{reverse('operations:cohorts')}?q={code}")
+
+
 def _cohort_active_filters(
-    rows: list[dict[str, Any]], query: str, status: str
+    rows: list[dict[str, Any]], query: str, status: str, stage: str = ""
 ) -> list[tuple[str, str]]:
     """The filters this request is narrowing by, named for the reader."""
     active: list[tuple[str, str]] = []
     if query:
         active.append((_("بحث"), query))
+    if stage:
+        label, _tone = cohort_service.STAGE_LOOK.get(stage, (stage, ""))
+        active.append((_("المرحلة"), label))
     if status:
         # The label off the drawn rows, never the stored code: a filter that
         # matches nothing has no row to read it from, and printing the enum is
@@ -394,13 +936,16 @@ def _cohort_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     the table, and so they describe this request's result rather than the
     register. A state nobody is in gets no chip rather than a zero.
     """
-    tally: dict[tuple[str, str], int] = {}
+    # Tallied by STAGE, which is what the rows themselves are labelled by: two
+    # vocabularies over one table — «مخطَّطة» in the chips and «جاهزة للتسجيل»
+    # in the rows — was the ambiguity this screen was fixed for.
+    tally: dict[tuple[str, str, str], int] = {}
     for row in rows:
-        key = (str(row["status"]), str(row["status_display"]))
+        key = (str(row["stage"]), str(row["stage_display"]), str(row["stage_tone"]))
         tally[key] = tally.get(key, 0) + 1
     return [
-        {"status": status, "label": label, "count": count}
-        for (status, label), count in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0][0]))
+        {"status": stage, "label": label, "tone": tone, "count": count}
+        for (stage, label, tone), count in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0][0]))
     ]
 
 
@@ -414,44 +959,101 @@ def _agreement_choices(request: HttpRequest) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 # Enrolments (Screen.ENROLLMENTS)
 # ---------------------------------------------------------------------------
+def _enrollment_form(request: HttpRequest, data: Any = None) -> EnrollmentForm:
+    """
+    The creation form, with the only two lists it may offer.
+
+    Both are guarded, though §3.2 gives STUDENTS VIEW to both roles that may
+    create an enrolment — so a list is empty only for a role that could not
+    have submitted anyway. Only ministry-approved cohorts are offered, because
+    BR-013 refuses the rest and a dropdown leading to a refusal is a trap.
+    """
+    return EnrollmentForm(
+        data,
+        cohort_choices=cohort_service.cohort_choices(actor=request.user, request=request)
+        if policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW)
+        else [],
+        participant_choices=participant_service.participant_choices(
+            actor=request.user, request=request
+        )
+        if policy.is_allowed(request.user, Screen.STUDENTS, Action.VIEW)
+        else [],
+    )
+
+
 @require_http_methods(["GET", "POST"])
+def enrollment_new_view(request: HttpRequest) -> HttpResponse:
+    """
+    Creating an enrolment, on its own screen.
+
+    The form used to live in the foot of the register, which put it 1289px
+    down at 1440 and 1909px at 1024 on a page two and a half screens tall: a
+    rejected field drew its message inside a card the reader could not see,
+    and the register had to grow an error summary at its top to point at a
+    form two screens below. A list screen lists and a form screen forms —
+    which is how the till, this system's reference form screen, is built.
+
+    The permission is the register's own CREATE: no new cell, no new matrix
+    row, and a reader without it is refused here rather than handed a form
+    whose save would be refused and written down as a DENIED_ATTEMPT (BR-085).
+    """
+    policy.require(request.user, Screen.ENROLLMENTS, Action.CREATE, request=request)
+
+    # The method is what decides whether the form is bound. ``request.POST or
+    # None`` read an EMPTY body as "not submitted", so a POST carrying nothing
+    # came back as a pristine form with no error and no message at all.
+    posted = request.method == "POST"
+    form = _enrollment_form(request, request.POST if posted else None)
+
+    if posted and form.is_valid():
+        response = _create_enrollment(request, form)
+        if response is not None:
+            return response
+
+    return render(
+        request,
+        "operations/enrollment_new.html",
+        {
+            "title": _("تسجيل جديد"),
+            "active_screen": Screen.ENROLLMENTS,
+            "form": form,
+            # Named at the top so a refusal is read rather than hunted.
+            "error_fields": [
+                {"label": form[name].label, "id": form[name].auto_id}
+                for name in form.fields
+                if form.is_bound and form[name].errors
+            ],
+            "today": timezone.localdate(),
+        },
+    )
+
+
+@require_http_methods(["GET"])
 def enrollments_view(request: HttpRequest) -> HttpResponse:
     can_create = policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.CREATE)
-    form = None
-    if can_create:
-        form = EnrollmentForm(
-            request.POST or None,
-            cohort_choices=cohort_service.cohort_choices(actor=request.user, request=request)
-            if policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW)
-            else [],
-            # Guarded like the cohorts above it, though §3.2 gives STUDENTS
-            # VIEW to both roles that may create an enrolment — so the list is
-            # empty only for a role that could not have submitted anyway.
-            participant_choices=participant_service.participant_choices(
-                actor=request.user, request=request
-            )
-            if policy.is_allowed(request.user, Screen.STUDENTS, Action.VIEW)
-            else [],
-        )
-
-    if request.method == "POST":
-        if form is None:
-            raise PermissionDenied
-        if form.is_valid():
-            response = _create_enrollment(request, form)
-            if response is not None:
-                return response
 
     query = request.GET.get("q", "").strip()
     cohort_code = request.GET.get("cohort", "").strip()
     status = request.GET.get("status", "").strip()
+    participant_number = request.GET.get("participant", "").strip()
     rows = enrollment_service.list_enrollments(
         actor=request.user,
         query=query,
         cohort_code=cohort_code,
         status=status,
+        participant_number=participant_number,
         request=request,
     )
+    # Paginated in the VIEW, over the list the service already returned — the
+    # register is one of four callers of ``list_enrollments`` and the other
+    # three (the dashboard, a report and the participant file) want the whole
+    # set, so a limit pushed down into the service would answer their question
+    # wrongly. What this stops is the PAGE drawing thousands of rows, which is
+    # the part the reader pays for.
+    page = page_of(rows, request.GET.get("page", ""))
+    rows = page["rows"]
+    _annotate_clearance_step(request, rows)
+    _annotate_transfer_step(request, rows)
     return render(
         request,
         "operations/enrollments.html",
@@ -459,18 +1061,122 @@ def enrollments_view(request: HttpRequest) -> HttpResponse:
             "title": _("التسجيلات"),
             "active_screen": Screen.ENROLLMENTS,
             "enrollments": rows,
+            "page": page,
+            # Everything but ``page``, so a pager link keeps the filters.
+            "params_qs": urlencode(
+                {
+                    key: value
+                    for key, value in (
+                        ("q", query),
+                        ("cohort", cohort_code),
+                        ("status", status),
+                        ("participant", participant_number),
+                    )
+                    if value
+                }
+            ),
+            # Counted over the page that is drawn, which is what the reader can
+            # check against the table beneath them.
             "status_counts": _status_counts(rows),
-            "active_filters": _enrollment_active_filters(rows, query, cohort_code, status),
-            "form": form,
+            "active_filters": _enrollment_active_filters(
+                rows, query, cohort_code, status, participant_number
+            ),
+            # Seven now: the expander, the code, the participant, the cohort,
+            # the balance, the status and the actions. Counted here rather than
+            # written into the template twice, because the empty row and the
+            # detail row both have to span exactly what the header draws.
+            "column_count": 7,
             "can_create": can_create,
             "can_edit": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.EDIT),
             "can_approve": policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.APPROVE),
+            # Who may open the till: the "pay first" stop becomes a link for them.
+            "can_take_payment": policy.is_allowed(request.user, Screen.PAYMENT_NEW, Action.CREATE),
             # Dismissal is filed as a special case (BR-067), so it wears that
             # screen's CREATE rather than this one's APPROVE.
             "can_dismiss": policy.is_allowed(request.user, Screen.SPECIAL_CASES, Action.CREATE),
+            # The row's two quick ways out — the participant's file and the
+            # cohort it belongs to — drawn only for a reader those screens
+            # would actually let in. A link into a refusal is worse than no
+            # link: it spends a click and files a DENIED_ATTEMPT (BR-085).
+            "can_view_participants": policy.is_allowed(
+                request.user, Screen.STUDENTS, Action.VIEW
+            ),
+            "can_view_cohorts": policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW),
+            "can_request_transfer": policy.is_allowed(
+                request.user, Screen.TRANSFER_NEW, Action.CREATE
+            ),
             "query": request.GET.get("q", ""),
         },
     )
+
+
+def _annotate_transfer_step(request: HttpRequest, rows: list[dict[str, Any]]) -> None:
+    """
+    Which rows the transfer screen would actually accept, marked on the row.
+
+    The request starts from an enrolment, and the only way in was the transfer
+    register — so the operator left this screen, opened that one, and hunted
+    the same person again in a dropdown. The link is drawn here instead.
+
+    The set comes from ``transferable_enrollment_choices``: the same function
+    the target screen fills its own list from, so a row can never offer a link
+    the next screen would refuse (BR-060 · a request already in flight). It is
+    asked once per page rather than once per row, and only for a reader who
+    may raise a request at all — the call itself requires VIEW there.
+    """
+    if not policy.is_allowed(request.user, Screen.TRANSFER_NEW, Action.CREATE):
+        return
+    transferable = {
+        code
+        for code, _label in transfer_service.transferable_enrollment_choices(
+            actor=request.user, request=request
+        )
+    }
+    for row in rows:
+        row["transferable"] = row.get("code") in transferable
+
+
+def _annotate_clearance_step(request: HttpRequest, rows: list[dict[str, Any]]) -> None:
+    """
+    What the clearance register already knows, carried onto the enrolment row.
+
+    §6.4 — an enrolment that has reached an exit is followed by a clearance,
+    and the operator was having to leave this screen, open the register and
+    find the same person again to start it. Nothing here decides anything:
+    which statuses may be cleared and which enrolments already carry a live
+    clearance are both read from ``clearance_service`` exactly as the register
+    reads them, so the case stays the service's to derive (BR-075, §6.4).
+
+    Both calls are pure reads, and each is made only after ``is_allowed`` says
+    the reader holds the permission — a reader who does not simply gets no
+    button, and no ``DENIED_ATTEMPT`` is written for a screen they never asked
+    for (BR-085).
+
+    Order matters: ``clearable_enrollment_choices`` already excludes an
+    enrolment carrying a live clearance, so "openable" is asked first. An
+    enrolment whose only clearance was cancelled is openable again, and is
+    offered the opening rather than a link to the cancelled one.
+    """
+    openable: set[str] = set()
+    if policy.is_allowed(request.user, Screen.CLEARANCE, Action.CREATE):
+        openable = {
+            code
+            for code, _ in clearance_service.clearable_enrollment_choices(
+                actor=request.user, request=request
+            )
+        }
+
+    latest: dict[str, str] = {}
+    if policy.is_allowed(request.user, Screen.CLEARANCE, Action.VIEW):
+        # Rows arrive newest first, so the first one seen for an enrolment is
+        # the one worth linking to.
+        for clearance in clearance_service.list_clearances(actor=request.user, request=request):
+            latest.setdefault(clearance["enrollment_code"], clearance["code"])
+
+    for row in rows:
+        code = row["code"]
+        row["clearance_openable"] = code in openable
+        row["clearance_code"] = latest.get(code, "")
 
 
 def _status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -495,7 +1201,11 @@ def _status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _enrollment_active_filters(
-    rows: list[dict[str, Any]], query: str, cohort_code: str, status: str
+    rows: list[dict[str, Any]],
+    query: str,
+    cohort_code: str,
+    status: str,
+    participant_number: str = "",
 ) -> list[tuple[str, str]]:
     """
     The filters this request is actually narrowing by, named for the reader.
@@ -513,10 +1223,17 @@ def _enrollment_active_filters(
     if status:
         labels = {str(row["status"]): row["status_display"] for row in rows}
         active.append((_("الحالة"), labels.get(status, status)))
+    if participant_number:
+        # The name when the rows carry it, else the number — both are on
+        # every row the reader can already see.
+        names = {row["participant_number"]: row["participant_name"] for row in rows}
+        active.append((_("المشارك"), names.get(participant_number, participant_number)))
     return active
 
 
-def _create_enrollment(request: HttpRequest, form: EnrollmentForm) -> HttpResponse | None:
+def _create_enrollment(
+    request: HttpRequest, form: EnrollmentForm | QuickEnrollmentForm
+) -> HttpResponse | None:
     data = form.cleaned_data
     try:
         participant = participant_service.participant_instance(
@@ -537,12 +1254,60 @@ def _create_enrollment(request: HttpRequest, form: EnrollmentForm) -> HttpRespon
             enrolled_on=data["enrolled_on"],
             request=request,
         )
-    except DjangoValidationError as exc:
+    except (DjangoValidationError, ObjectDoesNotExist) as exc:
         messages.error(request, _message_of(exc))
+        return None
+    # The pricing engine's refusals are not programming errors and they are the
+    # ones a registrar meets most: a term with no approved list, a programme the
+    # list never priced, a category with no fee rule (BR-008 · BR-009 · BR-012).
+    # Uncaught, each arrived as a 500 — the registrar losing the typed form and
+    # the screen saying nothing about what is missing or who fixes it.
+    except (
+        pricing_service.NoEffectivePriceListError,
+        pricing_service.ProgramNotPricedError,
+        pricing_service.LevelRequiredError,
+    ) as exc:
+        messages.error(
+            request,
+            _("تعذّر تحميل الرسوم: %(why)s — يُصلَح من قائمة الأسعار قبل التسجيل.")
+            % {"why": exc},
+        )
         return None
 
     messages.success(request, _("تم التسجيل وتحميل الرسوم"))
     return redirect("operations:enrollments")
+
+
+@require_http_methods(["POST"])
+def enrollment_quick_view(request: HttpRequest) -> HttpResponse:
+    """
+    The participants-screen dialog posts here: one participant, one cohort.
+
+    Same gate, same service and same refusals as the enrolments screen — the
+    dialog is a shorter road to the same door, not a second door. The cohort
+    is checked against the approved set first (BR-013), so a stale dialog
+    cannot enrol on a cohort whose approval was withdrawn meanwhile. On
+    success or refusal the reader lands back where the dialog was opened.
+    """
+    policy.require(request.user, Screen.ENROLLMENTS, Action.CREATE, request=request)
+
+    form = QuickEnrollmentForm(request.POST)
+    back = reverse("people:participants")
+    if form.is_valid():
+        wanted = form.cleaned_data["next"]
+        if wanted and url_has_allowed_host_and_scheme(wanted, allowed_hosts={request.get_host()}):
+            back = wanted
+        approved = {
+            code
+            for code, _label in cohort_service.cohort_choices(actor=request.user, request=request)
+        }
+        if form.cleaned_data["cohort_code"] not in approved:
+            messages.error(request, _("الدفعة المختارة غير معتمدة من الوزارة (BR-013)"))
+        elif _create_enrollment(request, form) is not None:
+            return redirect(back)
+    else:
+        messages.error(request, _("اختر الدفعة وتاريخ التسجيل"))
+    return redirect(back)
 
 
 @require_http_methods(["POST"])
@@ -631,6 +1396,16 @@ def account_view(request: HttpRequest, code: str) -> HttpResponse:
             "title": _("كشف حساب المشارك"),
             "active_screen": Screen.ENROLLMENTS,
             "statement": statement,
+            "can_take_payment": policy.is_allowed(request.user, Screen.PAYMENT_NEW, Action.CREATE),
+            # §5.1 — the manager grants a discount from the account they are
+            # reading; the discounts screen opens with this enrolment chosen.
+            "can_grant_discount": policy.is_allowed(request.user, Screen.DISCOUNTS, Action.CREATE),
+            # §5.3 / BR-071 — the finance officer raises a refund or returns a
+            # credit from the account they are reading; the refunds screen
+            # opens on the matching tab with this enrolment chosen.
+            "can_refund": policy.is_allowed(request.user, Screen.REFUNDS, Action.CREATE),
+            # §5.5 — an extra fee lands on the account being read.
+            "can_charge_fee": policy.is_allowed(request.user, Screen.EXTRA_FEES, Action.CREATE),
         },
     )
 
@@ -754,7 +1529,6 @@ def clearance_detail_view(request: HttpRequest, code: str) -> HttpResponse:
     except ObjectDoesNotExist as exc:
         raise Http404 from exc
 
-    role = getattr(request.user, "role", None)
     approves = policy.is_allowed(request.user, Screen.CLEARANCE, Action.APPROVE)
     is_live = clearance["status"] not in {"COMPLETED", "CANCELLED"}
 
@@ -775,13 +1549,27 @@ def clearance_detail_view(request: HttpRequest, code: str) -> HttpResponse:
             "deposit_form": DepositSettlementForm(),
             "credit_form": CreditReturnAtClearanceForm(),
             # §6.4 — each step offered to the department it belongs to, and
-            # only while the clearance is still live.
-            "can_custody": approves and is_live and role == clearance["custody_role"],
+            # only while the clearance is still live. The DECISION is the
+            # service's: comparing the role here as well gave the screen a
+            # second copy of «whose step is this», and the two then had to be
+            # kept in step by hand — which is exactly how the client's own
+            # account came to be refused on screen after the service allowed it.
+            "can_custody": approves
+            and is_live
+            and clearance_service.role_may_take_step(
+                actor=request.user, required_role=clearance["custody_role"]
+            ),
             "can_certify": approves and is_live,
             "can_second_certify": approves
             and is_live
-            and role == clearance["second_certifier_role"],
-            "can_handover": approves and is_live and role == clearance["handover_role"],
+            and clearance_service.role_may_take_step(
+                actor=request.user, required_role=clearance["second_certifier_role"]
+            ),
+            "can_handover": approves
+            and is_live
+            and clearance_service.role_may_take_step(
+                actor=request.user, required_role=clearance["handover_role"]
+            ),
             "can_close": approves and is_live,
             "can_settle_money": policy.is_allowed(request.user, Screen.REFUNDS, Action.CREATE)
             and is_live,
@@ -1092,6 +1880,65 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
     rows = mohe_service.list_submissions(
         actor=request.user, status=status, query=query, request=request
     )
+    # The strip above the register counts the whole register, not the slice
+    # — a tile that shrank with the filter it opens would count itself.
+    everything = (
+        rows
+        if not (query or status)
+        else mohe_service.list_submissions(actor=request.user, request=request)
+    )
+    base = reverse("operations:mohe")
+
+    def _tile(label: Any, value: int, url: str, icon: str, tone: str, on: bool) -> dict[str, Any]:
+        return {"label": label, "value": value, "url": url, "icon": icon, "tone": tone, "on": on}
+
+    tiles = [
+        _tile(_("كل الملفات"), len(everything), base, "stamp", "brand", not (query or status)),
+        _tile(
+            _("مسودات"),
+            sum(1 for r in everything if r["status"] == "DRAFT"),
+            f"{base}?status=DRAFT",
+            "doc-plus",
+            "warn",
+            status == "DRAFT",
+        ),
+        _tile(
+            _("بانتظار الوزارة"),
+            sum(1 for r in everything if r["status"] == "SUBMITTED"),
+            f"{base}?status=SUBMITTED",
+            "globe",
+            "info",
+            status == "SUBMITTED",
+        ),
+        _tile(
+            _("معتمدة"),
+            sum(1 for r in everything if r["status"] == "APPROVED"),
+            f"{base}?status=APPROVED",
+            "shield-check",
+            "ok",
+            status == "APPROVED",
+        ),
+    ]
+    # The next step on a row is drawn from the reader's permission, not from the
+    # status alone: an auditor reads this register and holds nothing on
+    # MOHE_SUBMIT, and «أكمل الملف» promised them an act that refuses — a
+    # promise then a refusal is worse than no button, and it files a
+    # DENIED_ATTEMPT the screen itself invited (BR-085).
+    can_attach = policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.EDIT)
+    can_decide = policy.is_allowed(request.user, Screen.MOHE, Action.APPROVE)
+    can_resubmit = policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE)
+    for row in rows:
+        status_value = str(row["status"])
+        row["may_act"] = (
+            can_attach
+            if status_value == "DRAFT"
+            else can_decide
+            if status_value == "SUBMITTED"
+            else can_resubmit
+            if status_value == "REJECTED"
+            else False
+        )
+
     return render(
         request,
         "operations/mohe.html",
@@ -1099,6 +1946,10 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             "title": _("اعتماد الوزارة"),
             "active_screen": Screen.MOHE,
             "submissions": rows,
+            "tiles": tiles,
+            "can_view_enrollments": policy.is_allowed(
+                request.user, Screen.ENROLLMENTS, Action.VIEW
+            ),
             "query": query,
             "status": status,
             # Both filters were already read from the URL and neither was named
@@ -1106,6 +1957,7 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             "active_filters": _mohe_active_filters(rows, query, status),
             "status_counts": _mohe_status_counts(rows),
             "can_open_file": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
+            "can_view_cohorts": policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW),
             "can_export_uploaded_names": policy.is_allowed(request.user, Screen.MOHE, Action.VIEW),
             "mohe_name_sections": enrollment_service.list_mohe_name_uploads(
                 actor=request.user, request=request
@@ -1239,9 +2091,26 @@ def mohe_submit_view(request: HttpRequest) -> HttpResponse:
     """
     policy.require(request.user, Screen.MOHE_SUBMIT, Action.VIEW, request=request)
 
+    asked_for = request.GET.get("cohort", "")
+    options = mohe_service.submittable_cohort_options(actor=request.user, request=request)
     form = MoheSubmissionForm(
         request.POST or None,
-        cohort_choices=mohe_service.submittable_cohort_choices(actor=request.user, request=request),
+        # The cohorts register links here with the cohort already chosen.
+        initial={"cohort_code": asked_for},
+        cohort_choices=[(c["code"], c["label"]) for c in options],
+    )
+
+    # A cohort typed into the URL that no longer accepts a file: say which of
+    # the two it is rather than answering an empty page to a precise question.
+    existing_file = (
+        mohe_service.live_file_for_code(
+            actor=request.user, cohort_code=asked_for, request=request
+        )
+        if asked_for
+        else None
+    )
+    unknown_cohort = bool(asked_for) and existing_file is None and not any(
+        c["code"] == asked_for for c in options
     )
 
     if request.method == "POST":
@@ -1263,6 +2132,28 @@ def mohe_submit_view(request: HttpRequest) -> HttpResponse:
                     % {"code": cohort.code},
                 )
                 return redirect("operations:mohe-detail", submission_id=submission.pk)
+        else:
+            # The refusal used to be silent: the choices are recomputed on every
+            # request, so a cohort that gained a file while this page was open
+            # left the list, the field became invalid, and the page came back
+            # with no message — and with the seven typed fields gone.
+            posted = request.POST.get("cohort_code", "").strip()
+            taken = (
+                mohe_service.live_file_for_code(
+                    actor=request.user, cohort_code=posted, request=request
+                )
+                if posted
+                else None
+            )
+            if taken:
+                existing_file = taken
+                messages.error(
+                    request,
+                    _("تعذّر الحفظ: للدفعة %(code)s ملف وزاري قائم — افتحه بدل فتح ملف ثانٍ.")
+                    % {"code": posted},
+                )
+            else:
+                messages.error(request, _("تعذّر الحفظ — راجع الحقول المعلَّمة أدناه."))
 
     return render(
         request,
@@ -1272,6 +2163,22 @@ def mohe_submit_view(request: HttpRequest) -> HttpResponse:
             "active_screen": Screen.MOHE_SUBMIT,
             "form": form,
             "can_create": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
+            # The cohort picker draws a summary and pre-fills the trainer and
+            # the place; the pick-lists offer what earlier files said.
+            "cohorts": options,
+            "suggestions": mohe_service.submission_suggestions(actor=request.user, request=request),
+            "preselected": asked_for,
+            # Arrived with a cohort that already holds a live file: say so and
+            # open it, rather than an empty list with no explanation.
+            "existing_file": existing_file,
+            "unknown_cohort": unknown_cohort,
+            # A refused POST keeps the form on screen with what was typed in it,
+            # even where the list has meanwhile emptied — the alternative is
+            # handing back a blank page for seven fields of work.
+            "refused_post": request.method == "POST",
+            # The empty state points somewhere, and only where this reader may go.
+            "can_view_files": policy.is_allowed(request.user, Screen.MOHE, Action.VIEW),
+            "can_view_cohorts": policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW),
         },
     )
 
@@ -1308,9 +2215,14 @@ def mohe_detail_view(request: HttpRequest, submission_id: int) -> HttpResponse:
             "title": _("الطلب الوزاري"),
             "active_screen": Screen.MOHE,
             "submission": submission,
+            # The upload form offers what is still MISSING (BR-016), so the
+            # second document cannot be filed under the first one's name by
+            # a default that was never changed. Once nothing is missing, the
+            # full list is offered again for a replacement.
             "attachment_form": MoheAttachmentForm(
                 purpose_choices=[
-                    (p["purpose"], p["label"]) for p in submission["required_purposes"]
+                    (p["purpose"], p["label"])
+                    for p in (submission["missing_attachments"] or submission["required_purposes"])
                 ]
             ),
             "send_form": MoheSendForm(initial={"submitted_on": timezone.localdate()}),
@@ -1325,6 +2237,15 @@ def mohe_detail_view(request: HttpRequest, submission_id: int) -> HttpResponse:
             "can_decide": may_decide and submission["is_decidable"],
             "can_resubmit": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE)
             and submission["is_resubmittable"],
+            # Where this file stands on the four-stop strip, read off the
+            # service's own flags — never recomputed here.
+            "stage": (
+                4
+                if submission["status"] in ("SUBMITTED", "APPROVED", "REJECTED")
+                else 3
+                if submission["is_sendable"]
+                else 2
+            ),
         },
     )
 
@@ -1444,6 +2365,23 @@ TRANSFER_ACTIONS: dict[str, tuple[str, str]] = {
     "execute": (Screen.TRANSFERS, Action.EDIT),
 }
 
+#: The request itself, and the exception to it. They are split because the
+#: second half belongs to one role: ``TransferRequestForm`` still declares all
+#: seven fields and still validates them, so a waiver POSTed by a hand that
+#: may not grant one is refused by the service exactly as before.
+TRANSFER_REQUEST_FIELDS = (
+    "from_enrollment_code",
+    "to_cohort_code",
+    "reason",
+    "requested_on",
+    "code",
+)
+#: And the exception's own two halves: the tick, and the reason that only
+#: exists once it has been ticked.
+TRANSFER_WAIVER_CHECK = ("grant_category_waiver",)
+TRANSFER_WAIVER_WHY = ("category_waiver_reason_ar",)
+TRANSFER_WAIVER_FIELDS = TRANSFER_WAIVER_CHECK + TRANSFER_WAIVER_WHY
+
 
 @require_http_methods(["GET"])
 def transfers_view(request: HttpRequest) -> HttpResponse:
@@ -1453,6 +2391,13 @@ def transfers_view(request: HttpRequest) -> HttpResponse:
     rows = transfer_service.list_transfers(
         actor=request.user, status=status, query=query, request=request
     )
+    # Paginated in the VIEW over the list the service returned, exactly as the
+    # enrolment register does: ``list_transfers`` is a read the detail screen
+    # and the tests also call, and a limit pushed into it would answer their
+    # question wrongly. What this stops is the PAGE drawing every request the
+    # centre has ever raised.
+    page = page_of(rows, request.GET.get("page", ""))
+    rows = page["rows"]
     return render(
         request,
         "operations/transfers.html",
@@ -1460,6 +2405,15 @@ def transfers_view(request: HttpRequest) -> HttpResponse:
             "title": _("النقل بين الدورات"),
             "active_screen": Screen.TRANSFERS,
             "transfers": rows,
+            "page": page,
+            # Everything but ``page``, so a pager link keeps the filters.
+            "params_qs": urlencode(
+                {key: value for key, value in (("q", query), ("status", status)) if value}
+            ),
+            # Nine: the expander, the code, the participant, from, to, the
+            # field, the difference, the status and the actions. Counted here
+            # so the empty row and the detail row span what the header draws.
+            "column_count": 9,
             "status_counts": _status_counts(rows),
             "status_choices": transfer_service.filterable_status_choices(),
             "active_filters": _transfer_active_filters(query, status),
@@ -1507,16 +2461,41 @@ def transfer_new_view(request: HttpRequest) -> HttpResponse:
     """
     policy.require(request.user, Screen.TRANSFER_NEW, Action.VIEW, request=request)
 
+    # §3.2/6's ``A``, asked here for the same reason ``_transfer_inputs`` asks
+    # it on the way in: the waiver is the manager's to grant. It was DRAWN for
+    # everybody, so a registrar who ticked it lost a filled form to a 403 page
+    # and earned a DENIED_ATTEMPT for using a control the screen offered them
+    # (BR-085 · قواعد التحسين §3.4). The check below is untouched; what changes
+    # is that the control is no longer put in front of the hand that is refused.
+    can_waive = policy.is_allowed(request.user, Screen.TRANSFERS, Action.APPROVE)
+
+    enrollment_choices = transfer_service.transferable_enrollment_choices(
+        actor=request.user, request=request
+    )
+    # The source the operator has already named — from the register's row link
+    # on arrival, from their own pick afterwards. ``destination_cohort_choices``
+    # has always taken it and nobody was passing it, so the list offered the
+    # cohort the participant is already ON and the only answer available was
+    # «الدفعة الهدف هي الدفعة نفسها».
+    from_code = (
+        request.POST.get("from_enrollment_code") or request.GET.get("enrollment", "")
+    ).strip()
+    cohort_choices = transfer_service.destination_cohort_choices(
+        actor=request.user, from_code=from_code, request=request
+    )
+
+    initial: dict[str, Any] = {"requested_on": timezone.localdate()}
+    prefill = request.GET.get("enrollment", "").strip()
+    transferable = {code for code, _label in enrollment_choices}
+    if prefill in transferable:
+        initial["from_enrollment_code"] = prefill
+
     form = TransferRequestForm(
         request.POST or None,
-        enrollment_choices=transfer_service.transferable_enrollment_choices(
-            actor=request.user, request=request
-        ),
-        cohort_choices=transfer_service.destination_cohort_choices(
-            actor=request.user, request=request
-        ),
+        enrollment_choices=enrollment_choices,
+        cohort_choices=cohort_choices,
         reason_choices=transfer_service.reason_choices(),
-        initial={"requested_on": timezone.localdate()},
+        initial=initial,
     )
     preview = None
 
@@ -1541,6 +2520,27 @@ def transfer_new_view(request: HttpRequest) -> HttpResponse:
             "form": form,
             "preview": preview,
             "can_create": policy.is_allowed(request.user, Screen.TRANSFER_NEW, Action.CREATE),
+            "can_waive": can_waive,
+            # The two halves of the form, so the waiver can be drawn — or not
+            # drawn — without the template listing field names it would then
+            # own a second copy of.
+            "request_fields": TRANSFER_REQUEST_FIELDS,
+            "waiver_check": TRANSFER_WAIVER_CHECK,
+            "waiver_why": TRANSFER_WAIVER_WHY,
+            # Named at the top so a refusal is read rather than hunted for,
+            # exactly as the enrolment form does.
+            "error_fields": [
+                {"label": form[name].label, "id": form[name].auto_id}
+                for name in form.fields
+                if form.is_bound
+                and form[name].errors
+                and (can_waive or name not in TRANSFER_WAIVER_FIELDS)
+            ],
+            # A link that arrives naming an enrolment nobody may transfer says
+            # so, rather than silently opening an empty-handed form.
+            "unknown_prefill": prefill if prefill and prefill not in transferable else "",
+            "has_sources": bool(enrollment_choices),
+            "has_destinations": bool(cohort_choices),
         },
     )
 
@@ -1602,6 +2602,17 @@ def _submit_transfer(request: HttpRequest, form: TransferRequestForm) -> str | N
         )
     except ObjectDoesNotExist as exc:
         messages.error(request, _message_of(exc))
+        return None
+    except IntegrityError:
+        # ``Transfer.code`` is unique and the operator types it, so a code
+        # already used answered a filled form with a 500. The rule is the
+        # database's and stays there; what the screen owes is the sentence
+        # that says which field to change.
+        messages.error(
+            request,
+            _("الرمز %(code)s مستعمل لطلب آخر — اختر رمزاً غيره.")
+            % {"code": form.cleaned_data["code"]},
+        )
         return None
     except (DjangoValidationError, *transfer_service.PRICING_ERRORS) as exc:
         # The rule engine's own words, with the reference the centre needs —
@@ -1926,34 +2937,60 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
     """
     The six documented exceptions to the ordinary lifecycle (DATA_MODEL §7.6).
 
-    The rules run today — ``special_case_service`` enforces BR-067 … BR-071 and
-    the database carries the dismissal constraint — but no data-entry screen
-    exists yet, so this page teaches the types and says so plainly instead of
-    drawing a form that would refuse everyone.
+    **What this page had wrong.** It sorted the six types into «built» and
+    «declared» and put CANCELLATION in the second bucket. That was false:
+    ``special_case_service.cancel_registration`` files a CANCELLATION case,
+    the enrolments screen calls it from a confirmation dialog, and cases of
+    that type exist in the database today. A page that teaches the rules had
+    to be corrected before anything else on it was worth polishing.
 
-    Two of the six types are honest about a gap: CANCELLATION and
-    CREDIT_TRANSFER are valid ``SpecialCaseType`` values with a CheckConstraint
-    behind them and no service that creates one. Listing them as though they
-    worked would be the fake functionality this sprint exists to avoid.
+    **Two buckets could not tell the truth anyway.** «Built» covered both a
+    dismissal — which has a service, a screen and a dialog — and a deferral,
+    which has a service no screen calls. A reader who saw one green chip for
+    both went looking for the deferral screen. So three buckets, and each
+    says exactly how far the type has been carried:
+
+    ``ON_SCREEN``   service + a screen that calls it (dismissal, cancellation)
+    ``SERVICE_ONLY``service and tests, no caller in any view (deferral,
+                    substitution, credit balance)
+    ``TYPE_ONLY``   a ``SpecialCaseType`` value and a CheckConstraint, and no
+                    service at all (credit transfer)
+
+    Still a reading screen: no form, no POST, no button that would refuse
+    whoever pressed it. What changed is that it now says WHERE the entry points are
+    instead of stopping at «not here».
     """
     policy.require(request.user, Screen.SPECIAL_CASES, Action.VIEW, request=request)
 
-    built = _("مسار مبني")
-    declared = _("نوع مُعرَّف — بلا خدمة تُنشئه بعد")
+    on_screen = _("مبني وله شاشة")
+    service_only = _("مبني بلا شاشة")
+    type_only = _("نوع مُعرَّف بلا خدمة")
+
+    #: Where a reader who may open it can go and file one. Filtered like every
+    #: other link on the page: §3.4 — never send a reader to a refusal.
+    can_open_enrollments = policy.is_allowed(request.user, Screen.ENROLLMENTS, Action.VIEW)
+    from_enrollments = _("من شاشة التسجيلات")
+
     cases = [
         {
             "label": _("إلغاء"),
-            "state": declared,
-            "built": False,
+            "reach": on_screen,
+            "tone": "ok",
+            "where": from_enrollments,
+            "where_url": reverse("operations:enrollments") if can_open_enrollments else "",
             "what": _(
-                "إلغاء التسجيل قبل أن يبدأ أثره. النوع محفوظ في النموذج ومحمي "
-                "بقيد في قاعدة البيانات، ولا توجد خدمة تُنشئ حالة من هذا النوع بعد."
+                "إلغاء الطلب قبل أن يعتمده المركز. ليس انسحاباً: المتدرّب لم يصر "
+                "نشطاً، فلا يستحق الشريك عنه شيئاً ولا تتبعه براءة ذمة. الرسوم "
+                "تُبطَل فيتوقف الحساب عن القراءة كدين، والمقبوض لا يُمسّ — يبقى "
+                "رصيداً دائناً غير مخصَّص (§5.3)."
             ),
         },
         {
             "label": _("فصل"),
-            "state": built,
-            "built": True,
+            "reach": on_screen,
+            "tone": "ok",
+            "where": from_enrollments,
+            "where_url": reverse("operations:enrollments") if can_open_enrollments else "",
             "what": _(
                 "قرار إداري لا يُتخذ على كلام: مرجع القرار إلزامي في الخدمة وفي "
                 "قاعدة البيانات معاً (BR-067). لا استرداد يتبع الفصل، والشريك لا "
@@ -1963,8 +3000,10 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
         },
         {
             "label": _("ترحيل لدفعة لاحقة"),
-            "state": built,
-            "built": True,
+            "reach": service_only,
+            "tone": "warn",
+            "where": _("الخدمة جاهزة، ولا شاشة تستدعيها بعد"),
+            "where_url": "",
             "what": _(
                 "ينتقل المشارك وماله معاً إلى دفعة لاحقة (BR-069). المال ينتقل كما "
                 "ينتقل في النقل: تخصيص عكسي على التسجيل القديم ومثله على الجديد — "
@@ -1973,8 +3012,10 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
         },
         {
             "label": _("إحلال"),
-            "state": built,
-            "built": True,
+            "reach": service_only,
+            "tone": "warn",
+            "where": _("الخدمة جاهزة، ولا شاشة تستدعيها بعد"),
+            "where_url": "",
             "what": _(
                 "بديل يأخذ مقعداً شاغراً بانسحاب موثّق، وبلا رسم تسجيل ثانٍ "
                 "(BR-070): المقعد دُفع عنه إدارياً مرة، وتحصيل الرسم مجدداً يُحاسب "
@@ -1983,17 +3024,21 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
         },
         {
             "label": _("نقل رصيد"),
-            "state": declared,
-            "built": False,
+            "reach": type_only,
+            "tone": "",
+            "where": _("لا خدمة تُنشئه"),
+            "where_url": "",
             "what": _(
-                "نقل رصيد بين تسجيلين. النوع مُعرَّف في النموذج، ولا توجد خدمة "
-                "تُنشئ حالة من هذا النوع بعد."
+                "نقل رصيد بين تسجيلين. النوع مُعرَّف في النموذج ومحميّ بقيد في "
+                "قاعدة البيانات، ولا توجد خدمة تُنشئ حالة من هذا النوع بعد."
             ),
         },
         {
             "label": _("رصيد دائن"),
-            "state": built,
-            "built": True,
+            "reach": service_only,
+            "tone": "warn",
+            "where": _("الخدمة جاهزة، ولا شاشة تستدعيها بعد"),
+            "where_url": "",
             "what": _(
                 "يجعل الرصيد الدائن حالةً لها صاحب بدل أن يبقى رقماً سالباً "
                 "(BR-071). يُنشأ عن ترحيل أو إحلال أو نقل أرخص، ويُردّ عند براءة "
@@ -2002,15 +3047,19 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
         },
     ]
 
-    # The built/declared split, said once at the top of the table instead of
-    # being left for the reader to derive by scanning six rows. Counted off
-    # `cases` above, so the two can never disagree — and a bucket nobody is in
-    # gets no chip rather than a zero.
+    # The three-way split, said once at the top of the table instead of being
+    # left for the reader to derive by scanning six rows. Counted off `cases`
+    # above, so the summary and the table can never disagree — and a bucket
+    # nobody is in gets no chip rather than a zero.
     coverage = [
         row
         for row in (
-            {"label": built, "count": sum(1 for c in cases if c["built"]), "built": True},
-            {"label": declared, "count": sum(1 for c in cases if not c["built"]), "built": False},
+            {
+                "label": label,
+                "tone": tone,
+                "count": sum(1 for c in cases if c["reach"] == label),
+            }
+            for label, tone in ((on_screen, "ok"), (service_only, "warn"), (type_only, ""))
         )
         if row["count"]
     ]
@@ -2021,12 +3070,29 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
         (_("ملغاة"), _("أُلغيت الحالة نفسها، ويبقى أثرها في سجل التدقيق.")),
     ]
 
+    # Each neighbouring screen with the sentence that says WHY it is here. A
+    # bare row of three buttons made the reader guess which one they wanted.
     links = [
-        {"url": reverse(route), "label": label}
-        for screen, route, label in (
-            (Screen.ENROLLMENTS, "operations:enrollments", _("التسجيلات")),
-            (Screen.TRANSFERS, "operations:transfers", _("النقل بين الدورات")),
-            (Screen.CLEARANCE, "operations:clearances", _("براءة الذمة")),
+        {"url": reverse(route), "label": label, "why": why}
+        for screen, route, label, why in (
+            (
+                Screen.ENROLLMENTS,
+                "operations:enrollments",
+                _("التسجيلات"),
+                _("منها يُسجَّل الفصل وإلغاء الطلب، من قائمة إجراءات السطر."),
+            ),
+            (
+                Screen.TRANSFERS,
+                "operations:transfers",
+                _("النقل بين الدورات"),
+                _("منه ينشأ الرصيد الدائن حين تكون الدورة الجديدة أرخص."),
+            ),
+            (
+                Screen.CLEARANCE,
+                "operations:clearances",
+                _("براءة الذمة"),
+                _("هناك يُردّ الرصيد الدائن، وهناك يمنعها الدين الذي يتركه الفصل."),
+            ),
         )
         if policy.is_allowed(request.user, screen, Action.VIEW)
     ]
@@ -2041,5 +3107,6 @@ def special_cases_view(request: HttpRequest) -> HttpResponse:
             "coverage": coverage,
             "statuses": statuses,
             "links": links,
+            "enrollments_url": reverse("operations:enrollments") if can_open_enrollments else "",
         },
     )

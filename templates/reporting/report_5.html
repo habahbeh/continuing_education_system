@@ -1,26 +1,102 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n money_ui arabic_ui %}
+
+{% block title %}{{ report.title }} — {% translate "التقارير" %}{% endblock %}
+
+{% comment %}
+  §9.5 — كشف حساب مالي شامل للطالب (Sprint 8L).
+
+  «للطالب» في نصّ المتطلب، لا للتسجيل: طالبٌ له تسجيلان له حسابٌ واحد. وكانت
+  الشاشة تطلب رمز تسجيلٍ يُكتب من الذاكرة — فمن لا يحفظ الرمز لا يصل إلى
+  الكشف أصلاً.
+
+  فصارت شاشتين في مسار واحد: قائمةٌ تُبحث كما في `/cashbox/payments/`، ونقرةٌ
+  تفتح الكشف الكامل. والكشف نفسه هو `_statement.html` الذي تعرضه شاشة المشارك
+  — لا نسخة ثانية منه: مستندان يقرآن حساباً واحداً هما الطريق إلى أن يختلفا.
+
+  البحث يطوي همزة الألف عبر `participant_service`: ترتيب `utf8mb4_0900_ai_ci`
+  يرى «أحمد» و«احمد» سلسلتين مختلفتين.
+{% endcomment %}
+
 {% block content %}
-<div class="no-print">
-  <div class="toolbar">
-    <a class="btn2 ghost" href="{% url 'reporting:reports' %}">{% translate "كل التقارير" %}</a>
-    <span class="spacer"></span>
-    <button type="button" class="btn2 primary" onclick="window.print()">{% translate "طباعة" %}</button>
-  </div>
-  <form method="get" class="filterbar" role="search">
-    <div class="fld">
-      <label for="f_enrollment">{% translate "رمز التسجيل" %}</label>
-      <input type="search" name="enrollment" value="{{ request.GET.enrollment }}" placeholder="{% translate 'رمز التسجيل…' %}" spellcheck="false" id="f_enrollment">
-    </div>
-    <button class="btn2" type="submit">{% translate "عرض" %}</button>
-  </form>
-</div>
-<div class="page-head">
-  <h1>{{ report.title }}</h1>
-</div>
+{% include "reporting/_shell.html" %}
+
 {% if report.statement %}
+  <div class="action-bar print:hidden">
+    <a class="btn2 ghost" href="{% url 'reporting:report' 5 %}">{% translate "العودة إلى القائمة" %}</a>
+  </div>
   {% include "operations/_statement.html" with statement=report.statement only %}
 {% else %}
-  <div class="note info">{% translate "أدخل رمز التسجيل لعرض كشف الحساب." %}</div>
+  <form method="get" class="filterbar print:hidden" role="search"
+        hx-get="{% url 'reporting:report' 5 %}" hx-target="#stmt-results" hx-select="#stmt-results"
+        hx-swap="outerHTML" hx-trigger="input changed delay:350ms from:#f_q" hx-push-url="true">
+    <div class="fld grow">
+      <label for="f_q">{% translate "بحث عن مشارك" %}</label>
+      <input type="search" name="q" value="{{ report.query }}" id="f_q" spellcheck="false"
+             placeholder="{% translate 'الاسم، الرقم الجامعي، الهاتف، أو رقم الوثيقة…' %}">
+    </div>
+    <span class="count">{{ report.rows|length|ar_count:"مشارك واحد|مشاركان|مشاركون|مشاركاً" }}</span>
+  </form>
+
+  <div id="stmt-results">
+  <div class="card2">
+    <div class="card2-head"><h2>{% translate "كشوف حسابات المشاركين" %}</h2></div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>{% translate "المشارك" %}</th>
+            <th class="num">{% translate "التسجيلات" %}</th>
+            <th class="num">{% translate "المستحق" %}</th>
+            <th class="num">{% translate "المدفوع" %}</th>
+            <th class="num">{% translate "الخصومات" %}</th>
+            <th class="num">{% translate "الاستردادات" %}</th>
+            <th class="num">{% translate "رسوم إضافية" %}</th>
+            <th class="num">{% translate "النقل" %}</th>
+            <th class="num">{% translate "الرصيد" %}</th>
+            <th>{% translate "الحالة" %}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in report.rows %}
+            <tr>
+              <td>
+                {% if r.codes %}
+                  <a href="{% url 'reporting:report' 5 %}?enrollment={{ r.codes.0 }}"><strong>{{ r.name_ar }}</strong></a>
+                {% else %}
+                  <strong>{{ r.name_ar }}</strong>
+                {% endif %}
+                <br><small class="muted" dir="ltr">{{ r.participant_number }}</small>
+              </td>
+              <td class="num">{{ r.enrollments }}</td>
+              <td class="num amt">{% money r.total_due %}</td>
+              <td class="num amt">{% money r.total_paid %}</td>
+              <td class="num amt">{% if r.total_discount %}{% money r.total_discount %}{% else %}—{% endif %}</td>
+              <td class="num amt">{% if r.refunds %}{% money r.refunds %}{% else %}—{% endif %}</td>
+              <td class="num amt">{% if r.extra_fees %}{% money r.extra_fees %}{% else %}—{% endif %}</td>
+              <td class="num">{% if r.transfers %}<span class="chip">{{ r.transfers }}</span>{% else %}—{% endif %}</td>
+              <td class="num amt"><strong>{% money r.balance %}</strong></td>
+              <td>
+                {% if r.balance > 0 %}<span class="chip danger">{% translate "عليه ذمّة" %}</span>
+                {% elif r.balance < 0 %}<span class="chip info">{% translate "رصيد دائن" %}</span>
+                {% else %}<span class="chip ok">{% translate "مسدَّد" %}</span>{% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="10" class="empty">
+              <span class="empty-title">{% translate "لا مشاركين مطابقين" %}</span>
+              <span class="empty-body">{% translate "البحث يطوي همزة الألف، فـ«احمد» تجد «أحمد». جرّب الرقم الجامعي أو الهاتف إن لم يُطابق الاسم." %}</span>
+            </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "reporting/_pager.html" with page=pages.page param="page" qs=params_qs %}
+  </div>
+  </div>
+
+  <div class="note info">
+    {% translate "الكشف يُظهر لكل مشارك بنوده الصريحة: الرسوم والدفعات والخصم والنقل والاسترداد والرصيد — كما ينصّ §9.5. انقر اسم المشارك لفتحه." %}
+  </div>
 {% endif %}
 {% endblock %}

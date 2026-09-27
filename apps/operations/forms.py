@@ -18,16 +18,32 @@ from django.utils.translation import gettext_lazy as _
 
 
 class CohortForm(forms.Form):
-    """فتح دفعة — opens PLANNED; the ministry decides when it may run."""
+    """
+    فتح دفعة — opens PLANNED; the ministry decides when it may run.
 
-    code = forms.CharField(label=_("رمز الدفعة"), max_length=32)
+    Nothing here has to be typed that the system can supply: the code and the
+    name are optional and minted by the service when left blank, the level is
+    a choice the dialog shows only for a levelled programme (BR-007), and the
+    delivery method is one of the three the model knows.
+    """
+
+    code = forms.CharField(label=_("رمز الدفعة"), max_length=32, required=False)
     program_code = forms.ChoiceField(label=_("البرنامج"), choices=[])
     semester_code = forms.ChoiceField(label=_("الفصل"), choices=[])
-    name_ar = forms.CharField(label=_("اسم الدفعة"), max_length=255)
-    level = forms.IntegerField(label=_("المستوى"), required=False, min_value=1)
+    name_ar = forms.CharField(label=_("اسم الدفعة"), max_length=255, required=False)
+    level = forms.TypedChoiceField(
+        label=_("المستوى"),
+        choices=[("", "—")] + [(str(n), str(n)) for n in range(1, 11)],
+        required=False,
+        coerce=int,
+        empty_value=None,
+    )
     starts_on = forms.DateField(label=_("تبدأ في"), widget=forms.DateInput({"type": "date"}))
     ends_on = forms.DateField(label=_("تنتهي في"), widget=forms.DateInput({"type": "date"}))
     capacity = forms.IntegerField(label=_("السعة"), min_value=1, initial=30)
+    delivery_method = forms.ChoiceField(
+        label=_("طريقة التقديم"), choices=[], required=False, initial="IN_PERSON"
+    )
     trainer_name = forms.CharField(label=_("المدرب"), max_length=150, required=False)
     location = forms.CharField(label=_("المكان"), max_length=150, required=False)
     agreement_number = forms.ChoiceField(label=_("الاتفاقية"), choices=[], required=False)
@@ -41,11 +57,78 @@ class CohortForm(forms.Form):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
+        from apps.operations.models import DeliveryMethod
+
         cast(forms.ChoiceField, self.fields["program_code"]).choices = program_choices or []
         cast(forms.ChoiceField, self.fields["semester_code"]).choices = semester_choices or []
+        cast(forms.ChoiceField, self.fields["delivery_method"]).choices = DeliveryMethod.choices
         cast(forms.ChoiceField, self.fields["agreement_number"]).choices = [("", "—")] + (
             agreement_choices or []
         )
+
+    def clean_delivery_method(self) -> str:
+        """Unsaid means in person — the model's own default."""
+        return cast(str, self.cleaned_data.get("delivery_method")) or "IN_PERSON"
+
+
+class CohortEditForm(forms.Form):
+    """
+    تعديل دفعة — the period, the seats and who runs it.
+
+    Not the programme, the level or the code: those are the cohort's identity in
+    every enrolment, ministry file and archive row that names it, so a typo in
+    them is a new cohort, not an edit. Whether the new capacity is below the
+    enrolments already on the cohort is the service's to refuse.
+    """
+
+    starts_on = forms.DateField(label=_("تبدأ في"), widget=forms.DateInput({"type": "date"}))
+    ends_on = forms.DateField(label=_("تنتهي في"), widget=forms.DateInput({"type": "date"}))
+    capacity = forms.IntegerField(label=_("السعة"), min_value=1)
+    delivery_method = forms.ChoiceField(label=_("طريقة التقديم"), choices=[], required=False)
+    trainer_name = forms.CharField(label=_("المدرب"), max_length=150, required=False)
+    location = forms.CharField(label=_("المكان"), max_length=150, required=False)
+    agreement_number = forms.ChoiceField(label=_("الاتفاقية"), choices=[], required=False)
+
+    def __init__(
+        self, *args: Any, agreement_choices: list[tuple[str, str]] | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        from apps.operations.models import DeliveryMethod
+
+        cast(forms.ChoiceField, self.fields["delivery_method"]).choices = DeliveryMethod.choices
+        cast(forms.ChoiceField, self.fields["agreement_number"]).choices = [("", "—")] + (
+            agreement_choices or []
+        )
+
+    def clean_delivery_method(self) -> str:
+        return cast(str, self.cleaned_data.get("delivery_method")) or "IN_PERSON"
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        starts, ends = cleaned.get("starts_on"), cleaned.get("ends_on")
+        if starts and ends and ends <= starts:
+            self.add_error("ends_on", _("تاريخ الانتهاء يجب أن يلي تاريخ البداية."))
+        return cleaned
+
+
+class CohortCancelForm(forms.Form):
+    """
+    إلغاء دفعة لقلة التسجيل — the reason is required, not decorative.
+
+    It is the document a full refund (§5.3) and a waived transfer bound (BR-065)
+    are justified by, so it is asked for once and stored verbatim.
+    """
+
+    reason_ar = forms.CharField(
+        label=_("سبب الإلغاء"),
+        max_length=255,
+        help_text=_("يُحفظ كما هو — سند الاسترداد الكامل وتجاوز قيد المجال في النقل."),
+    )
+
+
+def _today() -> Any:
+    """Callable, not a value: a module imported at boot must not freeze a date."""
+    return timezone.localdate()
 
 
 class EnrollmentForm(forms.Form):
@@ -74,8 +157,18 @@ class EnrollmentForm(forms.Form):
         help_text=_("اختر المشارك الذي أُدخل طلب التحاقه سابقاً."),
     )
     cohort_code = forms.ChoiceField(label=_("الدفعة"), choices=[])
+    # Required, and the answer is today on all but the rare back-dated entry.
+    # It was arriving empty, so every enrolment cost the clerk one hand-typed
+    # date the system already knew — the same defect the admission form names
+    # and fixes, on the screen that is used more often than it is.
+    #
+    # Callable, not a value: a module imported at boot must not freeze a date,
+    # or a server running since Monday would suggest Monday all week.
     enrolled_on = forms.DateField(
-        label=_("تاريخ التسجيل"), widget=forms.DateInput({"type": "date"})
+        label=_("تاريخ التسجيل"),
+        widget=forms.DateInput({"type": "date"}),
+        initial=_today,
+        help_text=_("اليوم مقترح، ويُعدَّل عند تسجيل بتاريخ سابق."),
     )
 
     def __init__(
@@ -90,6 +183,24 @@ class EnrollmentForm(forms.Form):
         cast(forms.ChoiceField, self.fields["participant_number"]).choices = (
             participant_choices or []
         )
+
+
+class QuickEnrollmentForm(forms.Form):
+    """
+    The participants-screen dialog: enrol THIS participant on a cohort.
+
+    The participant is fixed by the row the dialog was opened from, so it is a
+    plain value rather than a choice; the cohort is validated against the
+    approved set by the view, and every business rule (BR-012, BR-013, seats)
+    is still the service's to enforce — this form only shapes the input.
+    """
+
+    participant_number = forms.CharField(max_length=9)
+    cohort_code = forms.CharField(max_length=32)
+    enrolled_on = forms.DateField(
+        label=_("تاريخ التسجيل"), widget=forms.DateInput({"type": "date"})
+    )
+    next = forms.CharField(required=False, max_length=200)
 
 
 class ClearanceOpenForm(forms.Form):
@@ -374,6 +485,10 @@ class TransferRequestForm(forms.Form):
         label=_("منح استثناء قيد المجال"),
         required=False,
         help_text=_("BR-065 · C-12 — لا يكون إلا بإلغاء المركز للدورة، وبموافقة مدير المركز"),
+        # عرضٌ لا تحقّق: سبب الاستثناء يُكشف حين تُعلَّم الخانة، والسلوك في
+        # ``static/js/ui.js`` لا في سكربت داخل القالب. الحقل نفسه وقاعدته في
+        # ``clean`` لم يتغيّرا.
+        widget=forms.CheckboxInput({"data-expands": "waiver-why"}),
     )
     category_waiver_reason_ar = forms.CharField(
         label=_("سبب الاستثناء"), required=False, widget=forms.Textarea({"rows": 2})
@@ -393,6 +508,15 @@ class TransferRequestForm(forms.Form):
         )
         cast(forms.ChoiceField, self.fields["to_cohort_code"]).choices = cohort_choices or []
         cast(forms.ChoiceField, self.fields["reason"]).choices = reason_choices or []
+        # القائمتان الطويلتان تُبحثان: `static/js/ui.js` يدرج خانة بحث فوق
+        # القائمة من ثمانية خيارات فصاعداً. عرضٌ فقط — لا خيار يُحذف ولا
+        # قاعدة تُضاف، والقائمة تعمل كاملةً بلا سكربت.
+        self.fields["from_enrollment_code"].widget.attrs["data-searchable"] = _(
+            "ابحث برمز التسجيل أو اسم المشارك…"
+        )
+        self.fields["to_cohort_code"].widget.attrs["data-searchable"] = _(
+            "ابحث برمز الدفعة أو اسمها…"
+        )
 
     def clean(self) -> dict[str, Any]:
         """
@@ -442,6 +566,8 @@ __all__ = [
     "CertificateIssueForm",
     "ClearanceCancelForm",
     "ClearanceOpenForm",
+    "CohortCancelForm",
+    "CohortEditForm",
     "CohortForm",
     "CreditReturnAtClearanceForm",
     "CustodyForm",

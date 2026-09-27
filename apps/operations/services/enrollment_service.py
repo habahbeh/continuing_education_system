@@ -17,6 +17,7 @@ WITHDRAWN, and who said so" has to be answerable after a claim is signed.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -198,8 +199,7 @@ def create_enrollment(
     # leave a gap in the register that nobody could later account for.
     if Enrollment.objects.filter(participant=participant, cohort=cohort).exists():
         raise DuplicateEnrollmentError(
-            f"هذا المشارك مسجّل مسبقاً على الدفعة {cohort.code}. "
-            "لا يمكن إنشاء تسجيل مكرر (Q-19)."
+            f"هذا المشارك مسجّل مسبقاً على الدفعة {cohort.code}. لا يمكن إنشاء تسجيل مكرر (Q-19)."
         )
 
     if code is None:
@@ -332,6 +332,10 @@ def _require_first_payment(enrollment: Enrollment) -> None:
     credit-covered enrolment has nothing owed and passes untouched.
     """
     from apps.billing.services.account_service import ZERO, get_account_state
+    from apps.cashbox.services import payment_service
+
+    # Money under a pending void is not money to stand on.
+    payment_service.require_no_pending_void(enrollment, what_ar="اعتماد التسجيل")
 
     state = get_account_state(enrollment)
     if state.participant_owes and state.total_paid == ZERO:
@@ -797,16 +801,21 @@ def list_enrollments(
     query: str = "",
     cohort_code: str = "",
     status: str = "",
+    participant_number: str = "",
     request: Any = None,
 ) -> list[dict[str, Any]]:
     """
     Enrolments as rows, each carrying its balance.
 
+    ``participant_number`` narrows to one participant's enrolments exactly —
+    the participant file links here with it. ``query`` matches a name, and two
+    participants can share one.
+
     The balance comes from ``get_account_state`` rather than a stored column,
     because there is exactly one place the balance equation lives and a list
     screen is not entitled to a second opinion about it (DATA_MODEL §8.2).
     """
-    from apps.billing.services.account_service import get_account_state
+    from apps.billing.services.account_service import get_account_states
 
     policy.require(actor, Screen.ENROLLMENTS, Action.VIEW, request=request)
 
@@ -821,13 +830,25 @@ def list_enrollments(
         queryset = queryset.filter(cohort__code=cohort_code)
     if status:
         queryset = queryset.filter(status=status)
+    if participant_number:
+        queryset = queryset.filter(participant__participant_number=participant_number)
 
+    enrollments = list(queryset.order_by("-enrolled_on", "code"))
+    # One grouped read for the whole page instead of ten queries per row —
+    # the same equation, summed once (see ``get_account_states``).
+    from apps.cashbox.services import payment_service
+
+    states = get_account_states(enrollments)
+    holds = payment_service.pending_voids_by_enrollment(enrollments)
     rows: list[dict[str, Any]] = []
-    for enrollment in queryset.order_by("-enrolled_on", "code"):
-        state = get_account_state(enrollment)
+    for enrollment in enrollments:
+        state = states[enrollment.pk]
         rows.append(
             {
                 "code": enrollment.code,
+                # A receipt under a pending void: the balance shown counts
+                # money that may be taken back. Named so the row can say so.
+                "pending_void_receipt": holds.get(enrollment.pk, ""),
                 "participant_name": enrollment.participant.name_ar,
                 "participant_number": enrollment.participant.participant_number,
                 "cohort_code": enrollment.cohort.code,
@@ -924,6 +945,72 @@ def enroll_with_charges(
     return enrollment
 
 
+#: Tone and icon per programme kind, for the till's enrolment cards.
+_KIND_LOOK = {
+    "DIPLOMA": ("violet", "cap"),
+    "SHORT_COURSE": ("info", "book"),
+    "ONLINE_COURSE": ("teal", "globe"),
+}
+
+
+def _payable_rows(enrollments: list[Enrollment], *, as_of: date) -> list[dict[str, Any]]:
+    """
+    One card per enrolment that still owes money, balances summed in bulk.
+
+    ``enrollments`` arrive with participant, cohort and programme joined; the
+    nine ledger terms are summed once for the whole list
+    (``get_account_states``), and BR-020's floor is read through the service
+    that enforces it — so what the card says is what the save will check.
+    """
+    from apps.billing.services.account_service import ZERO, get_account_states
+    from apps.cashbox.services import payment_service
+
+    states = get_account_states(enrollments)
+    holds = payment_service.pending_voids_by_enrollment(enrollments)
+    rows: list[dict[str, Any]] = []
+    for enrollment in enrollments:
+        state = states[enrollment.pk]
+        if state.balance <= ZERO:
+            continue
+        cohort = enrollment.cohort
+        program = cohort.program
+        tone, icon = _KIND_LOOK.get(program.program_type, ("brand", "book"))
+        minimum = payment_service.first_payment_minimum(enrollment=enrollment, as_of=as_of)
+        rows.append(
+            {
+                "code": enrollment.code,
+                "participant_number": enrollment.participant.participant_number,
+                "participant_name": enrollment.participant.name_ar,
+                "cohort_code": cohort.code,
+                "cohort_name": cohort.name_ar or cohort.code,
+                "program_name": program.name_ar,
+                "program_type": program.program_type,
+                "type_label": program.get_program_type_display(),
+                "tone": tone,
+                "icon": icon,
+                "status_display": enrollment.get_status_display(),
+                "enrolled_on": enrollment.enrolled_on,
+                "total_due": state.total_due - state.total_discount,
+                "total_paid": state.total_paid,
+                "balance": state.balance,
+                "is_first_payment": state.total_paid == ZERO,
+                "pending_void_receipt": holds.get(enrollment.pk, ""),
+                "minimum_first_payment": minimum,
+                "program_minimum_override": program.minimum_first_payment_override,
+                "default_text": payment_service.default_breakdown_text(enrollment=enrollment),
+            }
+        )
+    return rows
+
+
+def _payable_queryset() -> Any:
+    return (
+        Enrollment.objects.select_related("participant", "cohort__program")
+        .exclude(status=EnrollmentStatus.CANCELLED)
+        .order_by("-enrolled_on", "-id")
+    )
+
+
 def payable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple[str, str]]:
     """
     Enrolments the cashier may collect against, with what is still owed.
@@ -937,23 +1024,99 @@ def payable_enrollment_choices(*, actor: Any, request: Any = None) -> list[tuple
     Settled enrolments are omitted: collecting against a zero balance produces
     an unallocated credit that then has to be handed back at clearance.
     """
-    from apps.billing.services.account_service import ZERO, get_account_state
+    policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
+
+    rows = _payable_rows(list(_payable_queryset()[:200]), as_of=timezone.localdate())
+    return [(r["code"], f"{r['code']} — {r['participant_name']} ({r['balance']})") for r in rows]
+
+
+def recent_payable_rows(*, actor: Any, limit: int = 6, request: Any = None) -> list[dict[str, Any]]:
+    """The latest enrolments still owing — the till's quick picks."""
+    policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
+
+    rows = _payable_rows(list(_payable_queryset()[:60]), as_of=timezone.localdate())
+    return rows[:limit]
+
+
+def payable_participant_search(
+    *, actor: Any, query: str, limit: int = 8, request: Any = None
+) -> list[dict[str, Any]]:
+    """
+    Participants matching a number, a name, a phone or an identity document,
+    each with how many enrolments still owe and how much in all.
+
+    Under the till's own permission, like every lookup on this screen.
+    """
+    from django.db.models import Q
+
+    from apps.people.models import Participant
 
     policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
 
-    pairs: list[tuple[str, str]] = []
-    for enrollment in (
-        Enrollment.objects.select_related("participant")
-        .exclude(status=EnrollmentStatus.CANCELLED)
-        .order_by("-enrolled_on")[:200]
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    people = list(
+        Participant.objects.filter(
+            Q(participant_number__startswith=query)
+            | Q(name_ar__icontains=query)
+            | Q(name_en__icontains=query)
+            | Q(phone__icontains=query)
+            | Q(id_document_number=query)
+        ).order_by("name_ar")[:limit]
+    )
+    if not people:
+        return []
+
+    owing: dict[int, list[dict[str, Any]]] = {p.pk: [] for p in people}
+    by_number = {p.participant_number: p.pk for p in people}
+    for row in _payable_rows(
+        list(_payable_queryset().filter(participant__in=people)), as_of=timezone.localdate()
     ):
-        balance = get_account_state(enrollment).balance
-        if balance <= ZERO:
-            continue
-        pairs.append(
-            (enrollment.code, f"{enrollment.code} — {enrollment.participant.name_ar} ({balance})")
+        owing[by_number[row["participant_number"]]].append(row)
+
+    matches = []
+    for person in people:
+        rows = owing[person.pk]
+        matches.append(
+            {
+                "participant_number": person.participant_number,
+                "name_ar": person.name_ar,
+                "phone": person.phone,
+                "category": person.get_category_display(),
+                "owing_count": len(rows),
+                "owing_total": sum((r["balance"] for r in rows), Decimal("0.000")),
+            }
         )
-    return pairs
+    return matches
+
+
+def payable_participant_account(
+    *, actor: Any, participant_number: str, request: Any = None
+) -> dict[str, Any] | None:
+    """
+    One participant and every enrolment of theirs that still owes — the
+    till's second step. ``None`` when the number names nobody.
+    """
+    from apps.people.models import Participant
+
+    policy.require(actor, Screen.PAYMENT_NEW, Action.CREATE, request=request)
+
+    person = Participant.objects.filter(participant_number=participant_number).first()
+    if person is None:
+        return None
+    rows = _payable_rows(
+        list(_payable_queryset().filter(participant=person)), as_of=timezone.localdate()
+    )
+    return {
+        "participant_number": person.participant_number,
+        "name_ar": person.name_ar,
+        "phone": person.phone,
+        "category": person.get_category_display(),
+        "enrollments": rows,
+        "owing_total": sum((r["balance"] for r in rows), Decimal("0.000")),
+    }
 
 
 def payable_enrollment(*, actor: Any, code: str, request: Any = None) -> Enrollment:
@@ -990,6 +1153,9 @@ __all__ = [
     "next_enrollment_code",
     "payable_enrollment",
     "payable_enrollment_choices",
+    "payable_participant_account",
+    "payable_participant_search",
+    "recent_payable_rows",
     "record_attendance",
     "record_status_change",
     "record_voucher",

@@ -1,20 +1,25 @@
 {% extends "base.html" %}
-{% load i18n status_ui guided_help %}
+{% load i18n status_ui arabic_ui %}
 
 {% block title %}{% translate "قوائم الأسعار المؤرّخة" %} — {% translate "مركز التعليم المستمر" %}{% endblock %}
 
 {% comment %}
-  صفحة قراءة كباقي الكتالوج: لا خدمة إدخال خلف هذه الشاشة ولا فرع POST في
-  العرض، فلا يُرسم زرّ إنشاء ولا تعديل ولا اعتماد ولو كانت الرايات في السياق.
-  زرٌّ بلا مسار أسوأ من غياب الزرّ — والاعتماد نفسه يقع خارج النظام (D-31).
+  كانت صفحة قراءة، وكان ذلك صحيحاً: `create_price_list` مكتوبة بلا مستدعٍ،
+  وزرٌّ بلا مسار أسوأ من غياب الزرّ. فلمّا وُصل المسار صار الغياب هو العيب —
+  شاشةٌ تقول «لا قوائم» ولا تدلّ على طريق (§8) — فالإنشاء زرٌّ في الرأس يفتح
+  حواراً، كما في شاشة البرامج المجاورة.
+
+  والاعتماد ليس هنا: هو فعلٌ على القائمة بعينها، ويقع أصلاً خارج النظام
+  ويُسجَّل قراره (D-31).
 
   ما تعرضه هذه الشاشة هو التأريخ: أي قائمة، لأي فصل، صدرت متى وتسري متى،
   وبأي حالة وبأي مرجع قرار. أما رسوم الدورة والتأمين ورسوم التسجيل فبنودٌ
   داخل القائمة الواحدة، وتُقرأ في صفحتها لا هنا.
 
-  ولا حكم «القائمة السارية اليوم» هنا: BR-012 يحسم السريان بتاريخ الواقعة عبر
-  خدمة التسعير، وهذا العرض لا يستدعيها ولا يمرّر نتيجتها. فيُقال من أين يأتي
-  الحكم بدل أن يُخمَّن من ترتيب الجدول.
+  «سارية اليوم» تأتي من خدمة التسعير نفسها (`effective_price_list` بتاريخ اليوم
+  — قراءة محضة بلا أثر)، لا من ترتيب الجدول: فما تقوله الشاشة هو ما يُسعَّر به
+  فعلاً. وBR-012 يبقى هو الحاكم: التسعير الحقيقي بتاريخ الواقعة لا بتاريخ
+  النظر إلى الشاشة، ولذلك تقول الشريحة «اليوم» صراحةً.
 
   ولا حصة شريك ولا قسمة إيراد: شرطٌ تجاري مع طرف ثالث لا محلّ له في قائمة أسعار.
 
@@ -26,17 +31,64 @@
 <div class="page-head">
   <div>
     <span class="eyebrow">{% translate "البرامج والأسعار" %}</span>
-    <h1>{% translate "قوائم الأسعار المؤرّخة" %}</h1>
+    <h1>{% include "partials/_title_icon.html" %}{% translate "قوائم الأسعار المؤرّخة" %}</h1>
     <p class="sub">
       {% translate "كل قائمة تخصّ فصلاً، ولها تاريخ إصدار وتاريخ سريان وحالة ومرجع قرار. القائمة المعتمدة لا تُعدَّل — التغيير بإصدار قائمة جديدة (BR-008 · D-14) — والاعتماد من رئيس الجامعة خارج النظام (D-31)." %}
     </p>
   </div>
   <div class="acts">
-    <span class="chip info dot">{% translate "قراءة فقط" %}</span>
+    {% if can_create %}
+      <button class="btn2 primary" type="button" @click="document.getElementById('pricelist-new').showModal()">
+        <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-plus-square"/></svg>
+        {% translate "قائمة أسعار جديدة" %}
+      </button>
+    {% else %}
+      <span class="chip info dot">{% translate "قراءة فقط" %}</span>
+    {% endif %}
   </div>
 </div>
 
-{% guided_help "pricelists" %}
+
+{# أول بطاقة تجيب «أي قائمة تسري اليوم؟» برمزها لا بعدد، والباقية مرشِّحات بالحالة تعدّ السجل كله. #}
+<div class="kpi-grid tiles plist-tiles">
+  {% for t in tiles %}
+    <a class="kpi tone-{{ t.tone }}{% if t.on %} is-on{% endif %}" href="{{ t.url }}"{% if t.on %} aria-current="true"{% endif %}>
+      <span class="ico" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-{{ t.icon }}"/></svg></span>
+      <span class="txt">
+        <span class="label">{{ t.label }}</span>
+        <span class="value{% if not t.is_code %} num{% else %} code-val{% endif %}"{% if t.is_code %} dir="ltr" translate="no"{% endif %}>{{ t.value }}</span>
+      </span>
+    </a>
+  {% endfor %}
+</div>
+
+{# البحث فوري: كل تغيير يعيد رسم الجدول (htmx)؛ وبلا JS يعمل بمفتاح Enter. #}
+<form method="get" class="filterbar plist-filters" role="search" id="pl-form"
+      hx-get="{% url 'catalog:pricelists' %}" hx-target="#pl-results" hx-select="#pl-results" hx-swap="outerHTML"
+      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status" hx-push-url="true" hx-indicator="#pl-busy">
+  <div class="fld grow">
+    <label for="f_q">{% translate "بحث" %}</label>
+    <input type="search" name="q" value="{{ query }}" id="f_q" spellcheck="false" placeholder="{% translate 'الرمز، اسم القائمة، الفصل، مرجع القرار…' %}">
+  </div>
+  <div class="fld">
+    <label for="f_status">{% translate "الحالة" %}</label>
+    <select name="status" id="f_status">
+      <option value="">{% translate "كل الحالات" %}</option>
+      {% for value, label in status_choices %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <span class="busy" id="pl-busy" aria-hidden="true"></span>
+  {% if is_filtered %}<a class="btn2 ghost" href="?">{% translate "إلغاء التصفية" %}</a>{% endif %}
+</form>
+
+{% if active_filters %}
+  <div class="note">
+    <div>
+      {% translate "نتائج مصفّاة" %}:
+      {% for label, value in active_filters %}<span class="chip">{{ label }}: {{ value }}</span>{% endfor %}
+    </div>
+  </div>
+{% endif %}
 
 <div class="card2">
   <div class="card2-head">
@@ -48,9 +100,10 @@
           <span class="chip {{ c.status|status_tone }}">{{ c.label }}: <span class="num">{{ c.count }}</span></span>
         {% endfor %}
       {% endif %}
-      <span class="count">{% blocktranslate count n=price_lists|length %}قائمة واحدة{% plural %}{{ n }} قوائم{% endblocktranslate %}</span>
+      <span class="count">{{ price_lists|length|ar_count:"قائمة واحدة|قائمتان|قوائم|قائمة" }}</span>
     </div>
   </div>
+  <div id="pl-results">
   <div class="tbl-wrap">
     <table class="tbl">
       <thead>
@@ -69,7 +122,9 @@
         {% for pl in price_lists %}
           <tr>
             <td dir="ltr" translate="no"><strong class="num">{{ pl.code }}</strong></td>
-            <td>{{ pl.name_ar }}</td>
+            <td>{{ pl.name_ar }}
+              {% if pl.code == in_force_code %}<br><span class="chip ok dot">{% translate "سارية اليوم" %}</span>{% endif %}
+            </td>
             <td>{{ pl.semester.name_ar }}</td>
             <td dir="ltr" class="num">{{ pl.issued_on|date:"Y/m/d" }}</td>
             <td dir="ltr" class="num">{{ pl.effective_from|date:"Y/m/d" }}</td>
@@ -84,20 +139,50 @@
           </tr>
         {% empty %}
           <tr><td colspan="8" class="empty">
-            <span class="empty-title">{% translate "لا قوائم أسعار معرَّفة بعد" %}</span>
-            <span class="empty-body">{% translate "بلا قائمة معتمدة سارية لا يُسعَّر تسجيل جديد (BR-008). القائمة تُقترح من مدير المركز وتُعتمد من رئيس الجامعة خارج النظام، ثم تُسجَّل هنا بمرجع قرارها — ولا تُنشأ من هذه الشاشة." %}</span>
+            {% if is_filtered %}
+              <span class="empty-title">{% translate "لا قائمة تطابق هذه التصفية" %}</span>
+              <span class="empty-body">{% translate "التصفية أعلاه هي ما ضيّق النتيجة، لا أن السجل فارغ." %}</span>
+              <a class="btn2 ghost empty-act" href="?">{% translate "كل القوائم" %}</a>
+            {% else %}
+              <span class="empty-title">{% translate "لا قوائم أسعار معرَّفة بعد" %}</span>
+              <span class="empty-body">{% translate "بلا قائمة معتمدة سارية لا يُسعَّر تسجيل جديد (BR-008). القائمة تُنشأ مسودةً من النموذج أدناه، ثم تُعتمد من رئيس الجامعة خارج النظام ويُسجَّل قرارُه على القائمة." %}</span>
+            {% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  </div>
   <div class="card2-body">
     <p class="hint boxed">
-      {% translate "BR-012: السعر يُقرأ من القائمة السارية بتاريخ الواقعة ثم يُنسخ على التسجيل، فإصدار قائمة جديدة لا يحرّك أرقام تسجيل قائم. تحديد «القائمة السارية اليوم» تحسمه خدمة التسعير بتاريخٍ مُعطى، وهذه الشاشة لا تستدعيها — فهي تعرض القوائم مرتّبة بتاريخ سريانها ولا تطبع حكماً لا تملكه." %}
+      {% translate "BR-012: السعر يُقرأ من القائمة السارية بتاريخ الواقعة ثم يُنسخ على التسجيل، فإصدار قائمة جديدة لا يحرّك أرقام تسجيل قائم." %}
+      {% if in_force_code %}{% blocktranslate with d=today|date:"Y/m/d" %}وشريحة «سارية اليوم» ({{ d }}) من خدمة التسعير نفسها التي يُسعَّر بها التسجيل، لا من ترتيب الجدول.{% endblocktranslate %}{% else %}{% translate "ولا قائمة معتمدة سارية اليوم: لا يُسعَّر تسجيل جديد حتى تُعتمد قائمة ويحلّ تاريخ سريانها (BR-008)." %}{% endif %}
     </p>
     <p class="hint">
       {% translate "رسوم الدورة والتأمين وقواعد رسوم التسجيل بنودٌ داخل القائمة الواحدة، وتُقرأ في صفحة القائمة." %}
     </p>
   </div>
 </div>
+
+{% if can_create %}
+  {# الفعل في الرأس والحوار عند الطلب: بطاقةُ إدخال في ذيل شاشة قائمة تضع الفعل #}
+  {# على بُعد شاشة ونصف من الزرّ الذي يفتحه، وهو ما أُصلح في سجل التسجيلات قبلها. #}
+  <dialog class="modal confirm-modal" id="pricelist-new" dir="rtl" aria-labelledby="pricelist-new-t"{% if new_form.errors and posted_create %} x-init="$nextTick(() => $el.showModal())"{% endif %}>
+    <form method="post">{% csrf_token %}
+      <div class="modal-head">
+        <span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-plus-square"/></svg></span>
+        <h2 id="pricelist-new-t">{% translate "قائمة أسعار جديدة" %}</h2>
+      </div>
+      <div class="modal-body">
+        {% for e in new_form.non_field_errors %}<div class="err" role="alert">{{ e }}</div>{% endfor %}
+        {% include "partials/_form.html" with form=new_form %}
+        <p class="hint">{% translate "تُولد القائمة مسودةً دائماً: لا حقل حالة هنا. تصير معتمدةً بتسجيل قرار رئيس الجامعة على صفحتها (D-31)، وعندها تُؤرشف سابقةُ الفصل نفسه (BR-008)." %}</p>
+      </div>
+      <div class="modal-acts">
+        <button class="btn2 primary" type="submit">{% translate "إنشاء مسودة" %}</button>
+        <button class="btn2 ghost" type="button" @click="document.getElementById('pricelist-new').close()">{% translate "رجوع" %}</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
 {% endblock %}

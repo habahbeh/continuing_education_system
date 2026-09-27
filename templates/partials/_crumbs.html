@@ -1,0 +1,16 @@
+{% load i18n %}
+{% comment %}
+  مسار التصفح — يُبنى من المدخل المفتوح في القائمة الجانبية (nav.py) لا من
+  كل قالب على حدة: «الرئيسية › المجموعة › الشاشة». لا رابط مسطور، والرمز
+  الملوّن هو رمز الشاشة نفسه في القائمة.
+{% endcomment %}
+{% url 'operations:dashboard' as home_url %}
+{% if nav_active and nav_active.url != home_url %}
+  <nav class="crumbs" aria-label="{% translate 'مسار التصفح' %}">
+    <ol>
+      <li><a href="{{ home_url }}">{% translate "الرئيسية" %}</a></li>
+      <li><span>{{ nav_active.group }}</span></li>
+      <li aria-current="page"><a href="{{ nav_active.url }}">{{ nav_active.label }}</a></li>
+    </ol>
+  </nav>
+{% endif %}
