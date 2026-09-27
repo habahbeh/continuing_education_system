@@ -160,7 +160,9 @@ def _year_digits(semester: Any) -> str:
     answer is empty and the screen says so.
     """
     head = (semester.academic_year or "").strip()[:4]
-    return head if len(head) == 4 and head.isdigit() else ""
+    # ``isdigit()`` وحدها تُرجع True لـ«٢٠٢٧»، فكان الصفّ يُعرَض «صالحاً» وهو
+    # يولّد رقماً بأرقامٍ عربية. ``isascii()`` معها هي الفرق.
+    return head if len(head) == 4 and head.isascii() and head.isdigit() else ""
 
 
 def _type_label(type_code: int) -> str:

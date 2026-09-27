@@ -47,7 +47,11 @@ class SemesterForm(forms.Form):
     transaction (``core_semester_single_active`` allows no other way).
     """
 
-    YEAR_SHAPE = re.compile(r"^\d{4}(/\d{4})?$")
+    #: ``[0-9]`` صراحةً لا ``\d``: الأخير يقبل الأرقام العربية-الهندية، و
+    #: ``"٢٠٢٧".isdigit()`` تُرجع True كذلك — فكانت «٢٠٢٧» تمرّ من هنا ومن
+    #: ``academic_year_digits``، فيخرج رقمٌ جامعيّ «٢٠٢٧10001» مشوَّهٌ ودائم
+    #: لا يُصحَّح بأثر رجعي (BR-001). الرقم يُطبع على شهادة، فلا يُترك للحظّ.
+    YEAR_SHAPE = re.compile(r"^[0-9]{4}(/[0-9]{4})?$")
 
     code = forms.CharField(
         label=_("الرمز"),
