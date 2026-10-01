@@ -4235,12 +4235,16 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     assert 'class="tbl-wrap"' in source
     assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
-    # Two tables: the register (nine columns — the actions column carries
+    # Two tables: the register (eight columns — the actions column carries
     # the next step) and the trainee-names table (seven).
+    #
+    # Eight, not nine: the cohort had a column of its own and it said the
+    # programme's name twice. Its code now sits under the programme name,
+    # which is itself the link to the file.
     register = source.split("<table", 2)[1]
     names = source.split("<table", 2)[2]
-    assert len(re.findall(r"<th[ >]", register)) == 9
-    assert register.count('colspan="9"') == 2, (
+    assert len(re.findall(r"<th[ >]", register)) == 8
+    assert register.count('colspan="8"') == 2, (
         "the reason row and the empty row both span the table"
     )
     assert len(re.findall(r"<th[ >]", names)) == 7

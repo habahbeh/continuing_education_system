@@ -131,7 +131,6 @@
     <table class="tbl mohe-tbl">
       <thead>
         <tr>
-          <th>{% translate "الدفعة" %}</th>
           <th>{% translate "البرنامج" %}</th>
           <th>{% translate "الحالة" %}</th>
           <th>{% translate "الرقم الوزاري" %}</th>
@@ -145,13 +144,14 @@
       <tbody>
         {% for s in submissions %}
           <tr>
-            <td dir="ltr" translate="no">
-              {% if can_view_cohorts %}<a class="row-link num" href="{% url 'operations:cohorts' %}?q={{ s.cohort_code|urlencode }}">{{ s.cohort_code }}</a>
-              {% else %}<strong class="num">{{ s.cohort_code }}</strong>{% endif %}
-              <br><small class="muted" dir="rtl">{{ s.cohort_name_ar }}</small>
-            </td>
-            <td>{{ s.program_name_ar }}
-              <br><small class="muted" dir="ltr" translate="no">{{ s.program_code }}</small>
+            {# هويّة الصفّ: اسم البرنامج بارزاً ويقود إلى الملف نفسه. #}
+            {# والرمزان تحته للبحث والنسخ — ورمز الدفعة يبقى لأن برنامجاً #}
+            {# واحداً قد يحمل دفعتين، فبغيره يتطابق الصفّان على الشاشة. #}
+            <td>
+              <a class="row-link" href="{% url 'operations:mohe-detail' s.id %}">{{ s.program_name_ar }}</a>
+              <br><small class="muted" dir="ltr" translate="no">{{ s.program_code }} ·
+                {% if can_view_cohorts %}<a href="{% url 'operations:cohorts' %}?q={{ s.cohort_code|urlencode }}">{{ s.cohort_code }}</a>
+                {% else %}{{ s.cohort_code }}{% endif %}</small>
             </td>
             <td>
               <span class="chip {{ s.status|status_tone }} dot">{{ s.status_display }}</span>
@@ -203,7 +203,7 @@
           </tr>
           {% if s.rejection_reason_ar %}
             <tr class="mohe-reason-row">
-              <td colspan="9">
+              <td colspan="8">
                 <p class="mohe-reason">
                   <strong>{% translate "سبب الرفض كما ورد" %}:</strong> {{ s.rejection_reason_ar }}
                 </p>
@@ -211,7 +211,7 @@
             </tr>
           {% endif %}
         {% empty %}
-          <tr><td colspan="9" class="empty">
+          <tr><td colspan="8" class="empty">
             {% if active_filters %}
               <span class="empty-title">{% translate "لا ملف يطابق هذه التصفية" %}</span>
               <span class="empty-body">{% translate "التصفية أعلاه هي ما ضيّق النتيجة، لا أن السجل فارغ. أزل التصفية لترى الملفات كلها — والمرفوضة تبقى معروضة، فهي وحدها ما يدلّ على ما يجب تغييره في إعادة الإرسال (BR-014)." %}</span>
