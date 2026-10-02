@@ -82,7 +82,7 @@
       {# المسار وحده يجعل معاملات النموذج هي الاستعلام كلَّه. #}
 <form method="get" class="filterbar mohe-filters" role="search" id="mohe-form"
       hx-get="{{ request.path }}" hx-target="#mohe-results" hx-select="#mohe-results" hx-swap="outerHTML"
-      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status" hx-push-url="true" hx-indicator="#mohe-busy">
+      hx-trigger="input changed delay:350ms from:#f_q, change from:#f_status, change from:#f_deadline" hx-push-url="true" hx-indicator="#mohe-busy">
   <div class="fld grow">
     <label for="f_q">{% translate "بحث" %}</label>
     <input type="search" name="q" value="{{ query }}" placeholder="{% translate 'رمز الدفعة أو اسمها…' %}" spellcheck="false" id="f_q">
@@ -97,6 +97,18 @@
       <option value="REJECTED" {% if status == "REJECTED" %}selected{% endif %}>{% translate "مرفوض" %}</option>
     </select>
   </div>
+  {# المهلة فلترٌ قائمٌ بذاته لا حالةٌ خامسة: «معتمد» و«قاربت» يجتمعان على  #}
+  {# صفٍّ واحد، وقائمةٌ واحدةٌ تخلطهما تمنع البحث عن أحدهما داخل الآخر.     #}
+  <div class="fld">
+    <label for="f_deadline">{% translate "المهلة" %}</label>
+    <select name="deadline" id="f_deadline">
+      <option value="">{% translate "كل المهل" %}</option>
+      <option value="soon" {% if deadline == "soon" %}selected{% endif %}>{% translate "قاربت المهلة" %}</option>
+      <option value="expired" {% if deadline == "expired" %}selected{% endif %}>{% translate "انتهت المهلة" %}</option>
+      <option value="open" {% if deadline == "open" %}selected{% endif %}>{% translate "المهلة مفتوحة" %}</option>
+    </select>
+  </div>
+  {% if sort != "priority" %}<input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ direction }}">{% endif %}
   <span class="busy" id="mohe-busy" aria-hidden="true"></span>
   {% if active_filters %}
     <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "إلغاء التصفية" %}</a>
@@ -120,14 +132,20 @@
   <div class="card2-head">
     <span class="head-ico tone-violet" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-stamp"/></svg></span><h2>{% translate "الملفات الوزارية" %}</h2>
     {% if can_export_uploaded_names %}
-      {# تصديرٌ على مستوى السجلّ كلّه: ثلاث جماهير لا جمهور واحد، ويتبع     #}
-      {# فلترة الأعلى — فالمنزَّل هو المعروض لا شيءٌ آخر. وتصديرُ دفعةٍ      #}
-      {# بعينها من صفّها في العمود «المسجّلون».                              #}
-      <div class="acts">
-        <small class="muted">{% translate "تصدير أسماء المعروض" %}:</small>
-        <a class="btn2 sm" href="{% url 'operations:mohe-names-export' %}?{{ kept_filters }}scope=pending" download>{% translate "بانتظار الرفع" %}</a>
-        <a class="btn2 sm ghost" href="{% url 'operations:mohe-names-export' %}?{{ kept_filters }}scope=uploaded" download>{% translate "المرفوعة" %}</a>
-        <a class="btn2 sm ghost" href="{% url 'operations:mohe-names-export' %}?{{ kept_filters }}scope=all" download>{% translate "الكل" %}</a>
+      {# ثلاثة أزرارٍ متجاورةٍ فوق جدولٍ تُقرأ تبويباتٍ تفلتره، وهي تنزيلات. #}
+      {# زرٌّ واحدٌ بأيقونة تنزيل يقول ما يفعل، وقائمتُه تسمّي الجماهير.      #}
+      <div class="acts" x-data="{ open: false }" @keydown.escape="open = false">
+        <button class="btn2 sm" type="button" :aria-expanded="open ? 'true' : 'false'"
+                aria-haspopup="menu" @click="open = !open">
+          <svg class="btn-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="#i-upload"/></svg>
+          {% translate "تصدير أسماء المتدربين" %}
+        </button>
+        <div class="menu-pop" x-show="open" x-cloak @click.outside="open = false" role="menu">
+          <a role="menuitem" href="{% url 'operations:mohe-names-export' %}?{{ kept_filters }}scope=pending" download>{% translate "بانتظار الرفع إلى الوزارة" %}</a>
+          <a role="menuitem" href="{% url 'operations:mohe-names-export' %}?{{ kept_filters }}scope=uploaded" download>{% translate "المرفوعة إلى الوزارة" %}</a>
+          <a role="menuitem" href="{% url 'operations:mohe-names-export' %}?{{ kept_filters }}scope=all" download>{% translate "الكل" %}</a>
+          <p class="menu-note">{% translate "تشمل الدفعات المعتمدة فقط، وتتبع البحث والفلتر الحاليين." %}</p>
+        </div>
       </div>
     {% endif %}
   </div>
@@ -136,67 +154,83 @@
     <table class="tbl mohe-tbl">
       <thead>
         <tr>
-          {# ‏`num` على الترويسة كما على خليّتها: الأربعة التالية بياناتها #}
-          {# مُحاذاةٌ إلى النهاية، وترويستُها كانت إلى البداية — فالرقم      #}
-          {# والعنوان في جهتين، ولا يُقرأ عمودٌ هكذا.                        #}
+          {# ‏`num` على الترويسة كما على خليّتها: ما بياناته مُحاذاةٌ إلى #}
+          {# النهاية ترويستُه كذلك، وإلا كان الرقم وعنوانه في جهتين.     #}
           <th>{% translate "البرنامج" %}</th>
           <th>{% translate "الحالة" %}</th>
           <th class="num">{% translate "الرقم الوزاري" %}</th>
-          {# ثلاثة أعمدة تواريخ متجاورة تتشابه فتضلّ العين بينها: الإرسال #}
-          {# والقرار محطّتان في رحلةٍ واحدة، فعمودٌ واحدٌ لهما بسطرين.      #}
-          <th class="num">{% translate "أُرسل · القرار" %}</th>
-          <th class="num">{% translate "مهلة التسجيل" %}</th>
-          <th class="num">{% translate "المسجّلون" %}</th>
-          <th aria-label="{% translate 'إجراءات' %}"></th>
+          {# ترويسةٌ تُنقر: الرابط يحمل الفلترة الحالية، والسهم و`aria-sort` #}
+          {# يُبنيان في العرض معاً فلا يفترقان (`_mohe_sort_columns`).        #}
+          {% with c=sort_columns.submitted_on %}<th class="num sortable{% if c.active %} is-sorted{% endif %}" aria-sort="{{ c.aria }}"><a class="sort-link" href="{{ c.url }}" hx-get="{{ c.url }}" hx-target="#mohe-results" hx-select="#mohe-results" hx-swap="outerHTML" hx-push-url="true">{{ c.label }}<span class="sort-ar" aria-hidden="true">{{ c.arrow }}</span></a></th>{% endwith %}
+          {% with c=sort_columns.decided_on %}<th class="num sortable{% if c.active %} is-sorted{% endif %}" aria-sort="{{ c.aria }}"><a class="sort-link" href="{{ c.url }}" hx-get="{{ c.url }}" hx-target="#mohe-results" hx-select="#mohe-results" hx-swap="outerHTML" hx-push-url="true">{{ c.label }}<span class="sort-ar" aria-hidden="true">{{ c.arrow }}</span></a></th>{% endwith %}
+          {% with c=sort_columns.registration_deadline %}<th class="num sortable{% if c.active %} is-sorted{% endif %}" aria-sort="{{ c.aria }}"><a class="sort-link" href="{{ c.url }}" hx-get="{{ c.url }}" hx-target="#mohe-results" hx-select="#mohe-results" hx-swap="outerHTML" hx-push-url="true">{{ c.label }}<span class="sort-ar" aria-hidden="true">{{ c.arrow }}</span></a></th>{% endwith %}
+          <th class="num">{% translate "التسجيلات" %}</th>
+          <th class="acts-head">{% translate "الإجراء" %}</th>
         </tr>
       </thead>
       <tbody>
         {% for s in submissions %}
           <tr>
-            {# هويّة الصفّ: اسم البرنامج بارزاً ويقود إلى الملف نفسه. #}
-            {# والرمزان تحته للبحث والنسخ — ورمز الدفعة يبقى لأن برنامجاً #}
-            {# واحداً قد يحمل دفعتين، فبغيره يتطابق الصفّان على الشاشة. #}
-            <td>
+            {# هويّة الصفّ: اسم البرنامج بارزاً ويقود إلى الملف نفسه، #}
+            {# والرمزان تحته بلونٍ محايد — رمزٌ ليس تحذيراً ولا رابطاً أوّلياً. #}
+            <td class="prog-cell">
               <a class="row-link" href="{% url 'operations:mohe-detail' s.id %}">{{ s.program_name_ar }}</a>
-              <br><small class="muted" dir="ltr" translate="no">{{ s.program_code }} ·
-                {% if can_view_cohorts %}<a href="{% url 'operations:cohorts' %}?q={{ s.cohort_code|urlencode }}">{{ s.cohort_code }}</a>
+              <br><small class="codes" dir="ltr" translate="no">{{ s.program_code }} ·
+                {% if can_view_cohorts %}<a class="code-link" href="{% url 'operations:cohorts' %}?q={{ s.cohort_code|urlencode }}">{{ s.cohort_code }}</a>
                 {% else %}{{ s.cohort_code }}{% endif %}</small>
+              {% if s.resubmission_of %}
+                {# السلسلة كانت رقاقةً تقول «إعادة إرسال» ولا تقول لأيّ ملف. #}
+                <br><a class="chain-link" href="{% url 'operations:mohe-detail' s.resubmission_of %}">{% translate "إعادة إرسال لـ" %} <span aria-hidden="true">←</span></a>
+              {% endif %}
             </td>
-            <td>
-              <span class="chip {{ s.status|status_tone }} dot">{{ s.status_display }}</span>
-              {% if s.resubmission_of %}<br><span class="chip">{% translate "إعادة إرسال" %}</span>{% endif %}
+            <td class="st-cell">
+              {# «معتمد» أخضرُ و«انتهت المهلة» أحمرُ على الصفّ نفسه تناقضٌ   #}
+              {# بصريّ: الملفّ معتمدٌ فعلاً، لكنه لم يعد يقبل اسماً. فالرمادي #}
+              {# يقول «انتهى شأنه» بلا أن ينازع الأحمر معناه.                #}
+              {% if s.deadline_stage == "expired" %}
+                <span class="chip closed dot">{% translate "معتمد · مغلق" %}</span>
+              {% else %}
+                <span class="chip {{ s.status|status_tone }} dot">{{ s.status_display }}</span>
+              {% endif %}
             </td>
-            {# ‏`auto` لا `ltr`: رقمٌ وزاريّ يبدأ بحروفٍ عربية («ع.م/117/2026») #}
-            {# يُقلب تحت `ltr` فيُقرأ ويُنسخ خطأً — وهو شرط الاعتماد (C-16). #}
-            <td dir="auto" class="num">
-              {% if s.mohe_course_number %}{{ s.mohe_course_number }}
+            {# ‏`auto` لا `ltr`: رقمٌ يبدأ بحروفٍ عربية («ع.م/2026/117») ينقلب #}
+            {# تحت `ltr` فيُقرأ ويُنسخ خطأً — وهو شرط الاعتماد (C-16). والعزل #}
+            {# يمنع الرقم من قلب ما جاوره، والمحاذاة واحدةٌ للقيم كلّها.      #}
+            <td class="num ref-cell" data-label="{% translate 'الرقم الوزاري' %}">
+              {% if s.mohe_course_number %}<span class="ref" dir="auto" translate="no">{{ s.mohe_course_number }}</span>
               {% else %}<span class="muted">{% translate "لم يصدر" %}</span>{% endif %}
             </td>
-            <td class="num dates-cell">
+            <td class="num sent-cell" data-label="{% translate 'أُرسل' %}">
               {% if s.submitted_on %}<span dir="ltr">{{ s.submitted_on|date:"Y/m/d" }}</span>
               {% else %}<span class="muted">{% translate "لم يُرسل بعد" %}</span>{% endif %}
-              <br>{% if s.decided_on %}<small dir="ltr">{{ s.decided_on|date:"Y/m/d" }}</small>
-              {% else %}<small class="muted">{% translate "بلا قرار" %}</small>{% endif %}
             </td>
-            <td class="num">
+            <td class="num dec-cell" data-label="{% translate 'القرار' %}">
+              {% if s.decided_on %}<span dir="ltr">{{ s.decided_on|date:"Y/m/d" }}</span>
+              {% else %}<span class="muted" aria-label="{% translate 'بلا قرار' %}">—</span>{% endif %}
+            </td>
+            {# سطرٌ واحدٌ تحت التاريخ لا سطران: الحالة الواحدة تُقال مرّة. #}
+            <td class="num dl-cell" data-label="{% translate 'مهلة التسجيل' %}">
               {% if s.registration_deadline %}
                 <span dir="ltr">{{ s.registration_deadline|date:"Y/m/d" }}</span>
-                {% if s.deadline_state.severity == "EXPIRED" %}
-                  <br><span class="chip danger dot">{% translate "انتهت المهلة" %}</span>
-                {% elif s.deadline_state.severity == "WARNING" %}
-                  <br><span class="chip warn dot">{% translate "قاربت المهلة" %}{% if s.deadline_state.days_left %} — {{ s.deadline_state.days_left|ar_count:"يوم واحد|يومان|أيام|يوماً" }}{% else %} — {% translate "آخر يوم" %}{% endif %}</span>
-                {% elif s.deadline_state %}
+                {% if s.deadline_stage == "expired" %}
+                  <br><span class="chip danger dot">{% translate "انتهت" %}</span>
+                {% elif s.deadline_stage == "soon" %}
+                  <br><span class="chip warn dot">{% translate "قاربت" %}{% if s.deadline_state.days_left %} — {{ s.deadline_state.days_left|ar_count:"يوم واحد|يومان|أيام|يوماً" }}{% else %} — {% translate "آخر يوم" %}{% endif %}</span>
+                {% elif s.deadline_stage == "open" %}
                   <br><small class="muted">{{ s.deadline_state.days_left|ar_count:"يوم واحد|يومان|أيام|يوماً" }} {% translate "متبقية" %}</small>
                 {% endif %}
               {% else %}<span class="muted">{% translate "غير محدَّدة" %}</span>{% endif %}
             </td>
-            {# رقمٌ وحده: نصُّ الزرّ هنا كان يوسّع العمود إلى 198px — أعرض  #}
-            {# من كل عمودٍ في الجدول — وموضعُ الزرّ هو عمود الإجراءات.       #}
-            <td class="num">
-              {% if s.enrolled_count %}{{ s.enrolled_count }}
-              {% else %}<span class="muted">0</span>{% endif %}
-              {% if s.awaits_approved_enrolment %}
-                <br><small class="muted">{% translate "لا معتمد بعد" %}</small>
+            {# العددان في عمودٍ واحد وبسطرين دائماً: «المسجّلون» وحده كان    #}
+            {# يُقرأ كأنه مَن يجوز رفع أسمائهم، وهم المعتمدون وحدهم (BR-019). #}
+            <td class="num enr-cell" data-label="{% translate 'التسجيلات' %}">
+              <span>{{ s.enrolled_count|ar_count:"مسجّل واحد|مسجّلان|مسجّلين|مسجّلاً" }}</span>
+              <br>{% if s.has_names %}
+                <a class="sub-link" href="{% url 'operations:mohe-detail' s.id %}?{{ kept_filters }}from=register#names">{{ s.approved_count|ar_count:"معتمد واحد|معتمدان|معتمدين|معتمداً" }}</a>
+              {% elif s.status == "APPROVED" %}
+                <small class="muted">{% translate "لا معتمد بعد" %}</small>
+              {% else %}
+                <small class="muted">{% translate "قبل الاعتماد" %}</small>
               {% endif %}
             </td>
             <td class="acts-col">
@@ -209,28 +243,25 @@
                 <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "سجّل القرار" %}</a>
               {% elif s.may_act and s.status == "REJECTED" %}
                 <a class="btn2 sm mohe-action" href="{% url 'operations:mohe-detail' s.id %}">{% translate "أعد الإرسال" %}</a>
-              {% endif %}
-              {# رابطٌ ثانويٌّ واحد لا اثنان: «الأسماء» و«التسجيلات» وجهتان  #}
-              {# عن مسجَّلي الدفعة نفسها، وكانتا تأخذان سطراً ثانياً في كل   #}
-              {# صفّ. الواحد يقود إلى صفحة الملفّ، وهناك الوجهتان متجاورتان. #}
-              {% if s.has_names %}
-                <a class="btn2 sm ghost" href="{% url 'operations:mohe-detail' s.id %}?{{ kept_filters }}from=register#names">{% translate "المسجّلون" %} <span class="num">{{ s.approved_count }}</span></a>
               {% elif s.status == "APPROVED" and can_view_enrollments %}
-                <a class="btn2 sm ghost" href="{% url 'operations:enrollments' %}?cohort={{ s.cohort_code }}">{% translate "التسجيلات" %}</a>
+                <a class="sub-link" href="{% url 'operations:enrollments' %}?cohort={{ s.cohort_code }}">{% translate "التسجيلات" %}</a>
               {% endif %}
             </td>
           </tr>
           {% if s.rejection_reason_ar %}
+            {# الصفُّ نفسه ورديّ، فإطارٌ ثقيلٌ فوقه تكرارٌ للرسالة بصوتٍ أعلى. #}
+            {# وتاريخ الرفض هو `decided_on` — حقلُ القرار الواحد للاثنين.      #}
             <tr class="mohe-reason-row">
-              <td colspan="7">
+              <td colspan="8">
                 <p class="mohe-reason">
-                  <strong>{% translate "سبب الرفض كما ورد" %}:</strong> {{ s.rejection_reason_ar }}
+                  <strong>{% translate "سبب الرفض كما ورد" %}{% if s.decided_on %} (<span dir="ltr">{{ s.decided_on|date:"Y/m/d" }}</span>){% endif %}:</strong>
+                  {{ s.rejection_reason_ar }}
                 </p>
               </td>
             </tr>
           {% endif %}
         {% empty %}
-          <tr><td colspan="7" class="empty">
+          <tr><td colspan="8" class="empty">
             {% if active_filters %}
               <span class="empty-title">{% translate "لا ملف يطابق هذه التصفية" %}</span>
               <span class="empty-body">{% translate "التصفية أعلاه هي ما ضيّق النتيجة، لا أن السجل فارغ. أزل التصفية لترى الملفات كلها — والمرفوضة تبقى معروضة، فهي وحدها ما يدلّ على ما يجب تغييره في إعادة الإرسال (BR-014)." %}</span>

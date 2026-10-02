@@ -1877,8 +1877,17 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
     """§3.3/14 — every ministry file, whatever its status."""
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "").strip()
+    deadline = request.GET.get("deadline", "").strip()
+    sort = request.GET.get("sort", "").strip()
+    direction = request.GET.get("dir", "").strip()
     rows = mohe_service.list_submissions(
-        actor=request.user, status=status, query=query, request=request
+        actor=request.user,
+        status=status,
+        query=query,
+        deadline=deadline,
+        sort=sort,
+        direction=direction,
+        request=request,
     )
     # The strip above the register counts the whole register, not the slice
     # — a tile that shrank with the filter it opens would count itself.
@@ -1952,25 +1961,41 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
 
     # «المسجّلون» counts the standing; the names below are the APPROVED. The
     # column used to show the first and link to nothing, and the page had to
-    # apologise for the gap in a sentence. Each row now carries both numbers,
-    # read off the very sections drawn below — so no query of its own.
-    name_sections = enrollment_service.list_mohe_name_uploads(
-        actor=request.user, request=request
-    )
-    by_cohort = {s["cohort_code"]: s for s in name_sections}
+    # apologise for the gap in a sentence. Both numbers now ride the
+    # register's own query (``approved_count`` off the same annotation), so
+    # the page no longer walks every approved cohort to learn them.
     for row in rows:
-        section = by_cohort.get(row["cohort_code"]) if row["status"] == "APPROVED" else None
+        approved = row["status"] == "APPROVED"
         # A button is drawn only where pressing it would show something: an
         # approved file with no approved enrolment yet gets the sentence that
         # explains the gap instead of a control that opens an empty table.
-        row["has_names"] = bool(section and section["rows"])
-        row["approved_count"] = section["approved_count"] if section else 0
-        row["pending_upload_count"] = section["pending_count"] if section else 0
-        row["awaits_approved_enrolment"] = bool(section and not section["rows"])
+        row["has_names"] = approved and row["approved_count"] > 0
+        row["awaits_approved_enrolment"] = approved and row["approved_count"] == 0
+
+    # Sortable headers are built here, not in the template: each needs the
+    # link that toggles it, the arrow, and the `aria-sort` a screen reader
+    # announces — three things that must agree, and a template that computed
+    # them with `{% if %}` would be the place they stop agreeing.
+    narrowing = urlencode(
+        {k: v for k, v in (("q", query), ("status", status), ("deadline", deadline)) if v}
+    )
+    sort_columns = _mohe_sort_columns(base, narrowing, sort=sort, direction=direction)
 
     # The names open on the file's own page, and the link carries the filters
     # so its «رجوع» comes back to this same slice of the register.
-    kept = urlencode({k: v for k, v in (("q", query), ("status", status)) if v})
+    kept = urlencode(
+        {
+            k: v
+            for k, v in (
+                ("q", query),
+                ("status", status),
+                ("deadline", deadline),
+                ("sort", sort),
+                ("dir", direction),
+            )
+            if v
+        }
+    )
 
     return render(
         request,
@@ -1985,16 +2010,20 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             ),
             "query": query,
             "status": status,
+            "deadline": deadline,
+            "sort": sort or "priority",
+            "direction": direction or "asc",
+            "sort_columns": sort_columns,
+            #: The register with its sort cleared — «back to the work order».
+            "priority_url": f"{base}?{narrowing}" if narrowing else base,
             #: The register's own filters, ready to carry into a link.
             "kept_filters": f"{kept}&" if kept else "",
-
             # Both filters were already read from the URL and neither was named
             # on screen, so a narrowed list read as the whole register.
-            "active_filters": _mohe_active_filters(rows, query, status),
+            "active_filters": _mohe_active_filters(rows, query, status, deadline),
             "can_open_file": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
             "can_view_cohorts": policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW),
             "can_export_uploaded_names": policy.is_allowed(request.user, Screen.MOHE, Action.VIEW),
-            "mohe_name_sections": name_sections,
         },
     )
 
@@ -2226,8 +2255,53 @@ def mohe_names_export_view(request: HttpRequest) -> HttpResponse:
     return response
 
 
+#: The columns a reader may order the register by, in the order they appear.
+MOHE_SORTABLE = (
+    ("submitted_on", _("تاريخ الإرسال")),
+    ("decided_on", _("تاريخ القرار")),
+    ("registration_deadline", _("مهلة التسجيل")),
+)
+
+
+def _mohe_sort_columns(
+    base: str, narrowing: str, *, sort: str, direction: str
+) -> dict[str, dict[str, Any]]:
+    """
+    One entry per sortable header: where it links, and what it announces.
+
+    Pressing the column that is already sorted reverses it; pressing any
+    other starts it ascending, because «oldest first» is what a reader means
+    by a date column they have just opened.
+    """
+    columns: dict[str, dict[str, Any]] = {}
+    for key, label in MOHE_SORTABLE:
+        active = sort == key
+        descending = active and direction != "desc"
+        params = f"{narrowing}&" if narrowing else ""
+        columns[key] = {
+            "label": label,
+            "active": active,
+            "url": f"{base}?{params}sort={key}&dir={'desc' if descending else 'asc'}",
+            # `aria-sort` belongs on the header that IS sorted and on no
+            # other — «none» on every column would say the table is unsorted.
+            "aria": ("descending" if direction == "desc" else "ascending")
+            if active
+            else "none",
+            "arrow": ("↓" if direction == "desc" else "↑") if active else "",
+        }
+    return columns
+
+
+#: The deadline filters as the reader asked for them, for the «مصفّاة» strip.
+MOHE_DEADLINE_LABELS = {
+    "soon": _("قاربت المهلة"),
+    "expired": _("انتهت المهلة"),
+    "open": _("المهلة مفتوحة"),
+}
+
+
 def _mohe_active_filters(
-    rows: list[dict[str, Any]], query: str, status: str
+    rows: list[dict[str, Any]], query: str, status: str, deadline: str = ""
 ) -> list[tuple[str, str]]:
     """The filters this request is narrowing by, named for the reader."""
     active: list[tuple[str, str]] = []
@@ -2239,6 +2313,8 @@ def _mohe_active_filters(
         # to read from, and the empty state says «filtered», not «empty».
         labels = {str(row["status"]): str(row["status_display"]) for row in rows}
         active.append((_("الحالة"), labels.get(status, status)))
+    if deadline in MOHE_DEADLINE_LABELS:
+        active.append((_("المهلة"), str(MOHE_DEADLINE_LABELS[deadline])))
     return active
 
 
@@ -2480,6 +2556,12 @@ def _handle_mohe_action(request: HttpRequest, submission_id: int) -> HttpRespons
     return redirect("operations:mohe-detail", submission_id=submission_id)
 
 
+def _form_errors(form: Any) -> str:
+    """Every refusal the form found, as one sentence a message can carry."""
+    said = [str(error) for errors in form.errors.values() for error in errors]
+    return " · ".join(dict.fromkeys(said)) or str(_("راجع حقول النموذج."))
+
+
 def _run_mohe_action(request: HttpRequest, action: str, submission: Any) -> int | None:
     """Perform one act and report the id to land on — a new one for a resubmission."""
     if action == "attach":
@@ -2516,9 +2598,19 @@ def _run_mohe_action(request: HttpRequest, action: str, submission: Any) -> int 
         return None
 
     if action in {"approve", "reject"}:
-        decision_form = MoheDecisionForm(request.POST)
+        # Which button was pressed decides which dates are required, and the
+        # send date is what «لا يسبق» is measured against — neither is a field
+        # on the form, so both are handed to it.
+        decision_form = MoheDecisionForm(
+            request.POST,
+            approved=action == "approve",
+            submitted_on=submission.submitted_on,
+        )
         if not decision_form.is_valid():
-            messages.error(request, _("تاريخ القرار مطلوب."))
+            # The POST redirects, so the bound form never reaches the page:
+            # a generic «تاريخ القرار مطلوب» was the only thing the typist saw
+            # however the form was wrong. The errors speak for themselves.
+            messages.error(request, _form_errors(decision_form))
             return None
         data = decision_form.cleaned_data
         mohe_service.record_decision(

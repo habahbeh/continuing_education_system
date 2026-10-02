@@ -17,6 +17,7 @@ not one this sprint needs answered.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
@@ -194,6 +195,23 @@ def record_decision(
         raise ValidationError("الاعتماد يتطلب الرقم الوزاري (C-16).")
     if not approved and not rejection_reason_ar.strip():
         raise ValidationError("الرفض يتطلب تسجيل سبب الوزارة نصاً (BR-014).")
+    # A decision cannot predate the letter it answers, and an approval cannot
+    # open a registration window that is already shut. Both were accepted
+    # until now at every layer — form, service and database — and the demo
+    # carries rows that show it: a file approved on the day its deadline
+    # ends, reading «معتمد» and «انتهت المهلة» from its first minute.
+    if submission.submitted_on and decided_on < submission.submitted_on:
+        raise ValidationError(
+            f"لا يسبق تاريخ القرار تاريخَ الإرسال إلى الوزارة ({submission.submitted_on})."
+        )
+    if approved and registration_deadline is None:
+        raise ValidationError(
+            "الاعتماد يتطلب مهلة التسجيل — بعدها يُمنع رفع أسماء جديدة (BR-019)."
+        )
+    if approved and registration_deadline is not None and registration_deadline <= decided_on:
+        raise ValidationError(
+            "يجب أن تنتهي مهلة التسجيل بعد تاريخ القرار — يوماً واحداً على الأقل."
+        )
 
     return _record_decision(
         actor=actor,
@@ -288,6 +306,169 @@ CONTENT_FIELDS: tuple[str, ...] = (
 )
 
 
+#: What ``Cohort.enrolled_count`` leaves out — a seat given up is a seat free.
+#: Named here so the annotation and the property cannot drift apart.
+_NOT_ENROLLED = ("CANCELLED", "TRANSFERRED_OUT")
+
+#: The sort keys a reader may ask for by name. Anything else is ignored rather
+#: than refused: a hand-edited URL should answer, not fail.
+SORTS = {
+    "priority": None,  # the default, built in :func:`_priority_order`
+    "submitted_on": "submitted_on",
+    "decided_on": "decided_on",
+    "registration_deadline": "registration_deadline",
+}
+
+#: What «the deadline» can be narrowed to. Each is computed in SQL, so the
+#: filter and the pager (when there is one) see the same rows.
+DEADLINE_FILTERS = ("soon", "expired", "open")
+
+#: The four words :func:`_stage` answers with, in the order they escalate.
+DEADLINE_STAGES = ("none", "open", "soon", "expired")
+
+
+def _tally(submission: MoheSubmission, field: str, fallback: Callable[[], int]) -> int:
+    """
+    An annotated count if the caller asked for one, else the slow honest way.
+
+    ``fallback`` is a CALLABLE, not a number: passed as a plain argument it
+    would run its query before this function was even entered, and the N+1
+    the annotation exists to remove would survive it untouched — which is
+    exactly what the query-count test caught.
+    """
+    annotated = getattr(submission, field, None)
+    return int(annotated) if annotated is not None else int(fallback())
+
+
+def _approved_enrolments(cohort: Cohort) -> int:
+    """The cohort's APPROVED, still-standing enrolments — BR-019's population."""
+    return cohort.enrollments.filter(status="ACTIVE", approved_at__isnull=False).count()
+
+
+def _stage(state: dict[str, Any] | None) -> str:
+    """``deadline_state`` as one word: none · open · soon · expired."""
+    if state is None:
+        return "none"
+    return {"EXPIRED": "expired", "WARNING": "soon"}.get(str(state["severity"]), "open")
+
+
+def _with_counts(queryset: Any) -> Any:
+    """
+    Both tallies in the page's own query.
+
+    One file per row used to mean one query per row for its cohort's
+    enrolments, and the register has no pager — a hundred files were a
+    hundred extra round trips. Both counts cross the SAME join, so they
+    cannot multiply each other.
+    """
+    from django.db.models import Count, Q
+
+    return queryset.annotate(
+        enrolled_total=Count(
+            "cohort__enrollments",
+            filter=~Q(cohort__enrollments__status__in=_NOT_ENROLLED),
+            distinct=True,
+        ),
+        approved_total=Count(
+            "cohort__enrollments",
+            filter=Q(
+                cohort__enrollments__status="ACTIVE",
+                cohort__enrollments__approved_at__isnull=False,
+            ),
+            distinct=True,
+        ),
+    )
+
+
+def _narrow_by_deadline(queryset: Any, *, deadline: str, as_of: date, alert_days: int) -> Any:
+    """
+    «قاربت» · «انتهت» · «مفتوحة» — in SQL, against the same edges as BR-015.
+
+    A file the ministry has not approved has no window at all, so every one
+    of the three narrows to APPROVED first rather than quietly including
+    drafts under «مفتوحة».
+    """
+    from django.db.models import Q
+
+    if deadline not in DEADLINE_FILTERS:
+        return queryset
+    approved = queryset.filter(status=MoheStatus.APPROVED)
+    edge = as_of + timedelta(days=alert_days)
+    if deadline == "expired":
+        return approved.filter(registration_deadline__lt=as_of)
+    if deadline == "soon":
+        return approved.filter(registration_deadline__gte=as_of, registration_deadline__lte=edge)
+    # «مفتوحة» holds the files with room left, AND those whose window was
+    # never recorded — nothing has run out on them either, and hiding them
+    # here would leave them findable under no filter at all.
+    return approved.filter(
+        Q(registration_deadline__gt=edge) | Q(registration_deadline__isnull=True)
+    )
+
+
+def _ordered(queryset: Any, *, sort: str, direction: str, as_of: date, alert_days: int) -> Any:
+    """
+    The register in the order the work actually comes in.
+
+    ``-created_at`` sorted by the day a draft was OPENED, which is the one
+    date nobody is waiting on: a file whose ministry window shuts tomorrow
+    could sit at the bottom of the page. The default now leads with what
+    needs a hand — a rejection, then a window about to close — and ends with
+    the windows that have already shut.
+
+    A named ``sort`` overrides it entirely; anything unknown falls back to
+    the default rather than raising, because this reaches the URL.
+    """
+    from django.db.models import Case, DateField, F, IntegerField, Q, When
+
+    field = SORTS.get(sort)
+    if field:
+        column = F(field)
+        key = column.desc(nulls_last=True) if direction == "desc" else column.asc(nulls_last=True)
+        return queryset.order_by(key, "-created_at")
+
+    edge = as_of + timedelta(days=alert_days)
+    approved = Q(status=MoheStatus.APPROVED)
+    rank = Case(
+        When(status=MoheStatus.REJECTED, then=1),
+        When(
+            approved,
+            registration_deadline__gte=as_of,
+            registration_deadline__lte=edge,
+            then=2,
+        ),
+        When(status=MoheStatus.SUBMITTED, then=3),
+        When(status=MoheStatus.DRAFT, then=4),
+        When(approved, registration_deadline__gt=edge, then=5),
+        When(approved, registration_deadline__isnull=True, then=5),
+        default=6,  # approved, and the window already shut
+        output_field=IntegerField(),
+    )
+    # Two keys rather than one, because the groups do not all sort the same
+    # way: the waiting ones read oldest-first and the shut ones newest-first.
+    # The groups are disjoint, so exactly one key is set on any given row.
+    soonest = Case(
+        # Groups 2 and 5: a window still open, nearest first. The shut ones
+        # are left null here on purpose — they belong to ``latest`` below,
+        # and a key set on both would never let the second one speak.
+        When(approved, registration_deadline__gte=as_of, then=F("registration_deadline")),
+        When(status=MoheStatus.SUBMITTED, then=F("submitted_on")),
+        default=None,
+        output_field=DateField(),
+    )
+    latest = Case(
+        When(approved, registration_deadline__lt=as_of, then=F("registration_deadline")),
+        default=None,
+        output_field=DateField(),
+    )
+    return queryset.annotate(mohe_rank=rank, mohe_soonest=soonest, mohe_latest=latest).order_by(
+        "mohe_rank",
+        F("mohe_soonest").asc(nulls_last=True),
+        F("mohe_latest").desc(nulls_last=True),
+        "-created_at",
+    )
+
+
 def _row(
     submission: MoheSubmission,
     *,
@@ -296,6 +477,12 @@ def _row(
 ) -> dict[str, Any]:
     cohort = submission.cohort
     as_of = as_of or timezone.localdate()
+    state = deadline_state(
+        status=submission.status,
+        deadline=submission.registration_deadline,
+        as_of=as_of,
+        alert_days=alert_days,
+    )
     return {
         "id": submission.pk,
         "cohort_code": cohort.code,
@@ -311,17 +498,27 @@ def _row(
         "registration_deadline": submission.registration_deadline,
         # Days left and whether that is near or past, from the rule the daily
         # job counts by — never recomputed on the page.
-        "deadline_state": deadline_state(
-            status=submission.status,
-            deadline=submission.registration_deadline,
-            as_of=as_of,
-            alert_days=alert_days,
-        ),
+        "deadline_state": state,
+        # The same answer as one word, for a template that only has to choose
+        # a chip. NOT a column and not a status: it is recomputed from today
+        # on every read, because «expired» is a fact about the calendar.
+        "deadline_stage": _stage(state),
         # BR-019 reads with the deadline: a window closing on a cohort nobody
         # was registered onto is the one that gets the file refused next time.
-        # Counted by the cohort's own property so the exclusions are not
-        # written twice; it costs a query a row, which this register can pay.
-        "enrolled_count": cohort.enrolled_count,
+        #
+        # Both tallies ride the page's own query when the caller annotated
+        # them (:func:`_with_counts`), and fall back to a query apiece for the
+        # single-file read, where one row cannot be an N+1. The exclusions
+        # live in ONE place either way — :data:`_NOT_ENROLLED` is what
+        # ``Cohort.enrolled_count`` excludes, named once.
+        "enrolled_count": _tally(submission, "enrolled_total", lambda: cohort.enrolled_count),
+        # The population that may be uploaded to the ministry: approved, and
+        # still standing. Always smaller than ``enrolled_count``, and the two
+        # are not interchangeable — a seat is taken the moment it is booked,
+        # a name may be handed over only once the registrar approves it.
+        "approved_count": _tally(
+            submission, "approved_total", lambda: _approved_enrolments(cohort)
+        ),
         "rejection_reason_ar": submission.rejection_reason_ar,
         "resubmission_of": submission.resubmission_of_id,
         "created_at": submission.created_at,
@@ -329,7 +526,14 @@ def _row(
 
 
 def list_submissions(
-    *, actor: Any, status: str = "", query: str = "", request: Any = None
+    *,
+    actor: Any,
+    status: str = "",
+    query: str = "",
+    deadline: str = "",
+    sort: str = "",
+    direction: str = "",
+    request: Any = None,
 ) -> list[dict[str, Any]]:
     """
     The ministry files as rows (§3.3/14).
@@ -338,10 +542,21 @@ def list_submissions(
     what the ministry objected to and the only guide to what a resubmission
     must change (BR-014) — filtering it out of the default view would hide the
     thing the screen exists to act on.
+
+    ``deadline`` narrows by BR-015's own edges (:data:`DEADLINE_FILTERS`) and
+    ``sort``/``direction`` name a column (:data:`SORTS`); both are read off
+    the URL, so an unknown value is ignored rather than refused. Counting,
+    narrowing and ordering all happen in SQL: the register has no pager, and
+    a hundred files must not be a hundred round trips.
     """
     policy.require(actor, Screen.MOHE, Action.VIEW, request=request)
 
-    queryset = MoheSubmission.objects.select_related("cohort__program", "resubmission_of")
+    as_of = timezone.localdate()
+    alert_days = deadline_alert_days(as_of=as_of)
+
+    queryset = _with_counts(
+        MoheSubmission.objects.select_related("cohort__program", "resubmission_of")
+    )
     if status:
         queryset = queryset.filter(status=status)
     if query:
@@ -357,9 +572,13 @@ def list_submissions(
             | Q(cohort__program__name_ar__icontains=query)
         )
 
-    as_of = timezone.localdate()
-    alert_days = deadline_alert_days(as_of=as_of)
-    return [_row(s, as_of=as_of, alert_days=alert_days) for s in queryset.order_by("-created_at")]
+    queryset = _narrow_by_deadline(
+        queryset, deadline=deadline, as_of=as_of, alert_days=alert_days
+    )
+    queryset = _ordered(
+        queryset, sort=sort, direction=direction, as_of=as_of, alert_days=alert_days
+    )
+    return [_row(s, as_of=as_of, alert_days=alert_days) for s in queryset]
 
 
 def get_submission(*, actor: Any, submission_id: int, request: Any = None) -> dict[str, Any]:

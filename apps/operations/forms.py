@@ -461,6 +461,72 @@ class MoheDecisionForm(forms.Form):
         help_text=_("إلزامي عند الرفض · يُحفظ نصاً كما ورد من الوزارة (BR-014)"),
     )
 
+    def __init__(
+        self,
+        *args: Any,
+        approved: bool = False,
+        submitted_on: date | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        ``approved`` is which button was pressed, ``submitted_on`` the date
+        the file actually left the centre — neither is a field on this form,
+        and both decide what the dates may be.
+        """
+        super().__init__(*args, **kwargs)
+        self.approved = approved
+        self.submitted_on = submitted_on
+        if approved:
+            self.fields["registration_deadline"].required = True
+
+    def clean(self) -> dict[str, Any]:
+        """
+        The three ways a pair of dates can be nonsense.
+
+        Caught here so the person typing sees it beside the field, and again
+        in ``record_decision`` so no other caller can write it — the form is
+        the courtesy, the service is the rule.
+        """
+        # ``Form.clean`` is typed as possibly returning None; the base one
+        # never does, and every lookup below would be an attribute error on
+        # None if a subclass ever made it so.
+        cleaned: dict[str, Any] = super().clean() or {}
+        decided_on = cleaned.get("decided_on")
+        deadline = cleaned.get("registration_deadline")
+
+        # The two the service has always refused, said here as well so the
+        # typist gets every refusal at once beside its own field instead of
+        # one per round trip. The service and the database still hold them —
+        # this adds a courtesy, it does not move the rule.
+        if self.approved and not (cleaned.get("mohe_course_number") or "").strip():
+            self.add_error("mohe_course_number", _("الاعتماد يتطلب الرقم الوزاري (C-16)."))
+        if not self.approved and not (cleaned.get("rejection_reason_ar") or "").strip():
+            self.add_error(
+                "rejection_reason_ar",
+                _("الرفض يتطلب تسجيل سبب الوزارة نصاً كما ورد (BR-014)."),
+            )
+
+        if decided_on and self.submitted_on and decided_on < self.submitted_on:
+            self.add_error(
+                "decided_on",
+                _("لا يسبق تاريخ القرار تاريخَ الإرسال إلى الوزارة (%(sent)s).")
+                % {"sent": self.submitted_on},
+            )
+        if self.approved and not deadline:
+            self.add_error(
+                "registration_deadline",
+                _("الاعتماد يتطلب مهلة التسجيل — بعدها يُمنع رفع أسماء جديدة (BR-019)."),
+            )
+        # A window that shuts on the day it opens is not a window: the cohort
+        # is approved and closed in the same breath, and «انتهت المهلة» shows
+        # beside «معتمد» from the first minute.
+        if self.approved and deadline and decided_on and deadline <= decided_on:
+            self.add_error(
+                "registration_deadline",
+                _("يجب أن تنتهي مهلة التسجيل بعد تاريخ القرار — يوماً واحداً على الأقل."),
+            )
+        return cleaned
+
 
 # ---------------------------------------------------------------------------
 # Transfers (Sprint 8H — §3.2/6, §3.2/7)

@@ -329,6 +329,112 @@
      والحشو العمودي 10px لا 6px: ثمانية أعمدة، وفي كل خليّةٍ سطرٌ ثانٍ أو
      رقاقة، فستّة بكسلات تجعل الصفوف تتلاصق فلا يُتبَّع الصفُّ بالعين. */
   .mohe-tbl td        { @apply py-2.5; }
+  /* --- السجلّ الوزاري: الأعمدة الثمانية ----------------------------------
+   * عناوين الأعمدة أخفُّ من محتواها: الترويسة دليلٌ يُقرأ مرّةً، والقيمة هي
+   * ما تُقرأ في كل صفّ. وكانت بوزن `bold` نفسه فتنازع ما تحتها.
+   */
+  .mohe-tbl th        { @apply text-xs font-medium text-ink-3; }
+  .mohe-tbl td, .mohe-tbl th { font-variant-numeric: tabular-nums; }
+  /* الرمزان تحت اسم البرنامج: محايدان — رمزٌ ليس تحذيراً ولا فعلاً. */
+  .mohe-tbl .codes    { @apply text-2xs text-ink-3; }
+  .mohe-tbl .codes a.code-link { @apply text-ink-3 underline decoration-line underline-offset-2; }
+  .mohe-tbl .codes a.code-link:hover { @apply text-ink-2 decoration-ink-3; }
+  /* رابطٌ ثانويّ: لونُ الهوية لا يصلح هنا — يُقرأ تحذيراً في جدولٍ أحمره
+     محجوزٌ للرفض والانتهاء. لونُ الخطّ مع تسطيرٍ يكفي ليُعرف أنه رابط. */
+  .mohe-tbl .sub-link { @apply text-ink-2 underline decoration-line underline-offset-2; }
+  .mohe-tbl .sub-link:hover { @apply text-ink decoration-ink-3; }
+  /* سلسلة إعادة الإرسال: رقاقةٌ كانت تقول «إعادة إرسال» ولا تقول لأيّ ملف. */
+  .mohe-tbl .chain-link { @apply text-2xs text-ink-3 underline decoration-line underline-offset-2; }
+  .mohe-tbl .chain-link:hover { @apply text-ink-2; }
+  /* الرقم الوزاري: قد يبدأ بعربيّ أو لاتينيّ، و`isolate` يمنعه من قلب ما
+     جاوره. المحاذاة واحدةٌ للقيم كلّها فتقف على حافّةٍ واحدة. */
+  .mohe-tbl .ref      { display: inline-block; unicode-bidi: isolate; text-align: right; }
+  /* المهلة لم تعد تحمل ثلاث معلومات في خليّة: سطرٌ واحدٌ تحت التاريخ. */
+  .mohe-tbl .dl-cell  { @apply w-36; }
+  .mohe-tbl .enr-cell { @apply w-28; }
+  .mohe-tbl .prog-cell { @apply min-w-48; }
+  /* عمود الإجراء: عرضٌ ثابتٌ ومحاذاةٌ واحدة، فالأزرار تقف على خطٍّ واحد. */
+  .mohe-tbl .acts-head, .mohe-tbl .acts-col { @apply w-32 text-start; }
+  /* ترويسةٌ تُنقر: السهم يحجز مكانه دائماً فلا يقفز العمود عند الفرز. */
+  .mohe-tbl th.sortable { @apply p-0; }
+  .mohe-tbl th.sortable a.sort-link { @apply flex items-center justify-end gap-1 px-3 py-2 text-ink-3 font-medium; }
+  .mohe-tbl th.sortable a.sort-link:hover { @apply bg-surface-2 text-ink-2; }
+  .mohe-tbl th.is-sorted a.sort-link { @apply text-ink font-bold; }
+  .mohe-tbl .sort-ar  { @apply inline-block w-3 text-center text-2xs; }
+  /* «معتمد · مغلق»: رماديٌّ محايد — الملفّ معتمدٌ حقاً، لكنه لم يعد يقبل
+     اسماً. أخضرُ بجانب «انتهت» الحمراء يقول شيئين متناقضين في صفٍّ واحد. */
+  .chip.closed        { @apply bg-surface-2 text-ink-2 border-line; }
+  .chip.closed::before { background: theme(colors.ink.3); }
+  /* --- دون 768px: كل صفٍّ بطاقة ------------------------------------------
+   * ثمانية أعمدة لا تُقرأ على هاتف، وجدولٌ يُمرَّر أفقياً يُخفي عموداً أو
+   * عمودين خلف الحافّة فلا يعرف القارئ أنهما هناك. الصفُّ يصير بطاقة:
+   * البرنامج وحالته أولاً، ثم المهلة والتسجيلات — وهما ما يُقرأ في هذه
+   * الشاشة — ثم الأرقام والتواريخ سطراً ثانوياً، ثم الإجراء بعرض البطاقة.
+   *
+   * بلا سكربت: الترويسة تُخفى، وكل خليّة تحمل اسمها في `data-label`، فلا
+   * رقمٌ عائمٌ بلا عنوان. و`display:block` على خلايا الجدول يُسقط دور
+   * الجدول الدلالي، فيبقى `scope`/`aria-sort` بلا معنى على الهاتف — وهو
+   * مقبول لأن ما يُرسم عندئذٍ ليس جدولاً بل قائمة بطاقات.
+   */
+  @media (max-width: 767px) {
+    .mohe-tbl, .mohe-tbl tbody, .mohe-tbl tr, .mohe-tbl td { @apply block; }
+    .mohe-tbl thead { display: none; }
+    .mohe-tbl tbody tr:hover td { background: transparent; }
+
+    .mohe-tbl tbody tr {
+      @apply flex flex-wrap items-start gap-y-2 rounded-xl border border-line bg-white mb-2 p-3;
+      border-bottom-width: 1px;
+    }
+    .mohe-tbl tbody td { @apply p-0 border-0; }
+
+    /* السطر الأول: البرنامج وحالته. */
+    .mohe-tbl .prog-cell { @apply min-w-0; flex: 1 1 60%; }
+    .mohe-tbl .st-cell   { @apply text-end; flex: 0 0 auto; margin-inline-start: auto; }
+
+    /* السطر الثاني: ما تُقرأ هذه الشاشة من أجله. */
+    .mohe-tbl .dl-cell, .mohe-tbl .enr-cell {
+      @apply w-auto text-start border-t border-line-2 pt-2;
+      flex: 1 1 50%;
+    }
+
+    /* السطر الثالث: الأرقام والتواريخ، ثانويةً وفي سطرٍ يلتفّ. */
+    .mohe-tbl .ref-cell, .mohe-tbl .sent-cell, .mohe-tbl .dec-cell {
+      @apply text-start text-2xs text-ink-3;
+      flex: 0 0 auto;
+      margin-inline-end: .75rem;
+    }
+    .mohe-tbl .ref-cell { flex-basis: 100%; margin-inline-end: 0; }
+
+    /* الإجراء بعرض البطاقة: هدف نقرٍ لا طرفٌ في زاوية. */
+    .mohe-tbl .acts-col { @apply w-full text-center pt-1; flex: 1 1 100%; }
+    .mohe-tbl .acts-col:empty { @apply hidden; }
+    /* ‏`td` في المحدِّد عن قصد: `.tbl td.acts-col .btn2` تثبّت `w-max`
+       بتخصيصٍ أعلى وموضعٍ لاحق، فصنفان بلا عنصرٍ يخسران لها. */
+    .mohe-tbl tbody td.acts-col .btn2,
+    .mohe-tbl tbody td.acts-col .sub-link {
+      @apply block w-full rounded-lg border border-line py-2 text-center;
+    }
+
+    /* كل خليّة تقول ما هي، فالترويسة غائبة. */
+    .mohe-tbl td[data-label]::before {
+      content: attr(data-label) " · ";
+      @apply text-2xs text-ink-3 font-bold;
+    }
+    .mohe-tbl .ref-cell::before, .mohe-tbl .sent-cell::before,
+    .mohe-tbl .dec-cell::before { @apply font-medium; }
+    .mohe-tbl .dl-cell::before, .mohe-tbl .enr-cell::before { @apply block; content: attr(data-label); }
+
+    /* سبب الرفض داخل بطاقته لا في صفٍّ معلّقٍ تحتها. */
+    .mohe-tbl .mohe-reason-row { @apply -mt-2 mb-2 rounded-b-xl border border-t-0 border-line; }
+    .mohe-tbl .mohe-reason-row > td { @apply rounded-b-xl px-3 py-2; }
+  }
+
+  /* قائمة التصدير: الأزرار الثلاثة كانت تُقرأ تبويباتٍ تفلتر الجدول. */
+  .menu-pop           { @apply absolute z-20 mt-1 min-w-56 rounded-lg border border-line bg-white p-1 shadow-lg; }
+  .menu-pop a         { @apply block rounded-md px-3 py-2 text-xs text-ink-2; }
+  .menu-pop a:hover   { @apply bg-surface-2 text-ink; }
+  .menu-pop .menu-note { @apply border-t border-line-2 mt-1 px-3 py-2 text-2xs text-ink-3 m-0; text-wrap: pretty; }
+
   /* البطاقات الخمس: سطرٌ واحد — الرقم بجانب عنوانه لا تحته بفراغٍ.
      والتخصيص مزدوجٌ عن قصد: `.kpi-grid` تثبّت أربعة أعمدة وتأتي بعدها في
      الملف، فصنفٌ واحد يخسر بالترتيب وتقع الخامسة في سطرٍ ثانٍ. */
@@ -358,12 +464,11 @@
   /* سبب الرفض: النصّ الوحيد الذي يقول ما يجب تغييره في إعادة الإرسال
      (BR-014). بطاقة تنبيه داخل الصفّ نفسه، بلون حالة الرفض لا بأصفر: القرار
      ورد من الوزارة ولم تستنتجه الشاشة. */
-  .mohe-reason-row td { @apply px-3; padding-top: 0; padding-bottom: .625rem; }
-  .mohe-reason        { @apply rounded-lg bg-danger-soft px-3 py-2.5 text-xs text-ink-2;
-                        border: 1px solid theme(colors.danger.line);
-                        border-inline-start: 4px solid theme(colors.danger.DEFAULT);
-                        text-wrap: pretty; }
-  .mohe-reason strong { @apply text-danger; }
+  /* الصفّ المرفوض: خلفيّتُه وحدها تقول الحالة. الإطار والشريط الجانبيّان
+     كانا يقولانها مرّتين، والنصّ شرحٌ لا تنبيه. */
+  .mohe-reason-row > td { @apply bg-danger-soft px-3; padding-top: 0; padding-bottom: .625rem; }
+  .mohe-reason        { @apply m-0 text-xs text-ink-2; text-wrap: pretty; }
+  .mohe-reason strong { @apply text-danger font-semibold; }
 
   /* --- الأزرار --------------------------------------------------------- */
   /* كانت المفردة كلها `.btn2` و`.btn2.primary`: في صف التسجيلات يتساوى
@@ -396,10 +501,13 @@
 
   /* الروابط داخل المحتوى لم يكن لها أي تنسيق. */
   /* البطاقة والمحطة رابطان كاملان لا نصّاً مسطوراً: مستثنيان من لون الرابط وتسطيره. */
-  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):not(.kpi):not(.stop):not(.row-link) {
+  /* والثلاثة المضافة روابطُ ثانوية: لونُ الهوية عليها يُقرأ تحذيراً في جدولٍ
+     أحمرُه محجوزٌ للرفض وانتهاء المهلة. الاستثناء بالاسم هو آليّة هذه القاعدة
+     نفسها، وبغيره لا تغلبها أي قاعدة أضيق — تخصيصها 0,7,1. */
+  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):not(.kpi):not(.stop):not(.row-link):not(.sub-link):not(.chain-link):not(.code-link):not(.sort-link) {
     @apply text-brand-700 font-bold;
   }
-  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):not(.kpi):not(.stop):not(.row-link):hover {
+  .content a:not(.btn2):not(.nav-item):not(.chip):not(.skip-link):not(.kpi):not(.stop):not(.row-link):not(.sub-link):not(.chain-link):not(.code-link):not(.sort-link):hover {
     @apply underline;
   }
   /* رقم الصفّ رابطٌ بلون النصّ: يُفتح بالنقر ولا يبدو عنواناً مسطوراً. */

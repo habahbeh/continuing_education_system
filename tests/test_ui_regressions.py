@@ -3956,7 +3956,9 @@ def test_the_ministry_row_renders_the_projection_it_was_given(
     # only guide to what a resubmission must change (BR-014).
     assert rejected.rejection_reason_ar in page
     assert "سبب الرفض كما ورد" in page
-    for header in ("الرقم الوزاري", "أُرسل", "القرار", "مهلة التسجيل"):
+    # «أُرسل · القرار» were folded into one column and are two again: a reader
+    # sorting by a date needs a column of its own to press.
+    for header in ("الرقم الوزاري", "تاريخ الإرسال", "تاريخ القرار", "مهلة التسجيل"):
         assert header in page, header
 
 
@@ -4053,10 +4055,24 @@ def test_the_status_filter_options_are_the_ones_the_model_defines(
     client.force_login(_user(Role.CENTER_MANAGER, "moh.options"))
     page = _mohe(client)
 
+    status_select = page.split('id="f_status"', 1)[1].split("</select>", 1)[0]
     for value, label in MoheStatus.choices:
-        assert f'value="{value}"' in page, f"{value} is not offered by the filter"
-        assert str(label) in page, f"{value} is offered without its own name"
-    assert page.count("<option") == len(MoheStatus.choices) + 1, "an option the model never defined"
+        assert f'value="{value}"' in status_select, f"{value} is not offered by the filter"
+        assert str(label) in status_select, f"{value} is offered without its own name"
+    assert status_select.count("<option") == len(MoheStatus.choices) + 1, (
+        "an option the model never defined"
+    )
+
+    # The deadline is a second filter, not a fifth status: «معتمد» and «قاربت»
+    # sit on one row, and one list mixing them would make either unsearchable
+    # inside the other. Its three values are the service's own
+    # (``DEADLINE_FILTERS``), which is what keeps this copy from drifting too.
+    from apps.operations.services.mohe_service import DEADLINE_FILTERS
+
+    deadline_select = page.split('id="f_deadline"', 1)[1].split("</select>", 1)[0]
+    for value in DEADLINE_FILTERS:
+        assert f'value="{value}"' in deadline_select, f"{value} is not offered"
+    assert deadline_select.count("<option") == len(DEADLINE_FILTERS) + 1
 
 
 def test_the_two_ministry_empty_states_are_not_the_same_sentence(
@@ -4123,17 +4139,24 @@ def test_the_ministry_register_publishes_no_verdict_it_was_not_given(
         # the service's deadline states (BR-015) and the name-upload states
         "انتهت المهلة",
         "قاربت المهلة",
+        "انتهت",
+        "قاربت",
         "مرفوع",
         "بانتظار الرفع",
+        # Still APPROVED in the model, and said so — but the window the
+        # ministry set has closed, and green beside a red «انتهت» told the
+        # reader two opposite things about one row. Derived from the same
+        # ``deadline_state`` the chip beside it is, not from a new status.
+        "معتمد · مغلق",
     }
     toned = set(re.findall(r'<span class="chip [a-z]+ dot">([^<]+)</span>', page))
     assert toned, "no status chip was drawn, so this proves nothing"
     assert toned <= labels, toned - labels
-    assert toned >= {
-        str(MoheStatus.DRAFT.label),
-        str(MoheStatus.APPROVED.label),
-        str(MoheStatus.REJECTED.label),
-    }
+    assert toned >= {str(MoheStatus.DRAFT.label), str(MoheStatus.REJECTED.label)}
+    # APPROVED shows as itself, or as «معتمد · مغلق» once its window has run
+    # out — the fixture's approved file carries a deadline in the past, which
+    # is precisely the row the closed variant exists for.
+    assert toned & {str(MoheStatus.APPROVED.label), "معتمد · مغلق"}
 
 
 def test_the_ministry_register_prints_no_commercial_or_private_data(
@@ -4194,6 +4217,10 @@ def test_every_link_on_the_ministry_register_reaches_a_real_route(
             f"{base}?status=SUBMITTED",
             f"{base}?status=APPROVED",
             f"{base}?status=REJECTED",
+            # the sortable headers, each carrying the filter already applied
+            f"{base}?q=CO-UIC&amp;sort=submitted_on&amp;dir=asc",
+            f"{base}?q=CO-UIC&amp;sort=decided_on&amp;dir=asc",
+            f"{base}?q=CO-UIC&amp;sort=registration_deadline&amp;dir=asc",
         }
         | {
             reverse("operations:mohe-detail", args=[pk])
@@ -4241,10 +4268,12 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     assert 'class="tbl-wrap"' in source
     assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
-    # ONE table now: the register, seven columns, the actions column carrying
-    # the next step. Seven, not eight: «أُرسل» and «القرار» were two adjacent
-    # date columns the eye could not tell apart, and they are two stops of one
-    # journey — so one column holds both, the decision quieter beneath.
+    # ONE table: the register, eight columns, the last one carrying the next
+    # step under a header that now names itself.
+    #
+    # Eight, not seven: «أُرسل» and «القرار» were folded together, and a
+    # folded column cannot be sorted by either of the dates inside it. They
+    # are two columns again, and three of the eight are now pressable.
     #
     # Eight, not nine: the cohort had a column of its own and it said the
     # programme's name twice. Its code now sits under the programme name,
@@ -4257,16 +4286,17 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
     # file's own page, which has the width, a pager and a print.
     register = source.split("<table", 2)[1]
     assert source.count("<table") == 1, "the names moved to the file page"
-    assert len(re.findall(r"<th[ >]", register)) == 7
-    assert register.count('colspan="7"') == 2, (
+    assert len(re.findall(r"<th[ >]", register)) == 8
+    assert register.count('colspan="8"') == 2, (
         "the reason row and the empty row both span the table"
     )
     assert "names-box" not in source, "the duplicate names card is gone"
     markup = source.split("{% endcomment %}", 1)[-1]
-    # The actions column is named by attribute: `.sr-only` is `position:absolute`
-    # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
-    # the page sideways.
-    assert "aria-label=\"{% translate 'إجراءات' %}\"" in source
+    # The actions column has a visible header now — «الإجراء» — so there is
+    # nothing left to name by attribute. The rule it was written for still
+    # holds: `.sr-only` is `position:absolute` with no positioned ancestor,
+    # so in RTL it escapes `.tbl-wrap` and drags the page sideways.
+    assert '<th class="acts-head">' in source
     assert "sr-only" not in markup
     # The one header with no text carries a name; none is left nameless.
     for header in re.findall(r"<th([^>]*)>\s*</th>", markup):

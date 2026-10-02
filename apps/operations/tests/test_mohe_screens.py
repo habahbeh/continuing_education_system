@@ -666,7 +666,11 @@ def test_the_export_button_is_on_the_register_for_its_readers(
     page = client.get(reverse("operations:mohe")).content.decode()
     base = reverse("operations:mohe-names-export")
 
-    assert "تصدير أسماء المعروض" in page
+    assert "تصدير أسماء المتدربين" in page
+    # The three scopes are named inside the menu, not three buttons in a row
+    # above the table where they read as tabs that filter it.
+    assert "بانتظار الرفع إلى الوزارة" in page
+    assert "تشمل الدفعات المعتمدة فقط" in page
     assert f'href="{base}?scope=pending"' in page
     assert f'href="{base}?scope=uploaded"' in page
     assert f'href="{base}?scope=all"' in page
@@ -927,7 +931,8 @@ def test_the_register_offers_the_three_scopes_and_a_button_per_cohort(
     # The button leads to that file's page, at its names. It sits in the
     # actions column, not in «المسجّلون»: its text widened that column to
     # 198px, the widest in the table, for a count of one digit.
-    assert "المسجّلون" in register
+    # The count column names both populations; the approved half is the link.
+    assert "معتمدان" in register or "معتمد واحد" in register
     assert "from=register#names" in register
 
 
@@ -952,7 +957,10 @@ def test_the_count_button_shows_the_approved_beside_the_standing(
 
     assert row["has_names"] is True
     assert row["approved_count"] == 2
-    assert row["pending_upload_count"] == 1
+    # How many of those still await upload is the file page's question, not
+    # the register's: counting it here cost a walk over every approved cohort
+    # on a page that never drew the number.
+    assert "pending_upload_count" not in row
 
 
 def test_a_file_with_no_approved_enrolment_draws_no_button_to_press(
@@ -1331,8 +1339,9 @@ def test_a_cohort_with_no_approved_enrolment_gets_a_sentence_not_an_empty_table(
     response = client.get(reverse("operations:mohe"))
     page = response.content.decode("utf-8")
 
-    assert response.context["mohe_name_sections"], "no section means this proves nothing"
-    assert all(not s["rows"] for s in response.context["mohe_name_sections"])
+    # The register no longer walks the name sections at all — the count it
+    # needs rides its own query, and the sections are the file page's.
+    assert "mohe_name_sections" not in response.context
     # On the register the cell says it briefly — the column is 98px wide —
     # and the file's own page carries the full sentence and the next step.
     assert "لا معتمد بعد" in page
