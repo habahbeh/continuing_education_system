@@ -35,7 +35,9 @@
     <p class="sub">{% translate "ملف دفعة واحدة لدى الوزارة: محتواه ومرفقاته الإلزامية وما جرى عليه. لا يُسجَّل مشارك على دفعة لم تُعتمد (BR-013)، ولا يُرسَل الملف قبل استكمال مرفقيه (BR-016)." %}</p>
   </div>
   <div class="acts">
-    <a class="btn2 ghost" href="{% url 'operations:mohe' %}">{% translate "عودة إلى اعتماد الوزارة" %}</a>
+    {# العودة إلى الشريحة التي جاء منها القارئ لا إلى أول السجلّ: بحثٌ #}
+    {# وفلترةٌ يفقدهما الرجوع تعني إعادة الفلترة في كل ذهابٍ وإياب.      #}
+    <a class="btn2 ghost" href="{{ back_url }}">{% if came_from_register %}{% translate "رجوع إلى السجلّ" %}{% else %}{% translate "عودة إلى اعتماد الوزارة" %}{% endif %}</a>
   </div>
 </div>
 
@@ -332,11 +334,129 @@
   <div class="card2 next-card tone-ok">
     <div class="card2-head"><span class="head-ico tone-ok" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-shield-check"/></svg></span><h2>{% translate "الدفعة معتمدة" %}</h2></div>
     <div class="card2-body">
-      <p class="hint">{% translate "يجوز التسجيل على هذه الدفعة (BR-013)، ويُوثَّق رفع أسماء المعتمدين إلى نظام الوزارة من سجل اعتماد الوزارة." %}</p>
+      <p class="hint">{% translate "يجوز التسجيل على هذه الدفعة (BR-013)، ويُوثَّق رفع أسماء المعتمدين إلى نظام الوزارة من جدول «المعتمدون» أدناه." %}</p>
       <a class="btn2 primary" href="{% url 'operations:enrollments' %}?cohort={{ submission.cohort_code }}">{% translate "التسجيلات على الدفعة" %}</a>
+      {% if names and names.rows %}<a class="btn2 ghost" href="#names">{% translate "المعتمدون وأسماؤهم" %} <span class="num">{{ names.approved_count }}</span></a>{% endif %}
     </div>
   </div>
 {% endif %}
 </div>
 </div>
+
+{# خارج `dash-cols` عن قصد: العمود الجانبي ثلثُ الصفحة، وجدولٌ #}
+{# بسبعة أعمدة فيه يُمرَّر أفقياً. الأسماء تحتاج عرض الصفحة. #}
+{% if names %}
+  {# أسماء هذه الدفعة وحدها، في صفحتها: خمسون صفّاً لا تُقرأ داخل صفٍّ في #}
+  {# السجلّ ولا داخل حوار — هنا لها عرض الصفحة وترقيمٌ وطباعة.            #}
+  <div class="card2" id="names">
+    <div class="card2-head">
+      <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span><h2>{% translate "المعتمدون ورفع أسمائهم للوزارة" %}</h2>
+      <div class="acts">
+        <span class="chip">{% translate "المعتمدون" %}: <span class="num">{{ names.approved_count }}</span></span>
+        <span class="chip ok">{% translate "رُفعت أسماؤهم" %}: <span class="num">{{ names.uploaded_count }}</span></span>
+        <span class="chip{% if names.pending_count %} warn{% endif %}">{% translate "بانتظار الرفع" %}: <span class="num">{{ names.pending_count }}</span></span>
+      </div>
+    </div>
+    {% if not names.rows %}
+      {# لا جدولَ فارغاً بسبعة أعمدة: سطرٌ يشرح الفرق ويقول أين الخطوة. #}
+      <div class="card2-body">
+        <p class="empty">
+          <span class="empty-title">{% translate "لا تسجيل معتمد على هذه الدفعة بعد" %}</span>
+          <span class="empty-body">{% translate "لا يُرفع اسم إلى الوزارة قبل اعتماد تسجيله، فعمود «المسجّلون» في السجلّ يُحصي القائمين لا المعتمدين." %}</span>
+          <span class="empty-act"><a class="btn2 sm" href="{% url 'operations:enrollments' %}?cohort={{ submission.cohort_code }}">{% translate "التسجيلات على الدفعة" %}</a></span>
+        </p>
+      </div>
+    {% else %}
+      <div class="card2-body names-exp">
+        <small class="muted">{% translate "تصدير" %}:</small>
+        {% if names.pending_count %}<a class="btn2 sm" href="{% url 'operations:mohe-names-export' %}?cohort={{ submission.cohort_code|urlencode }}&amp;scope=pending" download>{% translate "بانتظار الرفع" %} <span class="num">{{ names.pending_count }}</span></a>{% endif %}
+        {% if names.uploaded_count %}<a class="btn2 sm ghost" href="{% url 'operations:mohe-names-export' %}?cohort={{ submission.cohort_code|urlencode }}&amp;scope=uploaded" download>{% translate "المرفوعة" %} <span class="num">{{ names.uploaded_count }}</span></a>{% endif %}
+        <a class="btn2 sm ghost" href="{% url 'operations:mohe-names-export' %}?cohort={{ submission.cohort_code|urlencode }}&amp;scope=all" download>{% translate "الكل" %} <span class="num">{{ names.approved_count }}</span></a>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>{% translate "المتدرب" %}</th>
+              <th>{% translate "التسجيل" %}</th>
+              <th>{% translate "الحالة" %}</th>
+              <th>{% translate "تاريخ الاعتماد" %}</th>
+              <th>{% translate "حالة الرفع" %}</th>
+              <th>{% translate "تاريخ الرفع" %}</th>
+              <th aria-label="{% translate 'إجراءات' %}"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in name_page.rows %}
+              <tr>
+                {# الاسم يقود إلى كشف حساب المتدرب: تفاصيله كلّها هناك. #}
+                <td>{% if can_view_enrollments %}<a class="row-link" href="{% url 'operations:account' row.enrollment_code %}">{{ row.participant_name }}</a>
+                  {% else %}{{ row.participant_name }}{% endif %}</td>
+                <td dir="ltr" translate="no"><strong class="num">{{ row.enrollment_code }}</strong></td>
+                <td><span class="chip {{ row.status|status_tone }}">{{ row.status_display }}</span></td>
+                <td class="num"><span dir="ltr">{{ row.approved_at|date:"Y/m/d" }}</span></td>
+                <td>
+                  {% if row.mohe_uploaded_on %}
+                    <span class="chip ok dot">{% translate "مرفوع" %}</span>
+                  {% else %}
+                    <span class="chip warn dot">{% translate "بانتظار الرفع" %}</span>
+                    {% if row.upload_requires_manager_reason %}
+                      <br><small class="muted">{% translate "انتهت المهلة؛ التسجيل بعدها يتطلب سبباً من مدير المركز." %}</small>
+                    {% endif %}
+                  {% endif %}
+                </td>
+                <td class="num">
+                  {% if row.mohe_uploaded_on %}<span dir="ltr">{{ row.mohe_uploaded_on|date:"Y/m/d" }}</span>
+                  {% else %}<span class="muted">{% translate "لم يُسجّل" %}</span>{% endif %}
+                </td>
+                <td class="acts">
+                  {% if row.can_record_upload %}
+                    <button class="btn2 sm" type="button" @click="document.getElementById('up-{{ row.enrollment_code }}').showModal()">{% translate "تسجيل الرفع للوزارة…" %}</button>
+                    <dialog class="modal confirm-modal" id="up-{{ row.enrollment_code }}" dir="rtl" aria-labelledby="up-{{ row.enrollment_code }}-t">
+                      <form method="post" action="{% url 'operations:mohe-name-upload' row.enrollment_code %}">
+                        {% csrf_token %}
+                        <div class="modal-head">
+                          <span class="head-ico tone-teal" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><use href="#i-upload"/></svg></span>
+                          <h2 id="up-{{ row.enrollment_code }}-t">{% translate "تسجيل رفع الاسم إلى الوزارة" %}</h2>
+                        </div>
+                        <div class="modal-body">
+                          <p class="hint">{% blocktranslate with n=row.participant_name e=row.enrollment_code %}تُقرّ بأن اسم «{{ n }}» ({{ e }}) رُفع يدوياً إلى نظام الوزارة الخارجي. يُسجَّل الإقرار باسمك وتاريخه، والنظام لا يتصل بموقع الوزارة.{% endblocktranslate %}</p>
+                          {% if row.upload_requires_manager_reason %}
+                            <p class="note warn" role="status">{% translate "انتهت مهلة التسجيل: الرفع بعدها يتطلب سبب تجاوز من مدير المركز (BR-019)." %}</p>
+                          {% endif %}
+                        </div>
+                        <div class="modal-acts">
+                          <button class="btn2 primary" type="submit">{% translate "تسجيل الرفع" %}</button>
+                          <button class="btn2 ghost" type="button" @click="$el.closest('dialog').close()">{% translate "رجوع" %}</button>
+                        </div>
+                      </form>
+                    </dialog>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if name_page.pages > 1 %}
+        <div class="tbl-foot pager">
+          <span class="muted"><span class="num">{{ name_page.start }}</span>–<span class="num">{{ name_page.end }}</span> {% translate "من" %} <span class="num">{{ name_page.total }}</span></span>
+          <span class="pager-btns">
+            {% if name_page.has_prev %}<a class="btn2 ghost" href="?{% if names_qs %}{{ names_qs }}&amp;{% endif %}page={{ name_page.prev }}#names">&lsaquo; {% translate "السابق" %}</a>{% endif %}
+            <span class="chip num">{{ name_page.number }} / {{ name_page.pages }}</span>
+            {% if name_page.has_next %}<a class="btn2 ghost" href="?{% if names_qs %}{{ names_qs }}&amp;{% endif %}page={{ name_page.next }}#names">{% translate "التالي" %} &rsaquo;</a>{% endif %}
+          </span>
+        </div>
+      {% endif %}
+      <div class="card2-body">
+        <p class="hint">{% translate "بعد اعتماد التسجيل، يُوثَّق هنا أن اسم المتدرب رُفع يدوياً إلى نظام الوزارة الخارجي. هذه الشاشة لا تتصل بموقع الوزارة ولا تنقل الأسماء تلقائياً." %}</p>
+      </div>
+    {% endif %}
+    {% if came_from_register %}
+      <div class="card2-body">
+        <a class="btn2 ghost" href="{{ back_url }}">{% translate "رجوع إلى السجلّ" %}</a>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
 {% endblock %}

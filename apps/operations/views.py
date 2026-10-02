@@ -1918,6 +1918,17 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             "ok",
             status == "APPROVED",
         ),
+        # A fifth, because four tiles counted four of the five statuses and
+        # «مرفوض» appeared only in a strip below them — the one status that
+        # needs an act was the one the strip of tiles hid.
+        _tile(
+            _("مرفوضة"),
+            sum(1 for r in everything if r["status"] == "REJECTED"),
+            f"{base}?status=REJECTED",
+            "undo",
+            "danger",
+            status == "REJECTED",
+        ),
     ]
     # The next step on a row is drawn from the reader's permission, not from the
     # status alone: an auditor reads this register and holds nothing on
@@ -1939,6 +1950,28 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             else False
         )
 
+    # «المسجّلون» counts the standing; the names below are the APPROVED. The
+    # column used to show the first and link to nothing, and the page had to
+    # apologise for the gap in a sentence. Each row now carries both numbers,
+    # read off the very sections drawn below — so no query of its own.
+    name_sections = enrollment_service.list_mohe_name_uploads(
+        actor=request.user, request=request
+    )
+    by_cohort = {s["cohort_code"]: s for s in name_sections}
+    for row in rows:
+        section = by_cohort.get(row["cohort_code"]) if row["status"] == "APPROVED" else None
+        # A button is drawn only where pressing it would show something: an
+        # approved file with no approved enrolment yet gets the sentence that
+        # explains the gap instead of a control that opens an empty table.
+        row["has_names"] = bool(section and section["rows"])
+        row["approved_count"] = section["approved_count"] if section else 0
+        row["pending_upload_count"] = section["pending_count"] if section else 0
+        row["awaits_approved_enrolment"] = bool(section and not section["rows"])
+
+    # The names open on the file's own page, and the link carries the filters
+    # so its «رجوع» comes back to this same slice of the register.
+    kept = urlencode({k: v for k, v in (("q", query), ("status", status)) if v})
+
     return render(
         request,
         "operations/mohe.html",
@@ -1952,16 +1985,16 @@ def mohe_view(request: HttpRequest) -> HttpResponse:
             ),
             "query": query,
             "status": status,
+            #: The register's own filters, ready to carry into a link.
+            "kept_filters": f"{kept}&" if kept else "",
+
             # Both filters were already read from the URL and neither was named
             # on screen, so a narrowed list read as the whole register.
             "active_filters": _mohe_active_filters(rows, query, status),
-            "status_counts": _mohe_status_counts(rows),
             "can_open_file": policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.CREATE),
             "can_view_cohorts": policy.is_allowed(request.user, Screen.COHORTS, Action.VIEW),
             "can_export_uploaded_names": policy.is_allowed(request.user, Screen.MOHE, Action.VIEW),
-            "mohe_name_sections": enrollment_service.list_mohe_name_uploads(
-                actor=request.user, request=request
-            ),
+            "mohe_name_sections": name_sections,
         },
     )
 
@@ -2046,6 +2079,153 @@ def mohe_uploaded_export_view(request: HttpRequest) -> HttpResponse:
     return response
 
 
+#: The three populations a registrar actually carries somewhere. ``PENDING``
+#: is the list taken to the ministry's own system; ``UPLOADED`` is the receipt
+#: of what was already carried; ``ALL`` is the file as a whole.
+MOHE_NAME_SCOPES = ("pending", "uploaded", "all")
+
+
+def _mohe_name_rows(
+    *,
+    actor: Any,
+    request: HttpRequest,
+    scope: str,
+    cohort: str,
+    query: str,
+    status: str,
+) -> tuple[list[dict[str, Any]], str]:
+    """
+    Flat trainee rows for the names export, and the label of what was exported.
+
+    Built from the very sections the register draws, so the download and the
+    screen can never disagree, and the ministry number comes from the register
+    rows the page already read — no query of its own.
+    """
+    sections = enrollment_service.list_mohe_name_uploads(actor=actor, request=request)
+    numbers = {
+        row["cohort_code"]: row["mohe_course_number"]
+        for row in mohe_service.list_submissions(
+            actor=actor, status=status, query=query, request=request
+        )
+        if row["status"] == "APPROVED"
+    }
+
+    # A cohort named outright wins over the register's filters: the reader
+    # pressed a button on one row, not on the strip above it.
+    if cohort:
+        sections = [s for s in sections if s["cohort_code"] == cohort]
+        scope_of = cohort
+    else:
+        sections = [s for s in sections if s["cohort_code"] in numbers]
+        scope_of = _("المعروض") if (query or status) else _("الكل")
+
+    rows: list[dict[str, Any]] = []
+    for section in sections:
+        for row in section["rows"]:
+            uploaded = row["mohe_uploaded_on"] is not None
+            if scope == "pending" and uploaded:
+                continue
+            if scope == "uploaded" and not uploaded:
+                continue
+            rows.append(
+                {
+                    **row,
+                    "cohort_code": section["cohort_code"],
+                    "program_name_ar": section["program_name_ar"],
+                    "registration_deadline": section["registration_deadline"],
+                    "mohe_course_number": numbers.get(section["cohort_code"], ""),
+                }
+            )
+    return rows, scope_of
+
+
+def _mohe_names_csv(rows: list[dict[str, Any]], scope: str) -> str:
+    """
+    The columns each scope actually needs, and no others.
+
+    A «بانتظار الرفع» sheet carried an empty «تاريخ الرفع» column and an
+    «حالة الرفع» column that said the same thing on every line — so each
+    scope now names only what varies within it.
+    """
+    header = [
+        _("المتدرب"),
+        _("رمز التسجيل"),
+        _("البرنامج"),
+        _("الدفعة"),
+        _("الرقم الوزاري"),
+        _("تاريخ اعتماد التسجيل"),
+    ]
+    if scope != "pending":
+        header.append(_("تاريخ رفع الاسم للوزارة"))
+    if scope == "all":
+        header.append(_("حالة الرفع"))
+    if scope != "uploaded":
+        header.append(_("مهلة التسجيل في الوزارة"))
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(header)
+    for row in rows:
+        approved_at = row["approved_at"]
+        uploaded_on = row["mohe_uploaded_on"]
+        deadline = row["registration_deadline"]
+        line = [
+            row["participant_name"],
+            row["enrollment_code"],
+            row["program_name_ar"],
+            row["cohort_code"],
+            row["mohe_course_number"],
+            timezone.localtime(approved_at).date().isoformat() if approved_at else "",
+        ]
+        if scope != "pending":
+            line.append(uploaded_on.isoformat() if uploaded_on else "")
+        if scope == "all":
+            line.append(str(_("مرفوع") if uploaded_on else _("بانتظار الرفع")))
+        if scope != "uploaded":
+            line.append(deadline.isoformat() if deadline else "")
+        writer.writerow(line)
+    return buffer.getvalue()
+
+
+@require_http_methods(["GET"])
+def mohe_names_export_view(request: HttpRequest) -> HttpResponse:
+    """
+    The trainees of a ministry file, by the population the reader asked for.
+
+    ``scope`` is one of :data:`MOHE_NAME_SCOPES`; ``cohort`` narrows to one
+    file, and without it the register's own ``q``/``status`` filters apply —
+    so the download is what the screen was showing when it was pressed.
+
+    The rows come from the service behind the SAME ``Screen.MOHE`` gate as the
+    page, so whoever cannot open the register cannot download it either.
+    """
+    scope = request.GET.get("scope", "all").strip()
+    if scope not in MOHE_NAME_SCOPES:
+        scope = "all"
+    cohort = request.GET.get("cohort", "").strip()
+
+    rows, _scope_of = _mohe_name_rows(
+        actor=request.user,
+        request=request,
+        scope=scope,
+        cohort=cohort,
+        query=request.GET.get("q", "").strip(),
+        status=request.GET.get("status", "").strip(),
+    )
+
+    # Written to a buffer and encoded once: streaming rows into an
+    # ``HttpResponse`` with this charset would put a BOM in front of every row.
+    response = HttpResponse(
+        _mohe_names_csv(rows, scope).encode(MOHE_EXPORT_ENCODING),
+        content_type=f"text/csv; charset={MOHE_EXPORT_ENCODING}",
+    )
+    stem = "-".join(part for part in ("mohe-names", scope, cohort) if part)
+    response["Content-Disposition"] = (
+        f'attachment; filename="{stem}-{timezone.localdate().isoformat()}.csv"'
+    )
+    return response
+
+
 def _mohe_active_filters(
     rows: list[dict[str, Any]], query: str, status: str
 ) -> list[tuple[str, str]]:
@@ -2060,24 +2240,6 @@ def _mohe_active_filters(
         labels = {str(row["status"]): str(row["status_display"]) for row in rows}
         active.append((_("الحالة"), labels.get(status, status)))
     return active
-
-
-def _mohe_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    The states of the files ACTUALLY DRAWN, tallied off the same rows.
-
-    Counted here rather than queried again so the chips cannot disagree with
-    the table, and so they follow the filter. A state nobody is in gets no
-    chip rather than a zero.
-    """
-    tally: dict[tuple[str, str], int] = {}
-    for row in rows:
-        key = (str(row["status"]), str(row["status_display"]))
-        tally[key] = tally.get(key, 0) + 1
-    return [
-        {"status": status, "label": label, "count": count}
-        for (status, label), count in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0][0]))
-    ]
 
 
 @require_http_methods(["GET", "POST"])
@@ -2208,6 +2370,38 @@ def mohe_detail_view(request: HttpRequest, submission_id: int) -> HttpResponse:
     may_send = policy.is_allowed(request.user, Screen.MOHE_SUBMIT, Action.APPROVE)
     may_decide = policy.is_allowed(request.user, Screen.MOHE, Action.APPROVE)
 
+    # The trainees of THIS file, paged — fifty names belong on a page with a
+    # pager and a print, not in a row of the register or inside a dialog.
+    names = next(
+        (
+            section
+            for section in enrollment_service.list_mohe_name_uploads(
+                actor=request.user, request=request
+            )
+            if section["cohort_code"] == submission["cohort_code"]
+        ),
+        None,
+    )
+    name_page = page_of(names["rows"], request.GET.get("page", "")) if names else None
+
+    # Back to exactly the slice of the register the reader left, filters and
+    # all — ``from=register`` says they came from it rather than from a link.
+    came_with = (("q", request.GET.get("q", "")), ("status", request.GET.get("status", "")))
+    kept = urlencode({k: v for k, v in came_with if v})
+    back_url = reverse("operations:mohe") + (f"?{kept}" if kept else "")
+    #: Everything but ``page``, so the pager keeps the return journey intact.
+    names_qs = urlencode(
+        {
+            k: v
+            for k, v in (
+                ("q", request.GET.get("q", "")),
+                ("status", request.GET.get("status", "")),
+                ("from", request.GET.get("from", "")),
+            )
+            if v
+        }
+    )
+
     return render(
         request,
         "operations/mohe_detail.html",
@@ -2228,6 +2422,14 @@ def mohe_detail_view(request: HttpRequest, submission_id: int) -> HttpResponse:
             "send_form": MoheSendForm(initial={"submitted_on": timezone.localdate()}),
             "decision_form": MoheDecisionForm(initial={"decided_on": timezone.localdate()}),
             "resubmission_form": MoheResubmissionForm(initial=submission["content"]),
+            "names": names,
+            "name_page": name_page,
+            "back_url": back_url,
+            "names_qs": names_qs,
+            "came_from_register": request.GET.get("from", "") == "register",
+            "can_view_enrollments": policy.is_allowed(
+                request.user, Screen.ENROLLMENTS, Action.VIEW
+            ),
             # BR-016 — the send button appears only when both documents are in.
             "can_attach": may_draft and submission["status"] == "DRAFT",
             "can_send": may_send and submission["is_sendable"],

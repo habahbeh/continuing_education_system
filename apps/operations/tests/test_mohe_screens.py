@@ -26,7 +26,7 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.operations.models import MoheStatus, MoheSubmission
-from apps.operations.services import mohe_service
+from apps.operations.services import enrollment_service, mohe_service
 from apps.people.models import Role, User
 
 pytestmark = pytest.mark.django_db
@@ -653,10 +653,23 @@ def test_the_financial_roles_cannot_download_the_uploaded_names(
 def test_the_export_button_is_on_the_register_for_its_readers(
     client: Client, registrar: User, seeded_settings: None
 ) -> None:
+    """
+    One button became three.
+
+    The register used to offer «تصدير الأسماء المرفوعة» alone — the names
+    already handed to the ministry, which is the opposite of the list a
+    registrar needs. The head now names the three populations and each link
+    carries the register's own filters. ``mohe-uploaded-export`` is kept as a
+    route for anyone holding its URL, and has its own tests above.
+    """
     client.force_login(registrar)
-    response = client.get(reverse("operations:mohe"))
-    assert reverse("operations:mohe-uploaded-export") in response.content.decode()
-    assert "تصدير الأسماء المرفوعة" in response.content.decode()
+    page = client.get(reverse("operations:mohe")).content.decode()
+    base = reverse("operations:mohe-names-export")
+
+    assert "تصدير أسماء المعروض" in page
+    assert f'href="{base}?scope=pending"' in page
+    assert f'href="{base}?scope=uploaded"' in page
+    assert f'href="{base}?scope=all"' in page
 
 
 def test_the_export_holds_the_uploaded_trainees_only(
@@ -683,6 +696,348 @@ def test_the_export_holds_the_uploaded_trainees_only(
         UPLOADED_ON.isoformat(),
         DEADLINE.isoformat(),
     ]
+
+
+# ---------------------------------------------------------------------------
+# The scoped names download — one cohort, or what the register is showing
+# ---------------------------------------------------------------------------
+def _names(client: Client, **params: Any) -> list[list[str]]:
+    return _csv_rows(client.get(reverse("operations:mohe-names-export"), params))
+
+
+def test_the_pending_names_are_a_sheet_of_their_own(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    """
+    The list a registrar carries to the ministry's own system.
+
+    Written because the only download on the screen was the opposite one: it
+    held the names already uploaded, so the names still owed could be had only
+    by subtracting one list from another by eye.
+    """
+    uploaded, pending = uploaded_and_pending
+
+    client.force_login(registrar)
+    header, *body = _names(client, scope="pending")
+
+    assert [row[1] for row in body] == [pending.code]
+    assert uploaded.code not in {row[1] for row in body}
+    # No «تاريخ رفع» column: it would be empty on every line, and no
+    # «حالة الرفع»: it would say the same thing on every line.
+    assert header == [
+        "المتدرب",
+        "رمز التسجيل",
+        "البرنامج",
+        "الدفعة",
+        "الرقم الوزاري",
+        "تاريخ اعتماد التسجيل",
+        "مهلة التسجيل في الوزارة",
+    ]
+
+
+def test_the_whole_file_says_which_names_were_uploaded_and_which_were_not(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    uploaded, pending = uploaded_and_pending
+
+    client.force_login(registrar)
+    header, *body = _names(client, scope="all")
+
+    assert {row[1] for row in body} == {uploaded.code, pending.code}
+    # «حالة الرفع» sits beside the date it explains, not at the end of the row.
+    at = header.index("حالة الرفع")
+    assert header[at - 1] == "تاريخ رفع الاسم للوزارة"
+    states = {row[1]: row[at] for row in body}
+    assert states[uploaded.code] == "مرفوع"
+    assert states[pending.code] == "بانتظار الرفع"
+
+
+def test_the_download_narrows_to_the_cohort_whose_button_was_pressed(
+    client: Client,
+    registrar: User,
+    manager: User,
+    uploaded_and_pending: tuple[Any, Any],
+    make_cohort: Any,
+    approve_cohort: Any,
+    make_enrollment: Any,
+) -> None:
+    """A second approved cohort must not appear in the first one's sheet."""
+    from apps.operations.services import enrollment_service
+
+    uploaded, pending = uploaded_and_pending
+    other = make_cohort(code="CO-8M-OTHER")
+    approve_cohort(other, deadline=DEADLINE, course_number="MOHE/2026/78")
+    outsider = make_enrollment(other, index=93)
+    enrollment_service.record_voucher(actor=registrar, enrollment=outsider)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=outsider)
+
+    client.force_login(registrar)
+    _header, *body = _names(client, scope="all", cohort=pending.cohort.code)
+
+    assert {row[1] for row in body} == {uploaded.code, pending.code}
+    assert outsider.code not in {row[1] for row in body}
+    response = client.get(
+        reverse("operations:mohe-names-export"), {"scope": "all", "cohort": other.code}
+    )
+    assert f'filename="mohe-names-all-{other.code}-' in response["Content-Disposition"]
+    assert [row[1] for row in _csv_rows(response)[1:]] == [outsider.code]
+
+
+def test_the_journey_back_keeps_the_filter_the_reader_left_behind(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    """
+    Going and coming back must cost nothing.
+
+    The file page used to send every reader to the head of the register, so a
+    search typed once had to be typed again after each file. The link out
+    carries ``q``/``status`` and the link back rebuilds them.
+    """
+    uploaded, _pending = uploaded_and_pending
+    submission = uploaded.cohort.mohe_submissions.first()
+    register = reverse("operations:mohe")
+
+    client.force_login(registrar)
+    page = client.get(
+        reverse("operations:mohe-detail", args=[submission.pk]),
+        {"q": "هندسة", "status": "APPROVED", "from": "register"},
+    )
+
+    assert page.context["came_from_register"] is True
+    kept = "q=%D9%87%D9%86%D8%AF%D8%B3%D8%A9&status=APPROVED"
+    assert page.context["back_url"] == f"{register}?{kept}"
+    assert "رجوع إلى السجلّ" in page.content.decode()
+
+    # Reached by a bare link instead, the page says «عودة» and goes to the top.
+    plain = client.get(reverse("operations:mohe-detail", args=[submission.pk]))
+    assert plain.context["came_from_register"] is False
+    assert plain.context["back_url"] == register
+
+
+def test_the_names_are_paged_and_the_pager_keeps_the_way_back(
+    client: Client,
+    registrar: User,
+    manager: User,
+    cohort: Any,
+    approve_cohort: Any,
+    make_enrollment: Any,
+) -> None:
+    """
+    Fifty-one approved trainees: the page shows fifty and says so.
+
+    ``page_of``'s own size is the window, and the count beside it is the whole
+    list — a pager that reported its window would answer «how many are there»
+    with «fifty».
+    """
+    approve_cohort(cohort, deadline=DEADLINE, course_number="MOHE/2026/81")
+    for index in range(101, 152):
+        enrollment = make_enrollment(cohort, index=index)
+        enrollment_service.record_voucher(actor=registrar, enrollment=enrollment)
+        enrollment_service.approve_enrollment(actor=manager, enrollment=enrollment)
+    submission = cohort.mohe_submissions.first()
+
+    client.force_login(registrar)
+    first = client.get(
+        reverse("operations:mohe-detail", args=[submission.pk]), {"from": "register"}
+    )
+    page = first.context["name_page"]
+
+    assert page["total"] == 51
+    assert len(page["rows"]) == 50
+    assert page["pages"] == 2
+    # The pager keeps ``from`` so page two still knows the way back.
+    assert "from=register&amp;page=2#names" in first.content.decode()
+
+    second = client.get(
+        reverse("operations:mohe-detail", args=[submission.pk]),
+        {"from": "register", "page": "2"},
+    )
+    assert len(second.context["name_page"]["rows"]) == 1
+    assert second.context["name_page"]["start"] == 51
+
+
+def test_a_file_page_with_no_approved_trainee_explains_and_points(
+    client: Client, manager: User, sent: MoheSubmission
+) -> None:
+    """§8 — an empty state says why it is empty and where the step is."""
+    mohe_service.record_decision(
+        actor=manager,
+        submission=sent,
+        approved=True,
+        decided_on=DECIDED_ON,
+        mohe_course_number="MOHE/2026/82",
+        registration_deadline=DEADLINE,
+    )
+    client.force_login(manager)
+
+    page = client.get(reverse("operations:mohe-detail", args=[sent.pk])).content.decode()
+
+    assert "لا تسجيل معتمد على هذه الدفعة بعد" in page
+    assert f'{reverse("operations:enrollments")}?cohort={sent.cohort.code}' in page
+    # And no export button for a sheet that would come out with no rows.
+    assert "scope=pending" not in page
+
+
+def test_an_unknown_scope_falls_back_to_the_whole_file_rather_than_refusing(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    """A hand-edited URL yields the widest honest answer, not a 500."""
+    uploaded, pending = uploaded_and_pending
+
+    client.force_login(registrar)
+    _header, *body = _names(client, scope="whatever")
+
+    assert {row[1] for row in body} == {uploaded.code, pending.code}
+
+
+@pytest.mark.parametrize("role", MOHE_OUTSIDERS)
+def test_the_financial_roles_cannot_download_the_names_either(
+    client: Client, seeded_settings: None, role: str
+) -> None:
+    client.force_login(_user(role, f"noscope.{role.lower()}"))
+    response = client.get(reverse("operations:mohe-names-export"), {"scope": "all"})
+    assert response.status_code == 403
+
+
+def test_the_register_offers_the_three_scopes_and_a_button_per_cohort(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    """
+    Two levels of export: the whole filtered register, and one open file.
+
+    The per-cohort links live inside the row that is open, so the closed
+    register draws none of them — the page stays the register, not a wall of
+    buttons for every file on it.
+    """
+    uploaded, _pending = uploaded_and_pending
+    code = uploaded.cohort.code
+    base = reverse("operations:mohe-names-export")
+
+    client.force_login(registrar)
+    register = client.get(reverse("operations:mohe")).content.decode()
+    file_page = client.get(
+        reverse("operations:mohe-detail", args=[uploaded.cohort.mohe_submissions.first().pk])
+    ).content.decode()
+
+    for scope in ("pending", "uploaded", "all"):
+        assert f'href="{base}?scope={scope}"' in register
+        assert f"cohort={code}&amp;scope={scope}" not in register
+        assert f"cohort={code}&amp;scope={scope}" in file_page
+
+    # The button leads to that file's page, at its names. It sits in the
+    # actions column, not in «المسجّلون»: its text widened that column to
+    # 198px, the widest in the table, for a count of one digit.
+    assert "المسجّلون" in register
+    assert "from=register#names" in register
+
+
+def test_the_count_button_shows_the_approved_beside_the_standing(
+    client: Client, registrar: User, uploaded_and_pending: tuple[Any, Any]
+) -> None:
+    """
+    Two numbers, because they count two different populations.
+
+    «المسجّلون» counts the standing enrolments and the names below are the
+    APPROVED ones. A button labelled with the first that opened a list of the
+    second read as a bug, and the page used to apologise for it in prose.
+    """
+    uploaded, _pending = uploaded_and_pending
+
+    client.force_login(registrar)
+    row = next(
+        r
+        for r in client.get(reverse("operations:mohe")).context["submissions"]
+        if r["cohort_code"] == uploaded.cohort.code
+    )
+
+    assert row["has_names"] is True
+    assert row["approved_count"] == 2
+    assert row["pending_upload_count"] == 1
+
+
+def test_a_file_with_no_approved_enrolment_draws_no_button_to_press(
+    client: Client, registrar: User, draft: MoheSubmission
+) -> None:
+    """§3.4 — a control whose use would lead nowhere is not drawn."""
+    client.force_login(registrar)
+    response = client.get(reverse("operations:mohe"))
+
+    row = next(
+        r for r in response.context["submissions"] if r["cohort_code"] == draft.cohort.code
+    )
+    assert row["has_names"] is False
+    assert f'href="?names={draft.cohort.code}' not in response.content.decode()
+
+
+def test_the_names_live_on_the_file_page_not_in_the_register(
+    client: Client,
+    registrar: User,
+    manager: User,
+    uploaded_and_pending: tuple[Any, Any],
+    make_cohort: Any,
+    approve_cohort: Any,
+    make_enrollment: Any,
+) -> None:
+    """
+    Fifty trainees belong on a page, not in a row of the register.
+
+    They used to sit in a second card below the register, a fold per cohort:
+    with many programmes the reader had to scroll away from the row and find
+    the matching fold by its code. Folding them INTO the row was worse — one
+    cohort of fifty drowns the register it was meant to explain. So they live
+    on the file's own page, where there is width, a pager and a print.
+    """
+    uploaded, pending = uploaded_and_pending
+    other = make_cohort(code="CO-8M-SHUT")
+    approve_cohort(other, deadline=DEADLINE, course_number="MOHE/2026/80")
+    outsider = make_enrollment(other, index=95)
+    enrollment_service.record_voucher(actor=registrar, enrollment=outsider)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=outsider)
+
+    client.force_login(registrar)
+    register = client.get(reverse("operations:mohe")).content.decode()
+    page = client.get(
+        reverse("operations:mohe-detail", args=[uploaded.cohort.mohe_submissions.first().pk])
+    ).content.decode()
+
+    # No name on the register at all — it stays a register.
+    assert "names-box" not in register, "the duplicate card is gone"
+    assert pending.participant.name_ar not in register
+    # And this file's page carries its own trainees and nobody else's.
+    assert pending.participant.name_ar in page
+    assert outsider.participant.name_ar not in page
+    # The trainee's own page is one click from the name.
+    assert reverse("operations:account", args=[pending.code]) in page
+
+
+def test_the_filtered_register_hands_down_the_slice_it_is_showing(
+    client: Client,
+    registrar: User,
+    manager: User,
+    uploaded_and_pending: tuple[Any, Any],
+    make_cohort: Any,
+    approve_cohort: Any,
+    make_enrollment: Any,
+) -> None:
+    """
+    A download that ignored the filter above it would be a quiet lie.
+
+    So the export links carry ``q``/``status``, and the rows obey them.
+    """
+    from apps.operations.services import enrollment_service
+
+    other = make_cohort(code="CO-8M-FILTER")
+    approve_cohort(other, deadline=DEADLINE, course_number="MOHE/2026/79")
+    outsider = make_enrollment(other, index=94)
+    enrollment_service.record_voucher(actor=registrar, enrollment=outsider)
+    enrollment_service.approve_enrollment(actor=manager, enrollment=outsider)
+
+    client.force_login(registrar)
+    page = client.get(reverse("operations:mohe"), {"q": other.code}).content.decode()
+    assert f"?q={other.code}&amp;scope=pending" in page
+
+    _header, *body = _names(client, scope="all", q=other.code)
+    assert [row[1] for row in body] == [outsider.code]
 
 
 def test_an_uploaded_trainee_who_is_no_longer_active_leaves_the_export(
@@ -863,7 +1218,11 @@ def test_the_row_offers_an_act_only_to_the_role_that_holds_it(
     assert "أكمل الملف" not in auditor_page
     assert "أعد الإرسال" not in auditor_page
     assert "سجّل القرار" not in auditor_page
-    assert "عرض الملف" in auditor_page, "the reader is still invited to read"
+    # The reader still reaches the file — by the programme's name, which is
+    # the link on every row. The old «عرض الملف» button beside it pointed at
+    # the same URL, so it spent a column and added no road.
+    assert reverse("operations:mohe-detail", args=[draft.pk]) in auditor_page
+    assert "عرض الملف" not in auditor_page
 
 
 def test_the_registrar_is_offered_the_draft_but_not_the_decision(
@@ -903,19 +1262,28 @@ def test_the_deadline_counts_days_in_arabic(
     assert "1 يوماً" not in page and "يوماً متبقياً" not in page
 
 
-def test_the_register_draws_the_distribution_it_already_counted(
+def test_the_register_counts_every_status_once_and_in_one_place(
     client: Client, manager: User, draft: MoheSubmission
 ) -> None:
-    """``status_counts`` was computed by the view and drawn nowhere."""
+    """
+    One tally, not two.
+
+    The tiles counted four of the five statuses and a strip of chips below
+    them repeated the same figures — and named «مرفوض», which the tiles did
+    not. So the one status that demands an act was the one the tiles hid, and
+    the reader had two answers to «how many». The fifth tile closes the gap
+    and the strip is gone.
+    """
     client.force_login(manager)
 
     response = client.get(reverse("operations:mohe"))
-
-    assert response.context["status_counts"], "nothing to draw proves nothing"
     page = response.content.decode("utf-8")
-    assert "توزيع النتائج المعروضة" in page
-    for entry in response.context["status_counts"]:
-        assert f'{entry["label"]}: <span class="num">{entry["count"]}' in page
+
+    assert "توزيع النتائج المعروضة" not in page
+    assert "status_counts" not in response.context
+    labels = [str(t["label"]) for t in response.context["tiles"]]
+    assert labels == ["كل الملفات", "مسودات", "بانتظار الوزارة", "معتمدة", "مرفوضة"]
+    assert f'{reverse("operations:mohe")}?status=REJECTED' in page
 
 
 def test_the_register_searches_without_a_button_and_swaps_its_own_rows(
@@ -965,8 +1333,17 @@ def test_a_cohort_with_no_approved_enrolment_gets_a_sentence_not_an_empty_table(
 
     assert response.context["mohe_name_sections"], "no section means this proves nothing"
     assert all(not s["rows"] for s in response.context["mohe_name_sections"])
-    assert "لا تسجيل معتمد على هذه الدفعة بعد" in page
-    assert "لا تسجيلات معتمدة في هذه الدفعة" not in page
+    # On the register the cell says it briefly — the column is 98px wide —
+    # and the file's own page carries the full sentence and the next step.
+    assert "لا معتمد بعد" in page
+    assert "from=register#names" not in page, "no button to open an empty table (§3.4)"
+    row = next(
+        r for r in response.context["submissions"] if r["cohort_code"] == sent.cohort.code
+    )
+    assert row["awaits_approved_enrolment"] is True
+    assert row["has_names"] is False
+    file_page = client.get(reverse("operations:mohe-detail", args=[sent.pk])).content.decode()
+    assert "لا تسجيل معتمد على هذه الدفعة بعد" in file_page
 
 
 def test_the_register_is_searchable_by_the_programme_on_every_row(

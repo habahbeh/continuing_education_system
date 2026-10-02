@@ -41,6 +41,13 @@ urlpatterns = [
         views.mohe_uploaded_export_view,
         name="mohe-uploaded-export",
     ),
+    # The scoped download: one cohort or the filtered register, and the
+    # population the reader asked for (pending / uploaded / all).
+    path(
+        "operations/mohe/names.csv",
+        views.mohe_names_export_view,
+        name="mohe-names-export",
+    ),
     path("operations/mohe/<int:submission_id>/", views.mohe_detail_view, name="mohe-detail"),
     path("operations/clearance/", views.clearances_view, name="clearances"),
     path("operations/clearance/<str:code>/", views.clearance_detail_view, name="clearance-detail"),

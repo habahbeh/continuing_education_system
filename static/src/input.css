@@ -325,11 +325,33 @@
   .mohe-register .card2-head    { @apply py-2; }
   .mohe-register .card2-head h2 { @apply text-xs text-ink-2; }
 
-  /* السجل: صفوفٌ أضيق، وبياناتٌ ثانوية أهدأ، وحالةٌ أوضح. */
-  .mohe-tbl td        { @apply py-1.5; }
+  /* السجل: بياناتٌ ثانوية أهدأ، وحالةٌ أوضح.
+     والحشو العمودي 10px لا 6px: ثمانية أعمدة، وفي كل خليّةٍ سطرٌ ثانٍ أو
+     رقاقة، فستّة بكسلات تجعل الصفوف تتلاصق فلا يُتبَّع الصفُّ بالعين. */
+  .mohe-tbl td        { @apply py-2.5; }
+  /* البطاقات الخمس: سطرٌ واحد — الرقم بجانب عنوانه لا تحته بفراغٍ.
+     والتخصيص مزدوجٌ عن قصد: `.kpi-grid` تثبّت أربعة أعمدة وتأتي بعدها في
+     الملف، فصنفٌ واحد يخسر بالترتيب وتقع الخامسة في سطرٍ ثانٍ. */
+  .kpi-grid.mohe-kpis { @apply xl:grid-cols-5; }
+  .mohe-kpis .kpi     { @apply p-3; }
+  .mohe-kpis .kpi .ico { @apply w-9 h-9; }
+  .mohe-kpis .kpi .ico svg { @apply w-5 h-5; }
+  .mohe-kpis .kpi .txt { @apply flex items-baseline justify-between gap-2; }
+  .mohe-kpis .kpi .value { @apply text-2xl mt-0; }
+  /* حقل بحثٍ لرمزٍ من اثني عشر محرفاً لا يأخذ عرض الشاشة. */
+  .mohe-filters .fld.grow { @apply flex-1 min-w-[16rem] max-w-[24rem]; }
+  .mohe-filters .fld.grow input { @apply w-full; }
+  /* عمود التاريخين: الإرسال بارزاً والقرار تحته أهدأ. */
+  .mohe-tbl .dates-cell small { @apply text-ink-3; }
+  /* الحاشية المطويّة: عنوانٌ بحجم التلميح، بلا مثلّث المتصفّح. */
+  .rules-fold summary { @apply text-2xs font-bold text-ink-3 cursor-pointer select-none; list-style: none; }
+  .rules-fold summary::-webkit-details-marker, .rules-fold summary::marker { display: none; content: ""; }
+  .rules-fold summary::before { content: "› "; @apply inline-block font-black; }
+  .rules-fold[open] summary::before { transform: rotate(90deg); }
+  .rules-fold[open] summary { @apply mb-2; }
   .mohe-tbl td small  { @apply text-2xs; }
   .mohe-tbl td .chip.dot { @apply text-xs px-2.5 py-1; }
-  /* «عرض الملف» كان شبحاً بلا حدّ فلا يُرى حتى يُبحث عنه. */
+  /* زرّ الخطوة التالية كان شبحاً بلا حدّ فلا يُرى حتى يُبحث عنه. */
   .mohe-action        { @apply bg-white text-brand-700 border-brand-200; }
   .mohe-action:hover  { @apply bg-brand-50 border-brand-300; }
 
@@ -1763,6 +1785,8 @@
   .names-box summary .t { @apply text-ink-2; }
   .names-box .chev { @apply text-lg font-black text-ink-3 transition-transform duration-150; margin-inline-start: auto; }
   .names-box[open] .chev { transform: rotate(-90deg); }
+  /* صفّ التصدير: أزرارٌ صغيرة في سطر يلتفّ على الشاشة الضيّقة. */
+  .names-exp    { @apply flex flex-wrap items-center gap-2 pb-0; }
 
   /* محطة منجَزة على شريط المسار: رمزها ممتلئ بلونها وعلامة صحّ صغيرة. */
   .flow-strip li.is-done .ico { background: var(--tone); color: #fff; }

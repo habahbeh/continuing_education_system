@@ -3944,7 +3944,8 @@ def test_the_ministry_row_renders_the_projection_it_was_given(
     page = _mohe(client)
 
     assert approved.cohort.code in page
-    assert approved.cohort.name_ar in page
+    # The cohort's NAME is no longer printed: it was derived from the
+    # programme's in every row, so the column said the same thing twice.
     assert approved.cohort.program.name_ar in page
     assert approved.cohort.program.code in page
     assert approved.mohe_course_number in page
@@ -4183,11 +4184,16 @@ def test_every_link_on_the_ministry_register_reaches_a_real_route(
         {
             base,
             reverse("operations:mohe-submit"),
-            reverse("operations:mohe-uploaded-export"),
-            # the tiles that filter the register
+            # three populations, each carrying the register's own filter
+            f'{reverse("operations:mohe-names-export")}?q=CO-UIC&amp;scope=pending',
+            f'{reverse("operations:mohe-names-export")}?q=CO-UIC&amp;scope=uploaded',
+            f'{reverse("operations:mohe-names-export")}?q=CO-UIC&amp;scope=all',
+            # the tiles that filter the register — five, one per status, since
+            # «مرفوض» had no tile and showed only in a strip the tiles hid.
             f"{base}?status=DRAFT",
             f"{base}?status=SUBMITTED",
             f"{base}?status=APPROVED",
+            f"{base}?status=REJECTED",
         }
         | {
             reverse("operations:mohe-detail", args=[pk])
@@ -4235,19 +4241,27 @@ def test_the_ministry_register_added_no_dead_class_and_no_dependency() -> None:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     assert 'class="tbl-wrap"' in source
     assert "overflow-x-auto" in css.split(".tbl-wrap", 1)[1].split("}", 1)[0]
-    # Two tables: the register (eight columns — the actions column carries
-    # the next step) and the trainee-names table (seven).
+    # ONE table now: the register, seven columns, the actions column carrying
+    # the next step. Seven, not eight: «أُرسل» and «القرار» were two adjacent
+    # date columns the eye could not tell apart, and they are two stops of one
+    # journey — so one column holds both, the decision quieter beneath.
     #
     # Eight, not nine: the cohort had a column of its own and it said the
     # programme's name twice. Its code now sits under the programme name,
     # which is itself the link to the file.
+    #
+    # And no trainee names here at all. They were a second card below — the
+    # reader had to scroll away from the row and find the fold matching its
+    # code — and folding them into the row was worse, since one cohort of
+    # fifty drowns the register it was meant to explain. They live on the
+    # file's own page, which has the width, a pager and a print.
     register = source.split("<table", 2)[1]
-    names = source.split("<table", 2)[2]
-    assert len(re.findall(r"<th[ >]", register)) == 8
-    assert register.count('colspan="8"') == 2, (
+    assert source.count("<table") == 1, "the names moved to the file page"
+    assert len(re.findall(r"<th[ >]", register)) == 7
+    assert register.count('colspan="7"') == 2, (
         "the reason row and the empty row both span the table"
     )
-    assert len(re.findall(r"<th[ >]", names)) == 7
+    assert "names-box" not in source, "the duplicate names card is gone"
     markup = source.split("{% endcomment %}", 1)[-1]
     # The actions column is named by attribute: `.sr-only` is `position:absolute`
     # with no positioned ancestor, so in RTL it escapes `.tbl-wrap` and drags
@@ -4772,18 +4786,23 @@ def test_the_ministry_file_added_no_dead_class_and_no_dependency() -> None:
     for name in used:
         assert f".{name}" in css or f".{name}" in built, f"«{name}» is defined nowhere"
     markup = source.split("{% endcomment %}", 1)[-1]
-    # Only the uploaded documents are tabular; every other block is a `.dl` or
-    # a hint, and the one table keeps its wrapper and spans it when empty.
-    assert markup.count('class="tbl-wrap"') == 1
-    # Two key/value blocks — the file's identity and the form's content. The
-    # attachments are the only genuinely tabular thing on the page.
+    # Two tables: the uploaded documents, and this file's approved trainees
+    # with their upload state — the names the register used to carry itself.
+    # Every other block is a `.dl` or a hint, and each table keeps its wrapper.
+    assert markup.count('class="tbl-wrap"') == 2
+    # Two key/value blocks — the file's identity and the form's content.
     assert markup.count('class="dl"') == 2
     assert 'colspan="5"' in markup
-    assert len(re.findall(r"<th[ >]", markup)) == 5
+    assert len(re.findall(r"<th[ >]", markup)) == 12  # five documents, seven names
     # Every alert box that was explaining a rule is gone: colour is reserved
-    # for the refusal itself (polish rules §6.5).
+    # for the refusal itself (polish rules §6.5). The one survivor is BR-019
+    # inside the upload dialog, which IS a refusal: recording a name after the
+    # deadline needs the manager's reason, and the dialog says so before the
+    # button is pressed rather than after the service refuses.
+    dialogs = re.sub(r"<dialog.*?</dialog>", "", markup, flags=re.S)
     for alert in ("note danger", "note info", "note warn", "note ok"):
-        assert alert not in markup, f"a rule is still being explained in «{alert}»"
+        assert alert not in dialogs, f"a rule is still being explained in «{alert}»"
+    assert markup.count("note warn") == 1, "only BR-019, and only in its dialog"
     assert "sr-only" not in markup
     for header in re.findall(r"<th([^>]*)>\s*</th>", markup):
         assert "aria-label" in header, "an empty column header with no name"
